@@ -6,6 +6,9 @@
 	var activeConnectionCount = 0;
 	var dead = false;
 
+	// Message ordering
+	var outgoingMessageId = 0;
+
 	// Remote transactions
 	var remoteTransactionCounter = 0;
 	var pendingTransactions = {};
@@ -21,7 +24,7 @@
 			dead = true;
 			window.removeEventListener("unload", destroySession, false);
 			// Send a "destroy" message so that the server can clean up the session
-			var message = "destroy=1&sessionID=" + sessionID;
+			var message = "destroy=1&sessionID=" + sessionID + "&messageID=" + (outgoingMessageId++);
 			sessionID = "";
 			if (navigator.sendBeacon) {
 				navigator.sendBeacon(location.href, message);
@@ -74,7 +77,7 @@
 				request.open("POST", location.href, true);
 				activeConnectionCount++;
 				request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-				var message = "sessionID=" + sessionID;
+				var message = "sessionID=" + sessionID + "&messageID=" + (outgoingMessageId++);
 				if (queuedLocalEvents) {
 					message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents));
 					queuedLocalEvents = undefined;

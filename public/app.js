@@ -19,6 +19,7 @@ function toggleStream() {
 		randomStream = concurrence.interval(function() {
 			concurrence.random().then(function(value) {
 				concurrence.render("#host", value);
+				console.log(value);
 			});
 		}, 1000);
 	}

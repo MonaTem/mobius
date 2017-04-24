@@ -49,6 +49,8 @@ class ConcurrenceSession {
 		this.remoteTransactionCounter = 0;
 		this.pendingTransactions = {};
 		this.pendingTransactionCount = 0;
+		this.incomingMessageId = 0;
+		this.reorderedMessages = [];
 		// Server-side version of the API
 		this.context = {
 			console: console,
@@ -76,6 +78,50 @@ class ConcurrenceSession {
 			}
 		};
 		host.script.runInNewContext(this.context);
+	}
+	processMessage(message) {
+		// Process messages in order
+		const messageId = message.messageID | 0;
+		if (messageId != this.incomingMessageId) {
+			return false;
+		}
+		// Read each event and dispatch the appropriate transaction in order
+		const jsonEvents = message.events;
+		if (jsonEvents) {
+			const events = JSON.parse(jsonEvents);
+			for (var i = 0; i < events.length; i++) {
+				const event = events[i];
+				var transactionId = event[0];
+				var transaction;
+				if (transactionId < 0) {
+					// Server decided the ordering on "fenced" events
+					this.sendEvent([transactionId]);
+					transaction = this.pendingTransactions[-transactionId];
+				} else {
+					// Regular client-side events are handled normally
+					transaction = this.pendingTransactions[transactionId];
+				}
+				if (transaction) {
+					transaction(event);
+				}
+			}
+		}
+		this.incomingMessageId++;
+		return true;
+	}
+	receiveMessage(message) {
+		if (this.processMessage(message)) {
+			// Process any messages we received out of order
+			for (var i = 0; i < this.reorderedMessages.length; i++) {
+				if (this.processMessage(this.reorderedMessages[i])) {
+					i = 0;
+					this.reorderedMessages.splice(i, 1);
+				}
+			}
+		} else {
+			// Message was received out of order, queue it for later
+			this.reorderedMessages.push(message);
+		}
 	}
 	dequeueEvents() {
 		return new Promise((resolve, reject) => {
@@ -246,26 +292,7 @@ server.post("/", function(req, res) {
 		} else {
 			// Process incoming events
 			const session = host.sessionById(req.body.sessionID);
-			const jsonEvents = req.body.events;
-			if (jsonEvents) {
-				const events = JSON.parse(jsonEvents);
-				for (var i = 0; i < events.length; i++) {
-					const event = events[i];
-					var transactionId = event[0];
-					var transaction;
-					if (transactionId < 0) {
-						// Server decided the ordering on "fenced" events
-						session.sendEvent([transactionId]);
-						transaction = session.pendingTransactions[-transactionId];
-					} else {
-						// Regular client-side events are handled normally
-						transaction = session.pendingTransactions[transactionId];
-					}
-					if (transaction) {
-						transaction(event);
-					}
-				}
-			}
+			session.receiveMessage(req.body);
 			// Wait to send the response until we have events ready or until there are no more server-side transactions open
 			resolve(session.dequeueEvents().then(events => {
 				res.set("Content-Type", "application/json");
