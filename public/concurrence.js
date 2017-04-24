@@ -204,39 +204,37 @@
 		};
 	}
 
-	// Client-side implementation of the various APIs
+	// Client-side version of the API
 	this.concurrence = {
-		server: {
-			random: receiveRemotePromise,
-			interval: receiveRemoteEventStream,
-			timeout: receiveRemotePromise
-		},
-		client: {
-			render: function(selector, innerHTML) {
-				var element = document.querySelector(selector)
-				if (element) {
-					element.innerHTML = innerHTML;
-				}
-			},
-			observe: function(selector, event, callback) {
-				var transaction = observeLocalEventCallback(callback);
-				var elements = document.querySelectorAll(selector);
-				for (var i = 0; i < elements.length; i++) {
-					elements[i].addEventListener(event, function() {
-						transaction.send();
-					}, false);
-				}
-				return transaction;
-			},
-			read: function(selector) {
-				var element = document.querySelector(selector);
-				return observeLocalPromise(element ? Promise.resolve(element.value) : Promise.reject("Selector not found!"));
-			}
-		},
-		disconnect: destroySession,
 		_init: function(newSessionID) {
 			delete this._init;
 			sessionID = newSessionID;
+		},
+		disconnect: destroySession,
+		// Server-side implementations
+		random: receiveRemotePromise,
+		interval: receiveRemoteEventStream,
+		timeout: receiveRemotePromise,
+		// Client-side implementations
+		render: function(selector, innerHTML) {
+			var element = document.querySelector(selector)
+			if (element) {
+				element.innerHTML = innerHTML;
+			}
+		},
+		observe: function(selector, event, callback) {
+			var transaction = observeLocalEventCallback(callback);
+			var elements = document.querySelectorAll(selector);
+			for (var i = 0; i < elements.length; i++) {
+				elements[i].addEventListener(event, function() {
+					transaction.send();
+				}, false);
+			}
+			return transaction;
+		},
+		read: function(selector) {
+			var element = document.querySelector(selector);
+			return observeLocalPromise(element ? Promise.resolve(element.value) : Promise.reject("Selector not found!"));
 		}
 	};
 })();

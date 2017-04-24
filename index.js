@@ -49,32 +49,30 @@ class ConcurrenceSession {
 		this.remoteTransactionCounter = 0;
 		this.pendingTransactions = {};
 		this.pendingTransactionCount = 0;
-		// Server-side implementation of the various APIs
+		// Server-side version of the API
 		this.context = {
 			console: console,
 			concurrence: {
-				server: {
-					random: () => this.observeLocalPromise(Math.random()),
-					interval: (callback, frequency) => {
-						const transaction = this.observeLocalEventCallback(callback);
-						const interval = setInterval(_ => {
-							if (this.dead) {
-								transaction.destroy();
-								clearInterval(interval);
-							} else {
-								transaction.send();
-							}
-						}, frequency);
-						return transaction;
-					},
-					timeout: interval => this.observeLocalPromise(new Promise(resolve => setTimeout(() => resolve(), interval)))
+				disconnect : () => this.destroy(),
+				// Server-side implementations
+				random: () => this.observeLocalPromise(Math.random()),
+				interval: (callback, frequency) => {
+					const transaction = this.observeLocalEventCallback(callback);
+					const interval = setInterval(_ => {
+						if (this.dead) {
+							transaction.destroy();
+							clearInterval(interval);
+						} else {
+							transaction.send();
+						}
+					}, frequency);
+					return transaction;
 				},
-				client: {
-					render: (selector, html) => undefined,
-					observe: (selector, event, callback) => this.receiveRemoteEventStream(callback),
-					read: selector => this.receiveRemotePromise()
-				},
-				disconnect : () => this.destroy()
+				timeout: interval => this.observeLocalPromise(new Promise(resolve => setTimeout(() => resolve(), interval))),
+				// Client-side implementations
+				render: (selector, html) => undefined,
+				observe: (selector, event, callback) => this.receiveRemoteEventStream(callback),
+				read: selector => this.receiveRemotePromise()
 			}
 		};
 		host.script.runInNewContext(this.context);

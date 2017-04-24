@@ -1,10 +1,10 @@
 // Basic render of static data
-concurrence.client.render("#host", "Loading...");
+concurrence.render("#host", "Loading...");
 
 // Basic fetch of data from the server
-Promise.all([concurrence.server.random(), concurrence.server.random()]).then(function(value) {
+Promise.all([concurrence.random(), concurrence.random()]).then(function(value) {
 	console.log(value);
-	concurrence.client.render("#host", JSON.stringify(value));
+	concurrence.render("#host", JSON.stringify(value));
 });
 
 // Stream of events from server to client
@@ -16,26 +16,26 @@ function toggleStream() {
 		randomStream = null;
 	} else {
 		console.log("Starting random stream");
-		randomStream = concurrence.server.interval(function() {
-			concurrence.server.random().then(function(value) {
-				concurrence.client.render("#host", value);
+		randomStream = concurrence.interval(function() {
+			concurrence.random().then(function(value) {
+				concurrence.render("#host", value);
 			});
 		}, 1000);
 	}
-	concurrence.client.render("#toggle", randomStream ? "Stop" : "Start");
+	concurrence.render("#toggle", randomStream ? "Stop" : "Start");
 }
 toggleStream();
-var toggleTransaction = concurrence.client.observe("#toggle", "click", toggleStream);
+var toggleTransaction = concurrence.observe("#toggle", "click", toggleStream);
 
 // Read input from the client
-var logTransaction = concurrence.client.observe("#log", "click", function() {
-	concurrence.client.read("#input").then(function(value) {
+var logTransaction = concurrence.observe("#log", "click", function() {
+	concurrence.read("#input").then(function(value) {
 		console.log("Read input: " + value);
 	});
 });
 
 // Disconnect all events
-var disconnectTransaction = concurrence.client.observe("#disconnect", "click", function() {
+var disconnectTransaction = concurrence.observe("#disconnect", "click", function() {
 	// Force disconnect
 	//concurrence.disconnect();
 	// Graceful disconnect by destroying all server-side streams
