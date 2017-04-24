@@ -82,9 +82,13 @@ class ConcurrenceSession {
 	processMessage(message) {
 		// Process messages in order
 		const messageId = message.messageID | 0;
-		if (messageId != this.incomingMessageId) {
+		if (messageId > this.incomingMessageId) {
 			return false;
 		}
+		if (messageId < this.incomingMessageId) {
+			return true;
+		}
+		this.incomingMessageId++;
 		// Read each event and dispatch the appropriate transaction in order
 		const jsonEvents = message.events;
 		if (jsonEvents) {
@@ -106,7 +110,6 @@ class ConcurrenceSession {
 				}
 			}
 		}
-		this.incomingMessageId++;
 		return true;
 	}
 	receiveMessage(message) {
@@ -118,10 +121,11 @@ class ConcurrenceSession {
 					this.reorderedMessages.splice(i, 1);
 				}
 			}
-		} else {
-			// Message was received out of order, queue it for later
-			this.reorderedMessages.push(message);
+			return true;
 		}
+		// Message was received out of order, queue it for later
+		this.reorderedMessages.push(message);
+		return false;
 	}
 	dequeueEvents() {
 		return new Promise((resolve, reject) => {
@@ -292,16 +296,21 @@ server.post("/", function(req, res) {
 		} else {
 			// Process incoming events
 			const session = host.sessionById(req.body.sessionID);
-			session.receiveMessage(req.body);
-			// Wait to send the response until we have events ready or until there are no more server-side transactions open
-			resolve(session.dequeueEvents().then(events => {
+			if (session.receiveMessage(req.body)) {
+				// Wait to send the response until we have events ready or until there are no more server-side transactions open
+				resolve(session.dequeueEvents().then(events => {
+					res.set("Content-Type", "application/json");
+					const response = {};
+					if (events && events.length) {
+						response.events = events;
+					}
+					res.send(JSON.stringify(response));
+				}));
+			} else {
+				// Out of order messages don't get any events
 				res.set("Content-Type", "application/json");
-				const response = {};
-				if (events && events.length) {
-					response.events = events;
-				}
-				res.send(JSON.stringify(response));
-			}));
+				res.send("{}");
+			}
 		}
 	}).catch(e => {
 		res.status(500);

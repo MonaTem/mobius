@@ -8,6 +8,8 @@
 
 	// Message ordering
 	var outgoingMessageId = 0;
+	var incomingMessageId = 0;
+	var reorderedMessages = [];
 
 	// Remote transactions
 	var remoteTransactionCounter = 0;
@@ -41,7 +43,16 @@
 	}
 	window.addEventListener("unload", destroySession, false);
 
-	function receiveMessage(message) {
+	function processMessage(message, messageId) {
+		// Process messages in order
+		if (messageId > incomingMessageId) {
+			return false;
+		}
+		if (messageId < incomingMessageId) {
+			return true;
+		}
+		incomingMessageId++;
+		// Read each event and dispatch the appropriate transaction in order
 		var events = message.events;
 		if (events) {
 			for (var i = 0; i < events.length; i++) {
@@ -67,6 +78,23 @@
 			}
 		}
 		synchronizeTransactions();
+		return true;
+	}
+
+	function receiveMessage(message, messageId) {
+		if (processMessage(message, messageId)) {
+			// Process any messages we received out of order
+			for (var i = 0; i < reorderedMessages.length; i++) {
+				var entry = reorderedMessages[i];
+				if (processMessage(entry[0], entry[1])) {
+					i = 0;
+					reorderedMessages.splice(i, 1);
+				}
+			}
+		} else {
+			// Message was received out of order, queue it for later
+			reorderedMessages.push([message, messageId]);
+		}
 	}
 
 	function synchronizeTransactions() {
@@ -77,7 +105,8 @@
 				request.open("POST", location.href, true);
 				activeConnectionCount++;
 				request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-				var message = "sessionID=" + sessionID + "&messageID=" + (outgoingMessageId++);
+				var messageId = outgoingMessageId++;
+				var message = "sessionID=" + sessionID + "&messageID=" + messageId;
 				if (queuedLocalEvents) {
 					message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents));
 					queuedLocalEvents = undefined;
@@ -86,7 +115,7 @@
 					if (request.readyState == 4) {
 						activeConnectionCount--;
 						if (request.status == 200) {
-							receiveMessage(JSON.parse(request.responseText));
+							receiveMessage(JSON.parse(request.responseText), messageId);
 						} else {
 							destroySession();
 						}
