@@ -39,6 +39,8 @@ class ConcurrenceHost {
 	}
 }
 
+const observers = [];
+
 class ConcurrenceSession {
 	constructor(host, sessionID) {
 		this.host = host;
@@ -71,6 +73,16 @@ class ConcurrenceSession {
 					return transaction;
 				},
 				timeout: interval => this.observeLocalPromise(new Promise(resolve => setTimeout(() => resolve(), interval))),
+				broadcast: text => {
+					for (var i = 0; i < observers.length; i++) {
+						observers[i](text);
+					}
+				},
+				receive: callback => {
+					const transaction = this.observeLocalEventCallback(callback);
+					observers.push(text => transaction.send(text));
+					return transaction;
+				},
 				// Client-side implementations
 				render: (selector, html) => undefined,
 				observe: (selector, event, callback) => this.receiveRemoteEventStream(callback),
@@ -277,7 +289,7 @@ class ConcurrenceSession {
 var host = new ConcurrenceHost(relativePath("public/app.js"));
 
 server.get("/", function (req, res) {
-	res.send("<!doctype html><html><head></head><body><div id=\"host\"></div><div><button id=\"toggle\"></button></div><div><input id=\"input\"><button id=\"log\">Log</button></div><div><button id=\"disconnect\">Disconnect</button></div><script src=\"concurrence.js\"></script><script>concurrence._init(\"" + uuid() + "\")</script><script src=\"app.js\"></script></body></html>");
+	res.send("<!doctype html><html><head></head><body><div id=\"host\"></div><div><button id=\"toggle\"></button></div><div><input id=\"input\"><button id=\"log\">Log</button></div><div><input id=\"broadcastField\"><button id=\"broadcast\">Broadcast</button></div><div><button id=\"disconnect\">Disconnect</button></div><script src=\"concurrence.js\"></script><script>concurrence._init(\"" + uuid() + "\")</script><script src=\"app.js\"></script></body></html>");
 });
 
 server.use(bodyParser.urlencoded({

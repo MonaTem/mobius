@@ -247,11 +247,18 @@
 		random: receiveRemotePromise,
 		interval: receiveRemoteEventStream,
 		timeout: receiveRemotePromise,
+		broadcast: function(text) {},
+		receive: receiveRemoteEventStream,
 		// Client-side implementations
-		render: function(selector, innerHTML) {
+		render: function(selector, value) {
 			var element = document.querySelector(selector)
 			if (element) {
-				element.innerHTML = innerHTML;
+				if ("value" in element) {
+					element.value = value;
+				}
+				if ("innerText" in element && element.nodeName != "INPUT") {
+					element.innerText = value;
+				}
 			}
 		},
 		observe: function(selector, event, callback) {
