@@ -150,19 +150,24 @@ class ConcurrenceSession {
 			if (queuedLocalEvents) {
 				delete this.queuedLocalEvents;
 				if (oldResolve) {
-					this.queuedLocalEventsResolve = resolve;
 					oldResolve(queuedLocalEvents);
 				} else {
 					resolve(queuedLocalEvents);
+					return;
 				}
 			} else if (this.localTransactionCount) {
-				this.queuedLocalEventsResolve = resolve;
 				if (oldResolve) {
 					oldResolve();
 				}
 			} else {
 				resolve();
+				return;
 			}
+			this.queuedLocalEventsResolve = resolve;
+			if (this.localResolveTimeout !== undefined) {
+				clearTimeout(this.localResolveTimeout);
+			}
+			this.localResolveTimeout = setTimeout(resolve, 30000);
 		});
 	}
 	sendEvent(event) {
@@ -187,6 +192,10 @@ class ConcurrenceSession {
 				const queuedLocalEvents = this.queuedLocalEvents;
 				delete this.queuedLocalEvents;
 				resolve(queuedLocalEvents);
+				if (this.localResolveTimeout !== undefined) {
+					clearTimeout(this.localResolveTimeout);
+					delete this.localResolveTimeout;
+				}
 			}
 			// If no transactions remain, the session is in a state where no more events
 			// can be sent from either the client or server. Session can be destroyed
