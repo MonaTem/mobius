@@ -108,7 +108,7 @@
 				var messageId = outgoingMessageId++;
 				var message = "sessionID=" + sessionID + "&messageID=" + messageId;
 				if (queuedLocalEvents) {
-					message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents));
+					message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents).slice(1, -1));
 					queuedLocalEvents = undefined;
 				}
 				request.onreadystatechange = function() {

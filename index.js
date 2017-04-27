@@ -107,7 +107,7 @@ class ConcurrenceSession {
 		// Read each event and dispatch the appropriate transaction in order
 		const jsonEvents = message.events;
 		if (jsonEvents) {
-			const events = JSON.parse(jsonEvents);
+			const events = JSON.parse("[" + jsonEvents + "]");
 			for (var i = 0; i < events.length; i++) {
 				const event = events[i];
 				var transactionId = event[0];
