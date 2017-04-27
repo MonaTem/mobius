@@ -21,12 +21,24 @@
 	var queuedLocalEvents;
 	var fencedLocalEvents = {};
 
+	function serializeMessage(messageId) {
+		var message = "sessionID=" + sessionID + "&messageID=" + messageId;
+		if (queuedLocalEvents) {
+			message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents).slice(1, -1));
+			queuedLocalEvents = undefined;
+		}
+		return message;
+	}
+
 	function destroySession() {
 		if (sessionID) {
 			dead = true;
 			window.removeEventListener("unload", destroySession, false);
+			for (var transactionId in pendingTransactions) {
+				pendingTransactions[transactionId]();
+			}
 			// Send a "destroy" message so that the server can clean up the session
-			var message = "destroy=1&sessionID=" + sessionID + "&messageID=" + (outgoingMessageId++);
+			var message = serializeMessage(outgoingMessageId++) + "&destroy=1";
 			sessionID = "";
 			if (navigator.sendBeacon) {
 				navigator.sendBeacon(location.href, message);
@@ -35,9 +47,6 @@
 				request.open("POST", location.href, false);
 				request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
 				request.send(message);
-			}
-			for (var transactionId in pendingTransactions) {
-				pendingTransactions[transactionId]();
 			}
 		}
 	}
@@ -106,11 +115,6 @@
 				activeConnectionCount++;
 				request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
 				var messageId = outgoingMessageId++;
-				var message = "sessionID=" + sessionID + "&messageID=" + messageId;
-				if (queuedLocalEvents) {
-					message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents).slice(1, -1));
-					queuedLocalEvents = undefined;
-				}
 				request.onreadystatechange = function() {
 					if (request.readyState == 4) {
 						activeConnectionCount--;
@@ -121,7 +125,7 @@
 						}
 					}
 				}
-				request.send(message);
+				request.send(serializeMessage(messageId));
 			}
 		});
 	}

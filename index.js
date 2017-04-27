@@ -284,6 +284,7 @@ class ConcurrenceSession {
 	destroy() {
 		if (!this.dead) {
 			this.dead = true;
+			this.sendQueuedEvents();
 			delete this.host.sessions[this.sessionID];
 		}
 	}
