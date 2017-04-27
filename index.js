@@ -11,6 +11,9 @@ const server = express();
 
 const relativePath = relative => path.join(__dirname, relative);
 
+server.disable("x-powered-by");
+server.disable("etag");
+
 server.use(express.static(relativePath("public")));
 
 class ConcurrenceHost {
@@ -286,9 +289,16 @@ class ConcurrenceSession {
 	}
 };
 
+function noCache(res) {
+	res.header("Cache-Control", "private, no-cache, no-store, must-revalidate");
+	res.header("Expires", new Date(0).toUTCString());
+	res.header("Pragma", "no-cache");
+}
+
 var host = new ConcurrenceHost(relativePath("public/app.js"));
 
 server.get("/", function (req, res) {
+	noCache(res);
 	res.send("<!doctype html><html><head></head><body><div id=\"host\"></div><div><button id=\"toggle\"></button></div><div><input id=\"input\"><button id=\"log\">Log</button></div><div><input id=\"broadcastField\"><button id=\"broadcast\">Broadcast</button></div><div><button id=\"disconnect\">Disconnect</button></div><script src=\"concurrence.js\"></script><script>concurrence._init(\"" + uuid() + "\")</script><script src=\"app.js\"></script></body></html>");
 });
 
@@ -298,6 +308,7 @@ server.use(bodyParser.urlencoded({
 }));
 
 server.post("/", function(req, res) {
+	noCache(res);
 	new Promise(resolve => {
 		if (req.body.destroy) {
 			// Forcefully clean up sessions
