@@ -9,7 +9,7 @@ Promise.all([concurrence.random(), concurrence.random()]).then(function(value) {
 
 // Stream of events from server to client
 var randomStream;
-function toggleStream() {
+function toggleRandoms() {
 	if (randomStream) {
 		console.log("Destroying random stream");
 		randomStream.destroy();
@@ -25,8 +25,8 @@ function toggleStream() {
 	}
 	concurrence.render("#toggle", randomStream ? "Stop" : "Start");
 }
-toggleStream();
-var toggleTransaction = concurrence.observe("#toggle", "click", toggleStream);
+toggleRandoms();
+var randomTransaction = concurrence.observe("#toggle", "click", toggleRandoms);
 
 // Read input from the client
 var logTransaction = concurrence.observe("#log", "click", function() {
@@ -36,37 +36,44 @@ var logTransaction = concurrence.observe("#log", "click", function() {
 });
 
 // Receive broadcasted values
-var receiveTransaction = concurrence.receive(function(value) {
-	console.log("Receiving: " + value);
-	concurrence.render("#broadcastField", value);
-});
+var receiveStream;
+function toggleReceive() {
+	if (receiveStream) {
+		receiveStream.destroy();
+		receiveStream = null;
+	} else {
+		receiveStream = concurrence.receive(function(value) {
+			console.log("Receiving: " + value);
+			concurrence.render("#broadcastField", value);
+		});
+	}
+	concurrence.render("#connect", receiveStream ? "Disconnect" : "Connect");
+}
+toggleReceive();
+var receiveTransaction = concurrence.observe("#connect", "click", toggleReceive);
 
 // Broadcast when button is pressed
 var broadcastTransaction = concurrence.observe("#broadcast", "click", function() {
 	concurrence.read("#broadcastField").then(function(value) {
-		if (value.length == 0) {
-			console.log("Disabling broadcast");
-			receiveTransaction.destroy();
-			broadcastTransaction.destroy();
-			concurrence.render("#broadcast", "Disabled");
-		} else {
-			console.log("Broadcasting: " + value);
-			concurrence.broadcast(value);
-		}
+		console.log("Broadcasting: " + value);
+		concurrence.broadcast(value);
 	});
 });
 
 // Disconnect all events
-var disconnectTransaction = concurrence.observe("#disconnect", "click", function() {
+var destroyTransaction = concurrence.observe("#destroy", "click", function() {
 	// Force disconnect
 	//concurrence.disconnect();
 	// Graceful disconnect by destroying all server-side streams
 	if (randomStream) {
-		toggleStream();
+		toggleRandoms();
 	}
+	randomTransaction.destroy();
 	broadcastTransaction.destroy();
+	if (receiveStream) {
+		toggleReceive();
+	}
 	receiveTransaction.destroy();
-	disconnectTransaction.destroy();
-	toggleTransaction.destroy();
+	destroyTransaction.destroy();
 	logTransaction.destroy();
 });

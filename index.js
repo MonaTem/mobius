@@ -299,7 +299,7 @@ var host = new ConcurrenceHost(relativePath("public/app.js"));
 
 server.get("/", function (req, res) {
 	noCache(res);
-	res.send("<!doctype html><html><head></head><body><div id=\"host\"></div><div><button id=\"toggle\"></button></div><div><input id=\"input\"><button id=\"log\">Log</button></div><div><input id=\"broadcastField\"><button id=\"broadcast\">Broadcast</button></div><div><button id=\"disconnect\">Disconnect</button></div><script src=\"concurrence.js\"></script><script>concurrence._init(\"" + uuid() + "\")</script><script src=\"app.js\"></script></body></html>");
+	res.send("<!doctype html><html><head></head><body><div id=\"host\"></div><div><button id=\"toggle\"></button></div><div><input id=\"input\"><button id=\"log\">Log</button></div><div><input id=\"broadcastField\"><button id=\"broadcast\">Broadcast</button><button id=\"connect\">Connect</button></div><div><button id=\"destroy\">End Session</button></div><script src=\"concurrence.js\"></script><script>concurrence._init(\"" + uuid() + "\")</script><script src=\"app.js\"></script></body></html>");
 });
 
 server.use(bodyParser.urlencoded({
