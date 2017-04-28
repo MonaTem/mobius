@@ -12,7 +12,7 @@ var randomStream;
 function toggleRandoms() {
 	if (randomStream) {
 		console.log("Destroying random stream");
-		randomStream.destroy();
+		randomStream.close();
 		randomStream = null;
 	} else {
 		console.log("Starting random stream");
@@ -39,7 +39,7 @@ var logTransaction = concurrence.observe("#log", "click", function() {
 var receiveStream;
 function toggleReceive() {
 	if (receiveStream) {
-		receiveStream.destroy();
+		receiveStream.close();
 		receiveStream = null;
 	} else {
 		receiveStream = concurrence.receive(function(value) {
@@ -68,12 +68,12 @@ var destroyTransaction = concurrence.observe("#destroy", "click", function() {
 	if (randomStream) {
 		toggleRandoms();
 	}
-	randomTransaction.destroy();
-	broadcastTransaction.destroy();
+	randomTransaction.close();
+	broadcastTransaction.close();
 	if (receiveStream) {
 		toggleReceive();
 	}
-	receiveTransaction.destroy();
-	destroyTransaction.destroy();
-	logTransaction.destroy();
+	receiveTransaction.close();
+	destroyTransaction.close();
+	logTransaction.close();
 });

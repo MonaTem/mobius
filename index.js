@@ -67,7 +67,7 @@ class ConcurrenceSession {
 					const transaction = this.observeLocalEventCallback(callback);
 					const interval = setInterval(_ => {
 						if (this.dead) {
-							transaction.destroy();
+							transaction.close();
 							clearInterval(interval);
 						} else {
 							transaction.send();
@@ -233,7 +233,7 @@ class ConcurrenceSession {
 					return callback.apply(null, arguments);
 				}
 			},
-			destroy: function() {
+			close: function() {
 				if (this.transactionId != null) {
 					this.transactionId = null;
 					if ((--session.localTransactionCount) == 0) {
@@ -253,7 +253,7 @@ class ConcurrenceSession {
 		const transactionId = ++this.remoteTransactionCounter;
 		this.pendingTransactions[transactionId] = callback;
 		return {
-			destroy: () => {
+			close: () => {
 				if (this.pendingTransactions[transactionId]) {
 					delete this.pendingTransactions[transactionId];
 					if ((--this.pendingTransactionCount) == 0) {
@@ -267,7 +267,7 @@ class ConcurrenceSession {
 	receiveRemotePromise() {
 		return new Promise((resolve, reject) => {
 			const transaction = this.registerRemoteTransaction(function(event) {
-				transaction.destroy();
+				transaction.close();
 				if (event && !event[2]) {
 					resolve(event[1]);
 				} else if (event) {
@@ -284,7 +284,7 @@ class ConcurrenceSession {
 				event.shift();
 				callback.apply(null, event);
 			} else {
-				transaction.destroy();
+				transaction.close();
 			}
 		});
 		return transaction;

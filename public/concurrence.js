@@ -140,7 +140,7 @@
 		pendingTransactions[transactionId] = callback;
 		synchronizeTransactions();
 		return {
-			destroy: function() {
+			close: function() {
 				// Cleanup the bookkeeping
 				if (pendingTransactions[transactionId]) {
 					pendingTransactionCount--;
@@ -153,7 +153,7 @@
 	function receiveRemotePromise() {
 		return new Promise(function(resolve, reject) {
 			var transaction = registerRemoteTransaction(function(event) {
-				transaction.destroy();
+				transaction.close();
 				if (event && !event[2]) {
 					resolve(event[1]);
 				} else if (event) {
@@ -171,7 +171,7 @@
 				event.shift();
 				callback.apply(null, event);
 			} else {
-				transaction.destroy();
+				transaction.close();
 			}
 		});
 		return transaction;
@@ -234,7 +234,7 @@
 					});
 				}
 			},
-			destroy: function() {
+			close: function() {
 				this.transactionId = null;
 			}
 		};
