@@ -119,7 +119,8 @@
 					if (request.readyState == 4) {
 						activeConnectionCount--;
 						if (request.status == 200) {
-							receiveMessage(JSON.parse(request.responseText), messageId);
+							var responseText = request.responseText;
+							receiveMessage(responseText.length ? JSON.parse(responseText) : {}, messageId);
 						} else {
 							destroySession();
 						}

@@ -333,11 +333,13 @@ server.post("/", function(req, res) {
 				// Wait to send the response until we have events ready or until there are no more server-side transactions open
 				resolve(session.dequeueEvents().then(events => {
 					res.set("Content-Type", "application/json");
-					const response = {};
+					var response;
 					if (events && events.length) {
-						response.events = events;
+						response = JSON.stringify({ events: events });
+					} else {
+						response = "";
 					}
-					res.send(JSON.stringify(response));
+					res.send(response);
 				}));
 			} else {
 				// Out of order messages don't get any events
