@@ -1,6 +1,8 @@
 (function() {
 	var defer = this.setImmediate || this.requestAnimationFrame || this.webkitRequestRequestAnimationFrame || this.mozRequestRequestAnimationFrame || function(callback) { setTimeout(callback, 0) };
 
+	var sessionHeartbeatInterval = 4 * 60 * 1000;
+
 	// Session state
 	var sessionID = "";
 	var activeConnectionCount = 0;
@@ -21,6 +23,8 @@
 	var queuedLocalEvents;
 	var fencedLocalEvents = {};
 
+	var heartbeatTimeout;
+
 	function serializeMessage(messageId) {
 		var message = "sessionID=" + sessionID + "&messageID=" + messageId;
 		if (queuedLocalEvents) {
@@ -30,9 +34,22 @@
 		return message;
 	}
 
+	function cancelHeartbeat() {
+		if (heartbeatTimeout !== undefined) {
+			clearTimeout(heartbeatTimeout);
+			heartbeatTimeout = undefined;
+		}
+	}
+
+	function restartHeartbeat() {
+		cancelHeartbeat();
+		heartbeatTimeout = setTimeout(sendMessages, sessionHeartbeatInterval);
+	}
+
 	function destroySession() {
 		if (sessionID) {
 			dead = true;
+			cancelHeartbeat();
 			window.removeEventListener("unload", destroySession, false);
 			for (var transactionId in pendingTransactions) {
 				pendingTransactions[transactionId]();
@@ -106,27 +123,37 @@
 		}
 	}
 
+	function sendMessages() {
+		if (heartbeatTimeout != undefined) {
+			restartHeartbeat();
+		}
+		var request = new XMLHttpRequest();
+		request.open("POST", location.href, true);
+		activeConnectionCount++;
+		request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+		var messageId = outgoingMessageId++;
+		request.onreadystatechange = function() {
+			if (request.readyState == 4) {
+				activeConnectionCount--;
+				if (request.status == 200) {
+					var responseText = request.responseText;
+					receiveMessage(responseText.length ? JSON.parse(responseText) : {}, messageId);
+				} else {
+					destroySession();
+				}
+			}
+		}
+		request.send(serializeMessage(messageId));
+	}
+
 	function synchronizeTransactions() {
 		// Deferred sending of events so that we many from a single event loop can be batched
 		defer(function() {
-			if (((pendingTransactionCount != 0 && activeConnectionCount == 0) || queuedLocalEvents) && !dead) {
-				var request = new XMLHttpRequest();
-				request.open("POST", location.href, true);
-				activeConnectionCount++;
-				request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-				var messageId = outgoingMessageId++;
-				request.onreadystatechange = function() {
-					if (request.readyState == 4) {
-						activeConnectionCount--;
-						if (request.status == 200) {
-							var responseText = request.responseText;
-							receiveMessage(responseText.length ? JSON.parse(responseText) : {}, messageId);
-						} else {
-							destroySession();
-						}
-					}
+			if (!dead) {
+				if ((pendingTransactionCount != 0 && activeConnectionCount == 0) || queuedLocalEvents) {
+					sendMessages();
+					restartHeartbeat();
 				}
-				request.send(serializeMessage(messageId));
 			}
 		});
 	}
