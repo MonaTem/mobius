@@ -6,8 +6,11 @@ const uuid = require("uuid/v4");
 const vm = require("vm");
 
 const express = require("express");
+const expressWs = require("express-ws");
 const bodyParser = require("body-parser");
+const qs = require("qs");
 const server = express();
+expressWs(server);
 
 const relativePath = relative => path.join(__dirname, relative);
 
@@ -364,13 +367,38 @@ server.post("/", function(req, res) {
 			} else {
 				// Out of order messages don't get any events
 				res.set("Content-Type", "application/json");
-				res.send("{}");
+				res.send("");
+				resolve();
 			}
 		}
 	}).catch(e => {
 		res.status(500);
 		res.set("Content-Type", "text/plain");
 		res.send(util.inspect(e));
+	});
+});
+
+server.ws("/", function(ws, req) {
+	var session;
+	ws.on("message", function(msg) {
+		var body = qs.parse(msg);
+		if (!session) {
+			session = host.sessionById(body.sessionID);
+		} else {
+			if (session.receiveMessage(body)) {
+				session.dequeueEvents().then(events => {
+					var response;
+					if (events && events.length) {
+						response = JSON.stringify({ events: events });
+					} else {
+						response = "";
+					}
+					ws.send(response);
+				});
+			} else {
+				ws.send("");
+			}
+		}
 	});
 });
 

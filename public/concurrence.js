@@ -1,8 +1,6 @@
 (function() {
 	var defer = this.setImmediate || this.requestAnimationFrame || this.webkitRequestRequestAnimationFrame || this.mozRequestRequestAnimationFrame || function(callback) { setTimeout(callback, 0) };
 
-	var sessionHeartbeatInterval = 4 * 60 * 1000;
-
 	// Session state
 	var sessionID = "";
 	var activeConnectionCount = 0;
@@ -23,10 +21,16 @@
 	var queuedLocalEvents;
 	var fencedLocalEvents = {};
 
+	// Heartbeat
+	var sessionHeartbeatInterval = 4 * 60 * 1000;
 	var heartbeatTimeout;
 
-	function serializeMessage(messageId) {
-		var message = "sessionID=" + sessionID + "&messageID=" + messageId;
+	// Websocket support
+	var websocket;
+	var pendingSocketMessageIds = [];
+
+	function serializeMessage(messageId, includeSession) {
+		var message = (includeSession ? "sessionID=" + sessionID + "&messageID=" : "messageID=") + messageId;
 		if (queuedLocalEvents) {
 			message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents).slice(1, -1));
 			queuedLocalEvents = undefined;
@@ -51,11 +55,20 @@
 			dead = true;
 			cancelHeartbeat();
 			window.removeEventListener("unload", destroySession, false);
+			// Forcefully tear down WebSocket
+			if (websocket) {
+				pendingSocketMessageIds = [];
+				if (websocket.readyState < 2) {
+					websocket.close();
+				}
+				websocket = undefined;
+			}
+			// Abandon pending transactions
 			for (var transactionId in pendingTransactions) {
 				pendingTransactions[transactionId]();
 			}
 			// Send a "destroy" message so that the server can clean up the session
-			var message = serializeMessage(outgoingMessageId++) + "&destroy=1";
+			var message = serializeMessage(outgoingMessageId++, true) + "&destroy=1";
 			sessionID = "";
 			if (navigator.sendBeacon) {
 				navigator.sendBeacon(location.href, message);
@@ -107,7 +120,8 @@
 		return true;
 	}
 
-	function receiveMessage(message, messageId) {
+	function receiveMessage(messageText, messageId) {
+		var message = messageText.length ? JSON.parse(messageText) : {};
 		if (processMessage(message, messageId)) {
 			// Process any messages we received out of order
 			for (var i = 0; i < reorderedMessages.length; i++) {
@@ -127,23 +141,32 @@
 		if (heartbeatTimeout != undefined) {
 			restartHeartbeat();
 		}
+		activeConnectionCount++;
+		var messageId = outgoingMessageId++;
+		if (websocket) {
+			var message = serializeMessage(messageId, false);
+			pendingSocketMessageIds.push(messageId);
+			if (websocket.readyState == 1) {
+				websocket.send(message);
+			} else {
+				websocket.addEventListener("open", websocket.send.bind(websocket, message), false);
+			}
+			return;
+		}
 		var request = new XMLHttpRequest();
 		request.open("POST", location.href, true);
-		activeConnectionCount++;
 		request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-		var messageId = outgoingMessageId++;
 		request.onreadystatechange = function() {
 			if (request.readyState == 4) {
 				activeConnectionCount--;
 				if (request.status == 200) {
-					var responseText = request.responseText;
-					receiveMessage(responseText.length ? JSON.parse(responseText) : {}, messageId);
+					receiveMessage(request.responseText, messageId);
 				} else {
 					destroySession();
 				}
 			}
 		}
-		request.send(serializeMessage(messageId));
+		request.send(serializeMessage(messageId, true));
 	}
 
 	function synchronizeTransactions() {
@@ -151,8 +174,28 @@
 		defer(function() {
 			if (!dead) {
 				if ((pendingTransactionCount != 0 && activeConnectionCount == 0) || queuedLocalEvents) {
+					// Attempt to open a WebSocket for transactions, but not heartbeats
+					if (!websocket && typeof WebSocket == "function") {
+						try {
+							websocket = new WebSocket(location.href.replace(/^http/, "ws"));
+							websocket.addEventListener("open", function() {
+								websocket.send("sessionID=" + sessionID);
+							}, false);
+							websocket.addEventListener("message", function(event) {
+								activeConnectionCount--;
+								receiveMessage(event.data, pendingSocketMessageIds.shift());
+							}, false);
+						} catch (e) {
+						}
+					}
 					sendMessages();
 					restartHeartbeat();
+				} else if (websocket && pendingSocketMessageIds.length == 0) {
+					// Disconnect WebSocket when server can't possibly send us messages
+					if (websocket.readyState < 2) {
+						websocket.close();
+					}
+					websocket = undefined;
 				}
 			}
 		});
