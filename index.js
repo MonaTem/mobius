@@ -22,6 +22,16 @@ class ConcurrenceHost {
 		this.script = new vm.Script(fs.readFileSync(path), {
 			filename: path
 		});
+		this.staleSessionTimeout = setInterval(() => {
+			var now = Date.now();
+			for (var i in this.sessions) {
+				if (this.sessions.hasOwnProperty(i)) {
+					if (now - this.sessions[i].lastMessageTime > 5 * 60 * 1000) {
+						this.sessions[i].destroy();
+					}
+				}
+			}
+		}, 60 * 1000);
 	}
 	sessionById(sessionID) {
 		var session = this.sessions[sessionID];
@@ -40,6 +50,14 @@ class ConcurrenceHost {
 			session.destroy();
 		}
 	}
+	destroy() {
+		for (var i in this.sessions) {
+			if (this.sessions.hasOwnProperty(i)) {
+				this.sessions[i].destroy();
+			}
+		}
+		clearInterval(this.staleSessionTimeout);
+	}
 }
 
 const observers = [];
@@ -56,6 +74,7 @@ class ConcurrenceSession {
 		this.pendingTransactionCount = 0;
 		this.incomingMessageId = 0;
 		this.reorderedMessages = [];
+		this.lastMessageTime = Date.now();
 		// Server-side version of the API
 		this.context = {
 			console: console,
@@ -128,6 +147,7 @@ class ConcurrenceSession {
 		return true;
 	}
 	receiveMessage(message) {
+		this.lastMessageTime = Date.now();
 		if (this.processMessage(message)) {
 			// Process any messages we received out of order
 			for (var i = 0; i < this.reorderedMessages.length; i++) {
@@ -354,6 +374,9 @@ server.post("/", function(req, res) {
 	});
 });
 
-server.listen(3000, function () {
+server.listen(3000, function() {
 	console.log("Listening on port 3000");
+	server.on("close", function() {
+		host.destroy();
+	});
 });
