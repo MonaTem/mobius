@@ -356,13 +356,7 @@ server.post("/", function(req, res) {
 				// Wait to send the response until we have events ready or until there are no more server-side transactions open
 				resolve(session.dequeueEvents().then(events => {
 					res.set("Content-Type", "application/json");
-					var response;
-					if (events && events.length) {
-						response = JSON.stringify({ events: events });
-					} else {
-						response = "";
-					}
-					res.send(response);
+					res.send(events && events.length ? JSON.stringify({ events: events }) : "");
 				}));
 			} else {
 				// Out of order messages don't get any events
@@ -379,26 +373,24 @@ server.post("/", function(req, res) {
 });
 
 server.ws("/", function(ws, req) {
-	function handleMessage(body) {
+	const body = qs.parse(req.query);
+	const session = host.sessionById(body.sessionID);
+	var messageId = body.messageID | 0;
+	function processMessage(body) {
 		if (session.receiveMessage(body)) {
 			session.dequeueEvents().then(events => {
-				var response;
-				if (events && events.length) {
-					response = JSON.stringify({ events: events });
-				} else {
-					response = "";
-				}
-				ws.send(response);
+				ws.send(events && events.length ? JSON.stringify({ events: events }) : "");
 			});
 		} else {
 			ws.send("");
 		}
 	}
-	const body = qs.parse(req.query);
-	const session = host.sessionById(body.sessionID);
-	handleMessage(body);
+	processMessage(body);
 	ws.on("message", function(msg) {
-		handleMessage(qs.parse(msg));
+		processMessage({
+			messageID: ++messageId,
+			events: msg,
+		});
 	});
 });
 

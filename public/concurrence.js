@@ -29,8 +29,8 @@
 	var websocket;
 	var pendingSocketMessageIds = [];
 
-	function serializeMessage(messageId, includeSession) {
-		var message = (includeSession ? "sessionID=" + sessionID + "&messageID=" : "messageID=") + messageId;
+	function serializeMessage(messageId) {
+		var message = "sessionID=" + sessionID + "&messageID=" + messageId;
 		if (queuedLocalEvents) {
 			message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents).slice(1, -1));
 			queuedLocalEvents = undefined;
@@ -70,7 +70,7 @@
 				pendingTransactions[transactionId]();
 			}
 			// Send a "destroy" message so that the server can clean up the session
-			var message = serializeMessage(outgoingMessageId++, true) + "&destroy=1";
+			var message = serializeMessage(outgoingMessageId++) + "&destroy=1";
 			sessionID = "";
 			if (navigator.sendBeacon) {
 				navigator.sendBeacon(location.href, message);
@@ -149,7 +149,7 @@
 			// Attempt to open a WebSocket for transactions, but not heartbeats
 			if (!websocket) {
 				try {
-					websocket = new WebSocket(location.href.replace(/^http/, "ws") + "?" + serializeMessage(messageId, true));
+					websocket = new WebSocket(location.href.replace(/^http/, "ws") + "?" + serializeMessage(messageId));
 					websocket.addEventListener("message", function(event) {
 						activeConnectionCount--;
 						receiveMessage(event.data, pendingSocketMessageIds.shift());
@@ -159,8 +159,14 @@
 				} catch (e) {
 				}
 			} else {
-				var message = serializeMessage(messageId, false);
 				pendingSocketMessageIds.push(messageId);
+				var message;
+				if (queuedLocalEvents) {
+					message = JSON.stringify(queuedLocalEvents).slice(1, -1);
+					queuedLocalEvents = undefined;
+				} else {
+					message = "";
+				}
 				if (websocket.readyState == 1) {
 					websocket.send(message);
 				} else {
@@ -182,7 +188,7 @@
 				}
 			}
 		}
-		request.send(serializeMessage(messageId, true));
+		request.send(serializeMessage(messageId));
 	}
 
 	function synchronizeTransactions() {
