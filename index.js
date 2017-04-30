@@ -346,8 +346,8 @@ server.post("/", function(req, res) {
 		if (req.body.destroy) {
 			// Forcefully clean up sessions
 			host.destroySessionById(req.body.sessionID);
-			res.set("Content-Type", "application/json");
-			res.send("{\"goodbye\":\"world\"}");
+			res.set("Content-Type", "text/plain");
+			res.send("");
 			resolve();
 		} else {
 			// Process incoming events
@@ -355,12 +355,12 @@ server.post("/", function(req, res) {
 			if (session.receiveMessage(req.body)) {
 				// Wait to send the response until we have events ready or until there are no more server-side transactions open
 				resolve(session.dequeueEvents().then(events => {
-					res.set("Content-Type", "application/json");
-					res.send(events && events.length ? JSON.stringify({ events: events }) : "");
+					res.set("Content-Type", "text/plain");
+					res.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
 				}));
 			} else {
 				// Out of order messages don't get any events
-				res.set("Content-Type", "application/json");
+				res.set("Content-Type", "text/plain");
 				res.send("");
 				resolve();
 			}
@@ -379,7 +379,7 @@ server.ws("/", function(ws, req) {
 	function processMessage(body) {
 		if (session.receiveMessage(body)) {
 			session.dequeueEvents().then(events => {
-				ws.send(events && events.length ? JSON.stringify({ events: events }) : "");
+				ws.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
 			});
 		} else {
 			ws.send("");

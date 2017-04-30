@@ -84,7 +84,7 @@
 	}
 	window.addEventListener("unload", destroySession, false);
 
-	function processMessage(message, messageId) {
+	function processMessage(events, messageId) {
 		// Process messages in order
 		if (messageId > incomingMessageId) {
 			return false;
@@ -94,28 +94,25 @@
 		}
 		incomingMessageId++;
 		// Read each event and dispatch the appropriate transaction in order
-		var events = message.events;
-		if (events) {
-			for (var i = 0; i < events.length; i++) {
-				var event = events[i];
-				var transactionId = event[0];
-				var transaction;
-				if (transactionId < 0) {
-					// Fenced client-side event
-					var fencedQueue = fencedLocalEvents[-transactionId];
-					transaction = fencedQueue.shift();
-					if (fencedQueue.length == 0) {
-						delete fencedLocalEvents[-transactionId];
-					}
-				} else {
-					// Server-side event
-					transaction = pendingTransactions[transactionId];
+		for (var i = 0; i < events.length; i++) {
+			var event = events[i];
+			var transactionId = event[0];
+			var transaction;
+			if (transactionId < 0) {
+				// Fenced client-side event
+				var fencedQueue = fencedLocalEvents[-transactionId];
+				transaction = fencedQueue.shift();
+				if (fencedQueue.length == 0) {
+					delete fencedLocalEvents[-transactionId];
 				}
-				if (transaction) {
-					transaction(event);
-				} else {
-					throw new Error("Guru meditation error!");
-				}
+			} else {
+				// Server-side event
+				transaction = pendingTransactions[transactionId];
+			}
+			if (transaction) {
+				transaction(event);
+			} else {
+				throw new Error("Guru meditation error!");
 			}
 		}
 		synchronizeTransactions();
@@ -123,7 +120,7 @@
 	}
 
 	function receiveMessage(messageText, messageId) {
-		var message = messageText.length ? JSON.parse(messageText) : {};
+		var message = messageText.length ? JSON.parse("[" + messageText + "]") : [];
 		if (processMessage(message, messageId)) {
 			// Process any messages we received out of order
 			for (var i = 0; i < reorderedMessages.length; i++) {
