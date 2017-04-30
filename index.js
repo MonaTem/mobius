@@ -10,7 +10,6 @@ const expressWs = require("express-ws");
 const bodyParser = require("body-parser");
 const qs = require("qs");
 const server = express();
-expressWs(server);
 
 const relativePath = relative => path.join(__dirname, relative);
 
@@ -372,6 +371,7 @@ server.post("/", function(req, res) {
 	});
 });
 
+expressWs(server);
 server.ws("/", function(ws, req) {
 	const body = qs.parse(req.query);
 	const session = host.sessionById(body.sessionID);

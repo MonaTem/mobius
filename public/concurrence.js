@@ -18,7 +18,7 @@
 
 	// Local transactions
 	var localTransactionCounter = 0;
-	var queuedLocalEvents;
+	var queuedLocalEvents = [];
 	var fencedLocalEvents = {};
 
 	// Heartbeat
@@ -26,14 +26,15 @@
 	var heartbeatTimeout;
 
 	// Websocket support
+	var hasWebSocketSupport = typeof WebSocket == "function";
 	var websocket;
 	var pendingSocketMessageIds = [];
 
 	function serializeMessage(messageId) {
 		var message = "sessionID=" + sessionID + "&messageID=" + messageId;
-		if (queuedLocalEvents) {
+		if (queuedLocalEvents.length) {
 			message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents).slice(1, -1)).replace(/%5B/g, "[").replace(/%5D/g, "]").replace(/%2C/g, ",").replace(/%20/g, "+");
-			queuedLocalEvents = undefined;
+			queuedLocalEvents = [];
 		}
 		return message;
 	}
@@ -136,42 +137,7 @@
 		}
 	}
 
-	function sendMessages(openWebSocket) {
-		if (heartbeatTimeout != undefined) {
-			restartHeartbeat();
-		}
-		activeConnectionCount++;
-		var messageId = outgoingMessageId++;
-		if (websocket || (openWebSocket && typeof WebSocket == "function")) {
-			// Attempt to open a WebSocket for transactions, but not heartbeats
-			if (!websocket) {
-				try {
-					websocket = new WebSocket(location.href.replace(/^http/, "ws") + "?" + serializeMessage(messageId));
-					websocket.addEventListener("message", function(event) {
-						activeConnectionCount--;
-						receiveMessage(event.data, pendingSocketMessageIds.shift());
-					}, false);
-					pendingSocketMessageIds = [messageId];
-					return;
-				} catch (e) {
-				}
-			} else {
-				pendingSocketMessageIds.push(messageId);
-				var message;
-				if (queuedLocalEvents) {
-					message = JSON.stringify(queuedLocalEvents).slice(1, -1);
-					queuedLocalEvents = undefined;
-				} else {
-					message = "";
-				}
-				if (websocket.readyState == 1) {
-					websocket.send(message);
-				} else {
-					websocket.addEventListener("open", websocket.send.bind(websocket, message), false);
-				}
-				return;
-			}
-		}
+	function sendFormMessage(body, messageId) {
 		var request = new XMLHttpRequest();
 		request.open("POST", location.href, true);
 		request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
@@ -185,15 +151,77 @@
 				}
 			}
 		}
-		request.send(serializeMessage(messageId));
+		request.send(body);
+	}
+
+	function sendMessages(attemptWebSockets) {
+		if (heartbeatTimeout != undefined) {
+			restartHeartbeat();
+		}
+		activeConnectionCount++;
+		var messageId = outgoingMessageId++;
+		if (websocket) {
+			pendingSocketMessageIds.push(messageId);
+			var message = JSON.stringify(queuedLocalEvents).slice(1, -1);
+			if (websocket.readyState == 1) {
+				queuedLocalEvents = [];
+				websocket.send(message);
+			} else {
+				// Coordinate with existing WebSocket that's in the process of being opened,
+				// falling back to a form POST if necessary
+				var body = serializeMessage(messageId);
+				function existingSocketOpened() {
+					websocket.removeEventListener("open", existingSocketOpened, false);
+					websocket.removeEventListener("error", existingSocketErrored, false);
+					websocket.send(message);
+				}
+				function existingSocketErrored() {
+					websocket.removeEventListener("open", existingSocketOpened, false);
+					websocket.removeEventListener("error", existingSocketErrored, false);
+					sendFormMessage(body, messageId);
+				}
+				websocket.addEventListener("open", existingSocketOpened, false);
+				websocket.addEventListener("error", existingSocketErrored, false);
+			}
+			return;
+		}
+		var body = serializeMessage(messageId);
+		if (attemptWebSockets) {
+			// Attempt to open a WebSocket for transactions, but not heartbeats
+			function newSocketOpened() {
+				websocket.removeEventListener("open", newSocketOpened, false);
+				websocket.removeEventListener("error", newSocketErrored, false);
+			}
+			function newSocketErrored() {
+				// WebSocket failed, fallback using form POSTs
+				newSocketOpened();
+				hasWebSocketSupport = false;
+				websocket = undefined;
+				pendingSocketMessageIds = [];
+				sendFormMessage(body, messageId);
+			}
+			try {
+				websocket = new WebSocket(location.href.replace(/^http/, "ws") + "?" + body);
+				websocket.addEventListener("open", newSocketOpened, false);
+				websocket.addEventListener("error", newSocketErrored, false);
+				websocket.addEventListener("message", function(event) {
+					activeConnectionCount--;
+					receiveMessage(event.data, pendingSocketMessageIds.shift());
+				}, false);
+				pendingSocketMessageIds = [messageId];
+				return;
+			} catch (e) {
+			}
+		}
+		sendFormMessage(body, messageId);
 	}
 
 	function synchronizeTransactions() {
 		// Deferred sending of events so that we many from a single event loop can be batched
 		defer(function() {
 			if (!dead) {
-				if ((pendingTransactionCount != 0 && activeConnectionCount == 0) || queuedLocalEvents) {
-					sendMessages(true);
+				if ((pendingTransactionCount != 0 && activeConnectionCount == 0) || queuedLocalEvents.length) {
+					sendMessages(hasWebSocketSupport);
 					restartHeartbeat();
 				} else if (websocket && pendingSocketMessageIds.length == 0) {
 					// Disconnect WebSocket when server can't possibly send us messages
@@ -270,10 +298,8 @@
 			}
 		});
 		// Queue an event to be sent to the server in the next flush
-		if (queuedLocalEvents) {
-			queuedLocalEvents.push(event);
-		} else {
-			queuedLocalEvents = [event];
+		queuedLocalEvents.push(event);
+		if (queuedLocalEvents.length == 1) {
 			synchronizeTransactions();
 		}
 		return result;
