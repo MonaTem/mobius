@@ -32,7 +32,7 @@
 	function serializeMessage(messageId) {
 		var message = "sessionID=" + sessionID + "&messageID=" + messageId;
 		if (queuedLocalEvents) {
-			message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents).slice(1, -1));
+			message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents).slice(1, -1)).replace(/%5B/g, "[").replace(/%5D/g, "]").replace(/%2C/g, ",").replace(/%20/g, "+");
 			queuedLocalEvents = undefined;
 		}
 		return message;
