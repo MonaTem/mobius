@@ -379,26 +379,26 @@ server.post("/", function(req, res) {
 });
 
 server.ws("/", function(ws, req) {
-	var session;
-	ws.on("message", function(msg) {
-		var body = qs.parse(msg);
-		if (!session) {
-			session = host.sessionById(body.sessionID);
+	function handleMessage(body) {
+		if (session.receiveMessage(body)) {
+			session.dequeueEvents().then(events => {
+				var response;
+				if (events && events.length) {
+					response = JSON.stringify({ events: events });
+				} else {
+					response = "";
+				}
+				ws.send(response);
+			});
 		} else {
-			if (session.receiveMessage(body)) {
-				session.dequeueEvents().then(events => {
-					var response;
-					if (events && events.length) {
-						response = JSON.stringify({ events: events });
-					} else {
-						response = "";
-					}
-					ws.send(response);
-				});
-			} else {
-				ws.send("");
-			}
+			ws.send("");
 		}
+	}
+	const body = qs.parse(req.query);
+	const session = host.sessionById(body.sessionID);
+	handleMessage(body);
+	ws.on("message", function(msg) {
+		handleMessage(qs.parse(msg));
 	});
 });
 

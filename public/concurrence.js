@@ -47,7 +47,9 @@
 
 	function restartHeartbeat() {
 		cancelHeartbeat();
-		heartbeatTimeout = setTimeout(sendMessages, sessionHeartbeatInterval);
+		heartbeatTimeout = setTimeout(function() {
+			sendMessages(false);
+		}, sessionHeartbeatInterval);
 	}
 
 	function destroySession() {
@@ -137,21 +139,35 @@
 		}
 	}
 
-	function sendMessages() {
+	function sendMessages(openWebSocket) {
 		if (heartbeatTimeout != undefined) {
 			restartHeartbeat();
 		}
 		activeConnectionCount++;
 		var messageId = outgoingMessageId++;
-		if (websocket) {
-			var message = serializeMessage(messageId, false);
-			pendingSocketMessageIds.push(messageId);
-			if (websocket.readyState == 1) {
-				websocket.send(message);
+		if (websocket || (openWebSocket && typeof WebSocket == "function")) {
+			// Attempt to open a WebSocket for transactions, but not heartbeats
+			if (!websocket) {
+				try {
+					websocket = new WebSocket(location.href.replace(/^http/, "ws") + "?" + serializeMessage(messageId, true));
+					websocket.addEventListener("message", function(event) {
+						activeConnectionCount--;
+						receiveMessage(event.data, pendingSocketMessageIds.shift());
+					}, false);
+					pendingSocketMessageIds = [messageId];
+					return;
+				} catch (e) {
+				}
 			} else {
-				websocket.addEventListener("open", websocket.send.bind(websocket, message), false);
+				var message = serializeMessage(messageId, false);
+				pendingSocketMessageIds.push(messageId);
+				if (websocket.readyState == 1) {
+					websocket.send(message);
+				} else {
+					websocket.addEventListener("open", websocket.send.bind(websocket, message), false);
+				}
+				return;
 			}
-			return;
 		}
 		var request = new XMLHttpRequest();
 		request.open("POST", location.href, true);
@@ -174,21 +190,7 @@
 		defer(function() {
 			if (!dead) {
 				if ((pendingTransactionCount != 0 && activeConnectionCount == 0) || queuedLocalEvents) {
-					// Attempt to open a WebSocket for transactions, but not heartbeats
-					if (!websocket && typeof WebSocket == "function") {
-						try {
-							websocket = new WebSocket(location.href.replace(/^http/, "ws"));
-							websocket.addEventListener("open", function() {
-								websocket.send("sessionID=" + sessionID);
-							}, false);
-							websocket.addEventListener("message", function(event) {
-								activeConnectionCount--;
-								receiveMessage(event.data, pendingSocketMessageIds.shift());
-							}, false);
-						} catch (e) {
-						}
-					}
-					sendMessages();
+					sendMessages(true);
 					restartHeartbeat();
 				} else if (websocket && pendingSocketMessageIds.length == 0) {
 					// Disconnect WebSocket when server can't possibly send us messages
