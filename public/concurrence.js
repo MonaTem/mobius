@@ -31,7 +31,10 @@
 	var pendingSocketMessageIds = [];
 
 	function serializeMessage(messageId) {
-		var message = "sessionID=" + sessionID + "&messageID=" + messageId;
+		var message = "sessionID=" + sessionID;
+		if (messageId) {
+			message += "&messageID=" + messageId;
+		}
 		if (queuedLocalEvents.length) {
 			message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents).slice(1, -1)).replace(/%5B/g, "[").replace(/%5D/g, "]").replace(/%2C/g, ",").replace(/%20/g, "+");
 			queuedLocalEvents = [];
