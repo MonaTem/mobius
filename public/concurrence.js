@@ -258,12 +258,28 @@
 		return new Promise(function(resolve, reject) {
 			var transaction = registerRemoteTransaction(function(event) {
 				transaction.close();
-				if (event && !event[2]) {
-					resolve(event[1]);
-				} else if (event) {
-					reject(event[1]);
+				if (!event) {
+					reject(new Error("Disconnected from server!"));
 				} else {
-					reject("Disconnected from server!");
+					var value = event[1];
+					var type = event[2];
+					if (type) {
+						// Convert serialized representation into the appropriate Error type
+						if (type !== 1) {
+							type = window[type] || Error;
+							var newValue = new type(value.message);
+							delete value.message;
+							for (var i in value) {
+								if (value.hasOwnProperty(i)) {
+									newValue[i] = value[i];
+								}
+							}
+							value = newValue;
+						}
+						reject(value);
+					} else {
+						resolve(value);
+					}
 				}
 			});
 		});
@@ -312,7 +328,25 @@
 				return value;
 			});
 		}, function(error) {
-			return sendEvent([transactionId, error, 1]).then(function() {
+			// Convert Error types to a representation that can be reconstituted on the server
+			var type = 1;
+			var serializedError = error;
+			if (error instanceof Error) {
+				var errorClass = error.constructor;
+				if ("name" in errorClass) {
+					type = errorClass.name;
+				} else {
+					// ES5 support
+					type = errorClass.toString().match(/function (\w+)\(/)[1];
+				}
+				serializedError = { message: error.message, stack: error.stack };
+				for (var i in error) {
+					if (error.hasOwnProperty(i)) {
+						serializedError[i] = error[i];
+					}
+				}
+			}
+			return sendEvent([transactionId, serializedError, type]).then(function() {
 				return Promise.reject(error);
 			});
 		});

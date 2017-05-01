@@ -64,6 +64,8 @@ class ConcurrenceHost {
 
 const observers = [];
 
+const globals = this;
+
 class ConcurrenceSession {
 	constructor(host, sessionID) {
 		this.host = host;
@@ -236,7 +238,14 @@ class ConcurrenceSession {
 			return value;
 		}, error => {
 			this.localTransactionCount--;
-			this.sendEvent([transactionId, error, 1]);
+			var type = 1;
+			var serializedError = error;
+			if (error instanceof Error) {
+				// Convert Error types to a representation that can be reconstituted on the client
+				type = error.constructor.name;
+				serializedError = Object.assign({ message: error.message, stack: error.stack }, error);
+			}
+			this.sendEvent([transactionId, serializedError, type]);
 			return error;
 		});
 	}
@@ -290,12 +299,23 @@ class ConcurrenceSession {
 		return new Promise((resolve, reject) => {
 			const transaction = this.registerRemoteTransaction(function(event) {
 				transaction.close();
-				if (event && !event[2]) {
-					resolve(event[1]);
-				} else if (event) {
-					reject(event[1]);
+				if (!event) {
+					reject(new Error("Disconnected from client!"));
 				} else {
-					reject("Disconnected from client!");
+					var value = event[1];
+					var type = event[2];
+					if (type[2]) {
+						// Convert serialized representation into the appropriate Error type
+						if (type !== 1) {
+							type = globals[type] || Error;
+							var newValue = new type(value.message);
+							delete value.message;
+							value = Object.assign(newValue, value);
+						}
+						reject(value);
+					} else {
+						resolve(value);
+					}
 				}
 			});
 		});
