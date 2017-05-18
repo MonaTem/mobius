@@ -304,7 +304,7 @@ class ConcurrenceSession {
 				} else {
 					var value = event[1];
 					var type = event[2];
-					if (type[2]) {
+					if (type) {
 						// Convert serialized representation into the appropriate Error type
 						if (type !== 1) {
 							type = globals[type] || Error;
