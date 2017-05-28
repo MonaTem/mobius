@@ -396,10 +396,15 @@ server.ws("/", function(ws, req) {
 	const body = qs.parse(req.query);
 	const session = host.sessionById(body.sessionID);
 	var messageId = body.messageID | 0;
+	var closed = false;
 	function processMessage(body) {
 		if (session.receiveMessage(body)) {
 			session.dequeueEvents().then(events => {
-				ws.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
+				if (!closed) {
+					ws.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
+				} else {
+					session.destroy();
+				}
 			});
 		} else {
 			ws.send("");
@@ -411,6 +416,9 @@ server.ws("/", function(ws, req) {
 			messageID: ++messageId,
 			events: msg,
 		});
+	});
+	ws.on("close", function() {
+		closed = true;
 	});
 });
 
