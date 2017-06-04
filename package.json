@@ -9,9 +9,11 @@
   "author": "Ryan Petrich",
   "license": "ISC",
   "dependencies": {
+    "@types/node": "^7.0.27",
     "body-parser": "^1.17.1",
     "express": "^4.15.2",
     "express-ws": "^3.0.0",
+    "typescript": "^2.3.4",
     "uuid": "^3.0.1"
   }
 }

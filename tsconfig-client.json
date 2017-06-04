@@ -1,0 +1,24 @@
+{
+	"include": [
+		"client/**/*.ts",
+		"client/**/*.js",
+		"src/**/*.ts",
+		"src/**/*.js"
+	],
+	"compilerOptions": {
+		"baseUrl": "./",
+		"outFile": "public/client.js",
+		"allowJs": true,
+		"strict": true,
+		"strictNullChecks": true,
+		"noUnusedLocals": true,
+		"module": "none",
+		"target": "es3",
+		"downlevelIteration": true,
+		"lib": [
+			"es5",
+			"dom",
+			"es2015.promise"
+		]
+	}
+}

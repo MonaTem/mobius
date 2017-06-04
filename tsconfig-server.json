@@ -1,0 +1,26 @@
+{
+	"include": [
+		"server/**/*.ts",
+		"server/**/*.js",
+		"src/**/*.ts",
+		"src/**/*.js"
+	],
+	"compilerOptions": {
+		"baseUrl": "./",
+		"outFile": "server.js",
+		"allowJs": true,
+		"strict": true,
+		"strictNullChecks": true,
+		"noUnusedLocals": true,
+		"module": "none",
+		"target": "es2017",
+		"downlevelIteration": false,
+		"lib": [
+			"es6",
+			"es2015.promise"
+		],
+		"types": [
+			"node"
+		]
+	}
+}

@@ -85,6 +85,7 @@ class ConcurrenceSession {
 			concurrence: {
 				disconnect : () => this.destroy(),
 				// Server-side implementations
+				now: () => this.observeLocalPromise(Date.now()),
 				random: () => this.observeLocalPromise(Math.random()),
 				interval: (callback, frequency) => {
 					const transaction = this.observeLocalEventCallback(callback);
@@ -347,11 +348,11 @@ function noCache(res) {
 	res.header("Pragma", "no-cache");
 }
 
-var host = new ConcurrenceHost(relativePath("public/app.js"));
+var host = new ConcurrenceHost(relativePath("server.js"));
 
 server.get("/", function (req, res) {
 	noCache(res);
-	res.send("<!doctype html><html><head></head><body><div id=\"host\"></div><div><button id=\"toggle\"></button></div><div><input id=\"input\"><button id=\"log\">Log</button></div><div><input id=\"broadcastField\"><button id=\"broadcast\">Broadcast</button><button id=\"connect\">Connect</button></div><div><button id=\"destroy\">End Session</button></div><script src=\"concurrence.js\"></script><script>concurrence._init(\"" + uuid() + "\")</script><script src=\"app.js\"></script></body></html>");
+	res.send("<!doctype html><html><head></head><body><div id=\"host\"></div><div><button id=\"toggle\"></button></div><div><input id=\"input\"><button id=\"log\">Log</button></div><div><input id=\"broadcastField\"><button id=\"broadcast\">Broadcast</button><button id=\"connect\">Connect</button></div><div><button id=\"destroy\">End Session</button></div><script src=\"client.js\"></script></body></html>");
 });
 
 server.use(bodyParser.urlencoded({

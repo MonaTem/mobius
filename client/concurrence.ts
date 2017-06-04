@@ -1,36 +1,41 @@
-(function() {
-	var defer = this.setImmediate || this.requestAnimationFrame || this.webkitRequestRequestAnimationFrame || this.mozRequestRequestAnimationFrame || function(callback) { setTimeout(callback, 0) };
+/// <reference path="../src/concurrence.d.ts" />
+
+const concurrence: Concurrence = (function(this: any) {
+	const defer = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { setTimeout(callback, 0) };
 
 	// Session state
-	var sessionID = "";
+	var sessionID: string | undefined = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+		var r = Math.random() * 16 | 0;
+		return (c == "x" ? r : (r & 3 | 8)).toString(16);
+	});
 	var activeConnectionCount = 0;
 	var dead = false;
 
 	// Message ordering
 	var outgoingMessageId = 0;
 	var incomingMessageId = 0;
-	var reorderedMessages = [];
+	var reorderedMessages : any[][] = [];
 
 	// Remote transactions
 	var remoteTransactionCounter = 0;
-	var pendingTransactions = {};
+	var pendingTransactions : { [key: number]: (event: any[] | undefined) => void; } = {};
 	var pendingTransactionCount = 0;
 
 	// Local transactions
 	var localTransactionCounter = 0;
-	var queuedLocalEvents = [];
-	var fencedLocalEvents = {};
+	var queuedLocalEvents: any[] = [];
+	var fencedLocalEvents: { [key: number]: ((event: any[]) => void)[]; } = {};
 
 	// Heartbeat
 	var sessionHeartbeatInterval = 4 * 60 * 1000;
-	var heartbeatTimeout;
+	var heartbeatTimeout: any;
 
 	// Websocket support
-	var hasWebSocketSupport = typeof WebSocket == "function";
-	var websocket;
-	var pendingSocketMessageIds = [];
+	var WebSocketClass: typeof WebSocket | undefined = WebSocket;
+	var websocket: WebSocket | undefined;
+	var pendingSocketMessageIds: number[] = [];
 
-	function serializeMessage(messageId) {
+	function serializeMessage(messageId: number | undefined) {
 		var message = "sessionID=" + sessionID;
 		if (messageId) {
 			message += "&messageID=" + messageId;
@@ -51,9 +56,7 @@
 
 	function restartHeartbeat() {
 		cancelHeartbeat();
-		heartbeatTimeout = setTimeout(function() {
-			sendMessages(false);
-		}, sessionHeartbeatInterval);
+		heartbeatTimeout = setTimeout(() => sendMessages(false), sessionHeartbeatInterval);
 	}
 
 	function destroySession() {
@@ -71,11 +74,11 @@
 			}
 			// Abandon pending transactions
 			for (var transactionId in pendingTransactions) {
-				pendingTransactions[transactionId]();
+				pendingTransactions[transactionId](undefined);
 			}
 			// Send a "destroy" message so that the server can clean up the session
 			var message = serializeMessage(outgoingMessageId++) + "&destroy=1";
-			sessionID = "";
+			sessionID = undefined;
 			if (navigator.sendBeacon) {
 				navigator.sendBeacon(location.href, message);
 			} else {
@@ -88,7 +91,7 @@
 	}
 	window.addEventListener("unload", destroySession, false);
 
-	function processMessage(events, messageId) {
+	function processMessage(events: any[][], messageId: number) {
 		// Process messages in order
 		if (messageId > incomingMessageId) {
 			return false;
@@ -123,7 +126,7 @@
 		return true;
 	}
 
-	function receiveMessage(messageText, messageId) {
+	function receiveMessage(messageText: string, messageId: number) {
 		var message = messageText.length ? JSON.parse("[" + messageText + "]") : [];
 		if (processMessage(message, messageId)) {
 			// Process any messages we received out of order
@@ -140,11 +143,11 @@
 		}
 	}
 
-	function sendFormMessage(body, messageId) {
+	function sendFormMessage(body: string, messageId: number) {
 		var request = new XMLHttpRequest();
 		request.open("POST", location.href, true);
 		request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-		request.onreadystatechange = function() {
+		request.onreadystatechange = () => {
 			if (request.readyState == 4) {
 				activeConnectionCount--;
 				if (request.status == 200) {
@@ -157,7 +160,7 @@
 		request.send(body);
 	}
 
-	function sendMessages(attemptWebSockets) {
+	function sendMessages(attemptWebSockets: boolean) {
 		if (heartbeatTimeout != undefined) {
 			restartHeartbeat();
 		}
@@ -173,15 +176,19 @@
 				// Coordinate with existing WebSocket that's in the process of being opened,
 				// falling back to a form POST if necessary
 				var body = serializeMessage(messageId);
-				function existingSocketOpened() {
-					websocket.removeEventListener("open", existingSocketOpened, false);
-					websocket.removeEventListener("error", existingSocketErrored, false);
-					websocket.send(message);
+				var existingSocketOpened = () => {
+					if (websocket) {
+						websocket.removeEventListener("open", existingSocketOpened, false);
+						websocket.removeEventListener("error", existingSocketErrored, false);
+						websocket.send(message);
+					}
 				}
-				function existingSocketErrored() {
-					websocket.removeEventListener("open", existingSocketOpened, false);
-					websocket.removeEventListener("error", existingSocketErrored, false);
-					sendFormMessage(body, messageId);
+				var existingSocketErrored = () => {
+					if (websocket) {
+						websocket.removeEventListener("open", existingSocketOpened, false);
+						websocket.removeEventListener("error", existingSocketErrored, false);
+						sendFormMessage(body, messageId);
+					}
 				}
 				websocket.addEventListener("open", existingSocketOpened, false);
 				websocket.addEventListener("error", existingSocketErrored, false);
@@ -189,27 +196,32 @@
 			return;
 		}
 		var body = serializeMessage(messageId);
-		if (attemptWebSockets) {
+		if (attemptWebSockets && WebSocketClass) {
 			// Attempt to open a WebSocket for transactions, but not heartbeats
-			function newSocketOpened() {
-				websocket.removeEventListener("open", newSocketOpened, false);
-				websocket.removeEventListener("error", newSocketErrored, false);
+			var newSocketOpened = () => {
+				if (websocket) {
+					websocket.removeEventListener("open", newSocketOpened, false);
+					websocket.removeEventListener("error", newSocketErrored, false);
+				}
 			}
-			function newSocketErrored() {
+			var newSocketErrored = () => {
 				// WebSocket failed, fallback using form POSTs
 				newSocketOpened();
-				hasWebSocketSupport = false;
+				WebSocketClass = undefined;
 				websocket = undefined;
 				pendingSocketMessageIds = [];
 				sendFormMessage(body, messageId);
 			}
 			try {
-				websocket = new WebSocket(location.href.replace(/^http/, "ws") + "?" + body);
-				websocket.addEventListener("open", newSocketOpened, false);
-				websocket.addEventListener("error", newSocketErrored, false);
-				websocket.addEventListener("message", function(event) {
+				const newSocket = websocket = new WebSocketClass(location.href.replace(/^http/, "ws") + "?" + body);
+				newSocket.addEventListener("open", newSocketOpened, false);
+				newSocket.addEventListener("error", newSocketErrored, false);
+				newSocket.addEventListener("message", function(event: any) {
 					activeConnectionCount--;
-					receiveMessage(event.data, pendingSocketMessageIds.shift());
+					var pendingId = pendingSocketMessageIds.shift();
+					if (typeof pendingId != "undefined") {
+						receiveMessage(event.data, pendingId);
+					}
 				}, false);
 				pendingSocketMessageIds = [messageId];
 				return;
@@ -221,10 +233,10 @@
 
 	function synchronizeTransactions() {
 		// Deferred sending of events so that we many from a single event loop can be batched
-		defer(function() {
+		defer(() => {
 			if (!dead) {
 				if ((pendingTransactionCount != 0 && activeConnectionCount == 0) || queuedLocalEvents.length) {
-					sendMessages(hasWebSocketSupport);
+					sendMessages(true);
 					restartHeartbeat();
 				} else if (websocket && pendingSocketMessageIds.length == 0) {
 					// Disconnect WebSocket when server can't possibly send us messages
@@ -237,7 +249,7 @@
 		});
 	}
 
-	function registerRemoteTransaction(callback) {
+	function registerRemoteTransaction(callback: (event: any) => void) {
 		if (dead) {
 			throw new Error("Session has died!");
 		}
@@ -247,7 +259,7 @@
 		pendingTransactions[transactionId] = callback;
 		synchronizeTransactions();
 		return {
-			close: function() {
+			close: () => {
 				// Cleanup the bookkeeping
 				if (pendingTransactions[transactionId]) {
 					pendingTransactionCount--;
@@ -269,7 +281,7 @@
 					if (type) {
 						// Convert serialized representation into the appropriate Error type
 						if (type !== 1) {
-							type = window[type] || Error;
+							type = (window as any)[type] || Error;
 							var newValue = new type(value.message);
 							delete value.message;
 							for (var i in value) {
@@ -288,7 +300,7 @@
 		});
 	}
 
-	function receiveRemoteEventStream(callback) {
+	function receiveRemoteEventStream<T>(callback: (value: T) => void, ...args: any[]) {
 		var transaction = registerRemoteTransaction(function(event) {
 			if (event) {
 				event.shift();
@@ -300,7 +312,7 @@
 		return transaction;
 	}
 
-	function sendEvent(event) {
+	function sendEvent(event: any[]) {
 		if (dead) {
 			return Promise.reject(new Error("Session has died!"));
 		}
@@ -324,18 +336,14 @@
 		return result;
 	}
 
-	function observeLocalPromise(value) {
+	function observeLocalPromise<T>(value: Promise<T>) : Promise<T> {
 		var transactionId = ++localTransactionCounter;
-		return Promise.resolve(value).then(function(value) {
-			return sendEvent([transactionId, value]).then(function() {
-				return value;
-			});
-		}, function(error) {
+		return Promise.resolve(value).then(value => sendEvent([transactionId, value]).then(() => value), error => {
 			// Convert Error types to a representation that can be reconstituted on the server
-			var type = 1;
-			var serializedError = error;
+			var type : any = 1;
+			var serializedError: any = error;
 			if (error instanceof Error) {
-				var errorClass = error.constructor;
+				var errorClass : any = error.constructor;
 				if ("name" in errorClass) {
 					type = errorClass.name;
 				} else {
@@ -343,24 +351,23 @@
 					type = errorClass.toString().match(/function (\w+)\(/)[1];
 				}
 				serializedError = { message: error.message, stack: error.stack };
-				for (var i in error) {
-					if (error.hasOwnProperty(i)) {
-						serializedError[i] = error[i];
+				var anyError : any = error;
+				for (var i in anyError) {
+					if (anyError.hasOwnProperty(i)) {
+						serializedError[i] = anyError[i];
 					}
 				}
 			}
-			return sendEvent([transactionId, serializedError, type]).then(function() {
-				return Promise.reject(error);
-			});
+			return sendEvent([transactionId, serializedError, type]).then(() => Promise.reject(error));
 		});
 	}
 
-	function observeLocalEventCallback(callback) {
+	function observeLocalEventCallback(callback: (...args: any[]) => void) {
 		return {
 			transactionId: ++localTransactionCounter,
 			send: function() {
 				var transactionId = this.transactionId;
-				if (transactionId != null) {
+				if (transactionId >= 0) {
 					var message = Array.prototype.slice.call(arguments);
 					var args = message.slice();
 					message.unshift(transactionId);
@@ -374,27 +381,24 @@
 				}
 			},
 			close: function() {
-				this.transactionId = null;
+				this.transactionId = -1;
 			}
 		};
 	}
 
 	// Client-side version of the API
-	this.concurrence = {
-		_init: function(newSessionID) {
-			delete this._init;
-			sessionID = newSessionID;
-		},
+	return {
 		disconnect: destroySession,
 		// Server-side implementations
-		random: receiveRemotePromise,
-		interval: receiveRemoteEventStream,
-		timeout: receiveRemotePromise,
-		broadcast: function(text) {},
-		receive: receiveRemoteEventStream,
+		now: receiveRemotePromise as () => Promise<number>,
+		random: receiveRemotePromise as () => Promise<number>,
+		interval: receiveRemoteEventStream as (callback: () => void, millis: number) => any,
+		timeout: receiveRemotePromise as () => Promise<void>,
+		broadcast: (text: string) => {},
+		receive: receiveRemoteEventStream as (callback: (value: string) => void) => any,
 		// Client-side implementations
-		render: function(selector, value) {
-			var element = document.querySelector(selector)
+		render: (selector: string, value: string) => {
+			var element: any = document.querySelector(selector)
 			if (element) {
 				if ("value" in element) {
 					element.value = value;
@@ -404,7 +408,7 @@
 				}
 			}
 		},
-		observe: function(selector, event, callback) {
+		observe: (selector: string, event: string, callback: () => void) => {
 			var transaction = observeLocalEventCallback(callback);
 			var elements = document.querySelectorAll(selector);
 			for (var i = 0; i < elements.length; i++) {
@@ -414,9 +418,9 @@
 			}
 			return transaction;
 		},
-		read: function(selector) {
-			var element = document.querySelector(selector);
-			return observeLocalPromise(element ? Promise.resolve(element.value) : Promise.reject("Selector not found!"));
+		read: (selector: string) : Promise<string> => {
+			var element: any = document.querySelector(selector);
+			return observeLocalPromise(element && "value" in element ? Promise.resolve(element.value) : Promise.reject("Selector not found!"));
 		}
 	};
 })();
