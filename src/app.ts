@@ -34,11 +34,11 @@ var logTransaction = concurrence.observe("#log", "click", () => {
 });
 
 // Receive broadcasted values
-var receiveStream : any;
+var receiveStream : ConcurrenceTransaction | undefined;
 function toggleReceive() {
 	if (receiveStream) {
 		receiveStream.close();
-		receiveStream = null;
+		receiveStream = undefined;
 	} else {
 		receiveStream = concurrence.receive(value => {
 			console.log("Receiving: " + value);

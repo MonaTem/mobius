@@ -62,8 +62,6 @@ class ConcurrenceHost {
 	}
 }
 
-const observers = [];
-
 const globals = this;
 
 class ConcurrenceSession {
@@ -80,43 +78,16 @@ class ConcurrenceSession {
 		this.reorderedMessages = [];
 		this.lastMessageTime = Date.now();
 		// Server-side version of the API
-		this.context = {
-			console: console,
-			concurrence: {
-				disconnect : () => this.destroy(),
-				// Server-side implementations
-				now: () => this.observeLocalPromise(Date.now()),
-				random: () => this.observeLocalPromise(Math.random()),
-				interval: (callback, frequency) => {
-					const transaction = this.observeLocalEventCallback(callback);
-					const interval = setInterval(_ => {
-						if (this.dead) {
-							transaction.close();
-							clearInterval(interval);
-						} else {
-							transaction.send();
-						}
-					}, frequency);
-					return transaction;
-				},
-				timeout: interval => this.observeLocalPromise(new Promise(resolve => setTimeout(() => resolve(), interval))),
-				broadcast: text => {
-					for (var i = 0; i < observers.length; i++) {
-						observers[i](text);
-					}
-				},
-				receive: callback => {
-					const transaction = this.observeLocalEventCallback(callback);
-					observers.push(text => transaction.send(text));
-					return transaction;
-				},
-				// Client-side implementations
-				render: (selector, html) => undefined,
-				observe: (selector, event, callback) => this.receiveRemoteEventStream(callback),
-				read: selector => this.receiveRemotePromise()
-			}
+		var context = Object.create(global);
+		context.concurrence = {
+			disconnect : this.destroy.bind(this),
+			receiveClientPromise: this.receiveRemotePromise.bind(this),
+			observeServerPromise: this.observeLocalPromise.bind(this),
+			receiveClientEventStream: this.receiveRemoteEventStream.bind(this),
+			observeServerEventCallback: this.observeLocalEventCallback.bind(this),
 		};
-		host.script.runInNewContext(this.context);
+		this.context = context;
+		host.script.runInNewContext(context);
 	}
 	processMessage(message) {
 		// Process messages in order

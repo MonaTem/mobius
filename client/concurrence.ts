@@ -1,6 +1,6 @@
 /// <reference path="../src/concurrence.d.ts" />
 
-const concurrence: Concurrence = (function(this: any) {
+namespace concurrence {
 	const defer = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { setTimeout(callback, 0) };
 
 	// Session state
@@ -9,7 +9,7 @@ const concurrence: Concurrence = (function(this: any) {
 		return (c == "x" ? r : (r & 3 | 8)).toString(16);
 	});
 	var activeConnectionCount = 0;
-	var dead = false;
+	export var dead = false;
 
 	// Message ordering
 	var outgoingMessageId = 0;
@@ -269,7 +269,34 @@ const concurrence: Concurrence = (function(this: any) {
 		};
 	}
 
-	function receiveRemotePromise() {
+	function sendEvent(event: any[]) {
+		if (dead) {
+			return Promise.reject(new Error("Session has died!"));
+		}
+		var result = new Promise(function(resolve) {
+			if (pendingTransactionCount) {
+				// Let server decide on the ordering of events since server-side transactions are active
+				var transactionId = event[0];
+				var fencedQueue = fencedLocalEvents[transactionId] || (fencedLocalEvents[transactionId] = []);
+				fencedQueue.push(resolve);
+				event[0] = -transactionId;
+			} else {
+				// No pending server-side transactions, resolve immediately
+				resolve();
+			}
+		});
+		// Queue an event to be sent to the server in the next flush
+		queuedLocalEvents.push(event);
+		if (queuedLocalEvents.length == 1) {
+			synchronizeTransactions();
+		}
+		return result;
+	}
+
+	export const disconnect = destroySession;
+
+	// APIs for client/, not to be used inside src/
+	export function receiveServerPromise() {
 		return new Promise(function(resolve, reject) {
 			var transaction = registerRemoteTransaction(function(event) {
 				transaction.close();
@@ -298,9 +325,9 @@ const concurrence: Concurrence = (function(this: any) {
 				}
 			});
 		});
-	}
+	};
 
-	function receiveRemoteEventStream<T>(callback: (value: T) => void, ...args: any[]) {
+	export function receiveServerEventStream<T>(callback: (value: T) => void, ...args: any[]): ConcurrenceTransaction {
 		var transaction = registerRemoteTransaction(function(event) {
 			if (event) {
 				event.shift();
@@ -312,31 +339,7 @@ const concurrence: Concurrence = (function(this: any) {
 		return transaction;
 	}
 
-	function sendEvent(event: any[]) {
-		if (dead) {
-			return Promise.reject(new Error("Session has died!"));
-		}
-		var result = new Promise(function(resolve) {
-			if (pendingTransactionCount) {
-				// Let server decide on the ordering of events since server-side transactions are active
-				var transactionId = event[0];
-				var fencedQueue = fencedLocalEvents[transactionId] || (fencedLocalEvents[transactionId] = []);
-				fencedQueue.push(resolve);
-				event[0] = -transactionId;
-			} else {
-				// No pending server-side transactions, resolve immediately
-				resolve();
-			}
-		});
-		// Queue an event to be sent to the server in the next flush
-		queuedLocalEvents.push(event);
-		if (queuedLocalEvents.length == 1) {
-			synchronizeTransactions();
-		}
-		return result;
-	}
-
-	function observeLocalPromise<T>(value: Promise<T>) : Promise<T> {
+	export function observeClientPromise<T>(value: Promise<T> | T) : Promise<T> {
 		var transactionId = ++localTransactionCounter;
 		return Promise.resolve(value).then(value => sendEvent([transactionId, value]).then(() => value), error => {
 			// Convert Error types to a representation that can be reconstituted on the server
@@ -360,9 +363,9 @@ const concurrence: Concurrence = (function(this: any) {
 			}
 			return sendEvent([transactionId, serializedError, type]).then(() => Promise.reject(error));
 		});
-	}
+	};
 
-	function observeLocalEventCallback(callback: (...args: any[]) => void) {
+	export function observeClientEventCallback(callback: (...args: any[]) => void) {
 		return {
 			transactionId: ++localTransactionCounter,
 			send: function() {
@@ -385,42 +388,4 @@ const concurrence: Concurrence = (function(this: any) {
 			}
 		};
 	}
-
-	// Client-side version of the API
-	return {
-		disconnect: destroySession,
-		// Server-side implementations
-		now: receiveRemotePromise as () => Promise<number>,
-		random: receiveRemotePromise as () => Promise<number>,
-		interval: receiveRemoteEventStream as (callback: () => void, millis: number) => any,
-		timeout: receiveRemotePromise as () => Promise<void>,
-		broadcast: (text: string) => {},
-		receive: receiveRemoteEventStream as (callback: (value: string) => void) => any,
-		// Client-side implementations
-		render: (selector: string, value: string) => {
-			var element: any = document.querySelector(selector)
-			if (element) {
-				if ("value" in element) {
-					element.value = value;
-				}
-				if ("innerText" in element && element.nodeName != "INPUT") {
-					element.innerText = value;
-				}
-			}
-		},
-		observe: (selector: string, event: string, callback: () => void) => {
-			var transaction = observeLocalEventCallback(callback);
-			var elements = document.querySelectorAll(selector);
-			for (var i = 0; i < elements.length; i++) {
-				elements[i].addEventListener(event, function() {
-					transaction.send();
-				}, false);
-			}
-			return transaction;
-		},
-		read: (selector: string) : Promise<string> => {
-			var element: any = document.querySelector(selector);
-			return observeLocalPromise(element && "value" in element ? Promise.resolve(element.value) : Promise.reject("Selector not found!"));
-		}
-	};
-})();
+}

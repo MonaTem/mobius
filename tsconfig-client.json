@@ -1,5 +1,6 @@
 {
 	"include": [
+		"client/concurrence.ts",
 		"client/**/*.ts",
 		"client/**/*.js",
 		"src/**/*.ts",

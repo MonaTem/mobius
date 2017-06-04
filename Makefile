@@ -6,10 +6,10 @@ BOTH_FILES = $(call rwildcard, src/, *.ts) $(call rwildcard, src/, *.js)
 CLIENT_FILES = $(call rwildcard, client/, *.ts) $(call rwildcard, client/, *.js)
 SERVER_FILES = $(call rwildcard, server/, *.ts) $(call rwildcard, server/, *.js)
 
-all: server.js public/client.js
+all: public/client.js server.js
 
 run: all
-	node index.js
+	node --trace-warnings index.js
 
 clean:
 	rm -f server.js public/client.js
