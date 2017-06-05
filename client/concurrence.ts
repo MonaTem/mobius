@@ -169,56 +169,51 @@ namespace concurrence {
 		}
 		activeConnectionCount++;
 		const messageId = outgoingMessageId++;
-		if (websocket) {
+		const existingSocket = websocket;
+		if (existingSocket) {
 			pendingSocketMessageIds.push(messageId);
 			const message = JSON.stringify(queuedLocalEvents).slice(1, -1);
-			if (websocket.readyState == 1) {
+			if (existingSocket.readyState == 1) {
 				// Send on open socket
 				queuedLocalEvents = [];
-				websocket.send(message);
+				existingSocket.send(message);
 			} else {
 				// Coordinate with existing WebSocket that's in the process of being opened,
 				// falling back to a form POST if necessary
 				const body = serializeMessage(messageId);
 				const existingSocketOpened = () => {
-					if (websocket) {
-						websocket.removeEventListener("open", existingSocketOpened, false);
-						websocket.removeEventListener("error", existingSocketErrored, false);
-						websocket.send(message);
-					}
+					existingSocket.removeEventListener("open", existingSocketOpened, false);
+					existingSocket.removeEventListener("error", existingSocketErrored, false);
+					existingSocket.send(message);
 				}
 				const existingSocketErrored = () => {
-					if (websocket) {
-						websocket.removeEventListener("open", existingSocketOpened, false);
-						websocket.removeEventListener("error", existingSocketErrored, false);
-						sendFormMessage(body, messageId);
-					}
+					existingSocket.removeEventListener("open", existingSocketOpened, false);
+					existingSocket.removeEventListener("error", existingSocketErrored, false);
+					sendFormMessage(body, messageId);
 				}
-				websocket.addEventListener("open", existingSocketOpened, false);
-				websocket.addEventListener("error", existingSocketErrored, false);
+				existingSocket.addEventListener("open", existingSocketOpened, false);
+				existingSocket.addEventListener("error", existingSocketErrored, false);
 			}
 			return;
 		}
 		// Message will be sent in query string of new connection
 		const body = serializeMessage(messageId);
 		if (attemptWebSockets && WebSocketClass) {
-			// Attempt to open a WebSocket for transactions, but not heartbeats
-			const newSocketOpened = () => {
-				if (websocket) {
-					websocket.removeEventListener("open", newSocketOpened, false);
-					websocket.removeEventListener("error", newSocketErrored, false);
-				}
-			}
-			const newSocketErrored = () => {
-				// WebSocket failed, fallback using form POSTs
-				newSocketOpened();
-				WebSocketClass = undefined;
-				websocket = undefined;
-				pendingSocketMessageIds = [];
-				sendFormMessage(body, messageId);
-			}
 			try {
 				const newSocket = websocket = new WebSocketClass(location.href.replace(/^http/, "ws") + "?" + body);
+				// Attempt to open a WebSocket for transactions, but not heartbeats
+				const newSocketOpened = () => {
+					newSocket.removeEventListener("open", newSocketOpened, false);
+					newSocket.removeEventListener("error", newSocketErrored, false);
+				}
+				const newSocketErrored = () => {
+					// WebSocket failed, fallback using form POSTs
+					newSocketOpened();
+					WebSocketClass = undefined;
+					websocket = undefined;
+					pendingSocketMessageIds = [];
+					sendFormMessage(body, messageId);
+				}
 				newSocket.addEventListener("open", newSocketOpened, false);
 				newSocket.addEventListener("error", newSocketErrored, false);
 				newSocket.addEventListener("message", (event: any) => {
