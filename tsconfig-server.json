@@ -13,6 +13,7 @@
 		"strict": true,
 		"strictNullChecks": true,
 		"noUnusedLocals": true,
+		"noImplicitThis": true,
 		"module": "none",
 		"target": "es2017",
 		"downlevelIteration": false,
