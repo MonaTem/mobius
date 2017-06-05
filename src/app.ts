@@ -8,12 +8,12 @@ Promise.all([concurrence.random(), concurrence.random()]).then(value => {
 });
 
 // Stream of events from server to client
-var randomStream : any;
+var randomStream : ConcurrenceTransaction | undefined;
 function toggleRandoms() {
 	if (randomStream) {
 		console.log("Destroying random stream");
 		randomStream.close();
-		randomStream = null;
+		randomStream = undefined;
 	} else {
 		console.log("Starting random stream");
 		randomStream = concurrence.interval(() => {
