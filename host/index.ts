@@ -1,27 +1,30 @@
-const path = require("path");
-const fs = require("fs");
-const util = require("util");
-const uuid = require("uuid/v4");
+import * as path from "path";
+import * as fs from "fs";
+import * as util from "util";
 
-const vm = require("vm");
+import * as vm from "vm";
 
-const express = require("express");
+import * as express from "express";
+import * as bodyParser from "body-parser";
+import * as qs from "qs";
 const expressWs = require("express-ws");
-const bodyParser = require("body-parser");
-const qs = require("qs");
+
 const server = express();
 
-const relativePath = relative => path.join(__dirname, relative);
+const relativePath = (relative: string) => path.join(__dirname, relative);
 
 server.disable("x-powered-by");
 server.disable("etag");
 
-server.use(express.static(relativePath("public")));
+server.use(express.static(relativePath("../public")));
 
 class ConcurrenceHost {
-	constructor(path) {
+	sessions: { [key: string]: ConcurrenceSession; } = {};
+	script: vm.Script;
+	staleSessionTimeout: any;
+	constructor(path: string) {
 		this.sessions = {};
-		this.script = new vm.Script(fs.readFileSync(path), {
+		this.script = new vm.Script(fs.readFileSync(path).toString(), {
 			filename: path
 		});
 		this.staleSessionTimeout = setInterval(() => {
@@ -35,7 +38,7 @@ class ConcurrenceHost {
 			}
 		}, 60 * 1000);
 	}
-	sessionById(sessionID) {
+	sessionById(sessionID: string) {
 		var session = this.sessions[sessionID];
 		if (!session) {
 			if (!sessionID) {
@@ -46,7 +49,7 @@ class ConcurrenceHost {
 		}
 		return session;
 	}
-	destroySessionById(sessionID) {
+	destroySessionById(sessionID: string) {
 		const session = this.sessions[sessionID];
 		if (session) {
 			session.destroy();
@@ -62,21 +65,41 @@ class ConcurrenceHost {
 	}
 }
 
-const globals = this;
+type ConcurrenceEvent = [number] | [number, any] | [number, any, any];
+
+interface ConcurrenceMessage {
+	events: string | undefined;
+	messageID: string | number | undefined;
+}
 
 class ConcurrenceSession {
-	constructor(host, sessionID) {
+	host: ConcurrenceHost;
+	sessionID: string;
+	dead: boolean = false;
+	lastMessageTime: number = Date.now();
+	localTransactionCounter: number = 0;
+	localTransactionCount: number = 0;
+	remoteTransactionCounter: number = 0;
+	pendingTransactions: { [transactionId: number]: (event: ConcurrenceEvent) => void; } = {};
+	pendingTransactionCount: number = 0;
+	incomingMessageId: number = 0;
+	reorderedMessages: ConcurrenceMessage[] = [];
+	context: any;
+	queuedLocalEvents: ConcurrenceEvent[];
+	queuedLocalEventsResolve: (events: ConcurrenceEvent[] | undefined) => void | undefined;
+	localResolveTimeout: NodeJS.Timer | undefined;
+	constructor(host: ConcurrenceHost, sessionID: string) {
 		this.host = host;
 		this.sessionID = sessionID;
-		this.dead = false;
-		this.localTransactionCounter = 0;
-		this.localTransactionCount = 0;
-		this.remoteTransactionCounter = 0;
-		this.pendingTransactions = {};
-		this.pendingTransactionCount = 0;
-		this.incomingMessageId = 0;
-		this.reorderedMessages = [];
-		this.lastMessageTime = Date.now();
+		// this.dead = false;
+		// this.localTransactionCounter = 0;
+		// this.localTransactionCount = 0;
+		// this.remoteTransactionCounter = 0;
+		// this.pendingTransactions = {};
+		// this.pendingTransactionCount = 0;
+		// this.incomingMessageId = 0;
+		// this.reorderedMessages = [];
+		// this.lastMessageTime = Date.now();
 		// Server-side version of the API
 		var context = Object.create(global);
 		context.concurrence = {
@@ -89,9 +112,9 @@ class ConcurrenceSession {
 		this.context = context;
 		host.script.runInNewContext(context);
 	}
-	processMessage(message) {
+	processMessage(message: ConcurrenceMessage) {
 		// Process messages in order
-		const messageId = message.messageID | 0;
+		const messageId = (message.messageID as any) | 0;
 		if (messageId > this.incomingMessageId) {
 			return false;
 		}
@@ -122,7 +145,7 @@ class ConcurrenceSession {
 		}
 		return true;
 	}
-	receiveMessage(message) {
+	receiveMessage(message: ConcurrenceMessage) {
 		this.lastMessageTime = Date.now();
 		if (this.processMessage(message)) {
 			// Process any messages we received out of order
@@ -138,8 +161,8 @@ class ConcurrenceSession {
 		this.reorderedMessages.push(message);
 		return false;
 	}
-	dequeueEvents() {
-		return new Promise((resolve, reject) => {
+	dequeueEvents() : Promise<ConcurrenceEvent[] | undefined> {
+		return new Promise<ConcurrenceEvent[] | undefined>((resolve, reject) => {
 			// Wait until events are ready, a new event handler comes in, or no more local transactions exist
 			const queuedLocalEvents = this.queuedLocalEvents;
 			const oldResolve = this.queuedLocalEventsResolve;
@@ -153,7 +176,7 @@ class ConcurrenceSession {
 				}
 			} else if (this.localTransactionCount) {
 				if (oldResolve) {
-					oldResolve();
+					oldResolve(undefined);
 				}
 			} else {
 				resolve();
@@ -166,7 +189,7 @@ class ConcurrenceSession {
 			this.localResolveTimeout = setTimeout(resolve, 30000);
 		});
 	}
-	sendEvent(event) {
+	sendEvent(event: ConcurrenceEvent) {
 		if (this.dead) {
 			throw new Error("Session has died!");
 		}
@@ -200,7 +223,7 @@ class ConcurrenceSession {
 			}
 		});
 	}
-	observeLocalPromise(value) {
+	observeLocalPromise<T>(value: Promise<T> | T): Promise<T> {
 		// Record and ship values/errors of server-side promises
 		this.localTransactionCount++;
 		const transactionId = ++this.localTransactionCounter;
@@ -210,7 +233,7 @@ class ConcurrenceSession {
 			return value;
 		}, error => {
 			this.localTransactionCount--;
-			var type = 1;
+			var type: number | string = 1;
 			var serializedError = error;
 			if (error instanceof Error) {
 				// Convert Error types to a representation that can be reconstituted on the client
@@ -221,24 +244,25 @@ class ConcurrenceSession {
 			return error;
 		});
 	}
-	observeLocalEventCallback(callback) {
+	observeLocalEventCallback<T extends Function>(callback: T): ConcurrenceLocalTransaction<T> {
 		// Record and ship arguments of server-side events
 		const session = this;
 		session.localTransactionCount++;
+		var transactionId = ++this.localTransactionCounter;
 		return {
-			transactionId: ++this.localTransactionCounter,
 			send: function() {
-				const transactionId = this.transactionId;
-				if (transactionId != null) {
-					const message = Array.prototype.slice.call(arguments);
-					message.unshift(transactionId);
-					session.sendEvent(message);
-					return callback.apply(null, arguments);
+				if (transactionId >= 0) {
+					if (!session.dead) {
+						const message = Array.prototype.slice.call(arguments);
+						message.unshift(transactionId);
+						session.sendEvent(message);
+					}
+					(callback as any as Function).apply(null, arguments);
 				}
-			},
+			} as any as T,
 			close: function() {
-				if (this.transactionId != null) {
-					this.transactionId = null;
+				if (transactionId >= 0) {
+					transactionId = -1;
 					if ((--session.localTransactionCount) == 0) {
 						// If this was the last server transaction, reevaluate queued events so the session can be potentially collected
 						session.sendQueuedEvents();
@@ -248,7 +272,7 @@ class ConcurrenceSession {
 		};
 	}
 
-	registerRemoteTransaction(callback) {
+	registerRemoteTransaction(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceTransaction {
 		if (this.dead) {
 			throw new Error("Session has died!");
 		}
@@ -269,7 +293,7 @@ class ConcurrenceSession {
 	}
 	receiveRemotePromise() {
 		return new Promise((resolve, reject) => {
-			const transaction = this.registerRemoteTransaction(function(event) {
+			const transaction = this.registerRemoteTransaction(event => {
 				transaction.close();
 				if (!event) {
 					reject(new Error("Disconnected from client!"));
@@ -278,9 +302,9 @@ class ConcurrenceSession {
 					var type = event[2];
 					if (type) {
 						// Convert serialized representation into the appropriate Error type
-						if (type !== 1) {
-							type = globals[type] || Error;
-							var newValue = new type(value.message);
+						if (type !== 1 && /Error$/.test(type)) {
+							var ErrorType : typeof Error = (global as any)[type] || Error;
+							var newValue = new ErrorType(value.message);
 							delete value.message;
 							value = Object.assign(newValue, value);
 						}
@@ -292,7 +316,7 @@ class ConcurrenceSession {
 			});
 		});
 	}
-	receiveRemoteEventStream(callback) {
+	receiveRemoteEventStream(callback: (event: ConcurrenceEvent | undefined) => void): ConcurrenceTransaction {
 		const transaction = this.registerRemoteTransaction(function(event) {
 			if (event) {
 				event.shift();
@@ -313,7 +337,7 @@ class ConcurrenceSession {
 	}
 };
 
-function noCache(res) {
+function noCache(res: any) { // Express.Response doesn't seem to haveheader :'(
 	res.header("Cache-Control", "private, no-cache, no-store, must-revalidate");
 	res.header("Expires", new Date(0).toUTCString());
 	res.header("Pragma", "no-cache");
@@ -359,12 +383,12 @@ server.post("/", function(req, res) {
 });
 
 expressWs(server);
-server.ws("/", function(ws, req) {
+(server as any).ws("/", function(ws: any, req: any) {
 	const body = qs.parse(req.query);
 	const session = host.sessionById(body.sessionID);
 	var messageId = body.messageID | 0;
 	var closed = false;
-	function processMessage(body) {
+	function processMessage(body: ConcurrenceMessage) {
 		if (session.receiveMessage(body)) {
 			session.dequeueEvents().then(events => {
 				if (!closed) {
@@ -378,7 +402,7 @@ server.ws("/", function(ws, req) {
 		}
 	}
 	processMessage(body);
-	ws.on("message", function(msg) {
+	ws.on("message", function(msg: string) {
 		processMessage({
 			messageID: ++messageId,
 			events: msg,
@@ -391,7 +415,7 @@ server.ws("/", function(ws, req) {
 
 server.listen(3000, function() {
 	console.log("Listening on port 3000");
-	server.on("close", function() {
+	(server as any).on("close", function() {
 		host.destroy();
 	});
 });

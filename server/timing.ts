@@ -5,13 +5,13 @@ namespace concurrence {
 		return concurrence.observeServerPromise(Date.now());
 	}
 	export function interval(callback: () => void, millis: number): ConcurrenceTransaction {
-		const transaction = concurrence.observeServerEventCallback<void>(callback);
+		const transaction = concurrence.observeServerEventCallback<typeof callback>(callback);
 		const interval = setInterval(_ => {
 			if (concurrence.dead) {
 				transaction.close();
 				clearInterval(interval);
 			} else {
-				transaction.send(undefined);
+				transaction.send();
 			}
 		}, millis);
 		return transaction;

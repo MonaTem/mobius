@@ -10,9 +10,9 @@ namespace concurrence {
 		}
 	}
 	export function receive(callback: (value: string) => void): ConcurrenceTransaction {
-		const transaction = concurrence.observeServerEventCallback(callback);
+		const transaction = concurrence.observeServerEventCallback<typeof callback>(callback);
 		const observers = (global as any).observers || ((global as any).observers = []);
 		observers.push((text: string) => transaction.send(text));
-		return transaction
+		return transaction;
 	}
 }

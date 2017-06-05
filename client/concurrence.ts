@@ -31,7 +31,7 @@ namespace concurrence {
 	var heartbeatTimeout: any;
 
 	// Websocket support
-	var WebSocketClass: typeof WebSocket | undefined = WebSocket;
+	var WebSocketClass = (window as any).WebSocket as typeof WebSocket | undefined;
 	var websocket: WebSocket | undefined;
 	var pendingSocketMessageIds: number[] = [];
 
@@ -216,7 +216,7 @@ namespace concurrence {
 				const newSocket = websocket = new WebSocketClass(location.href.replace(/^http/, "ws") + "?" + body);
 				newSocket.addEventListener("open", newSocketOpened, false);
 				newSocket.addEventListener("error", newSocketErrored, false);
-				newSocket.addEventListener("message", function(event: any) {
+				newSocket.addEventListener("message", (event: any) => {
 					activeConnectionCount--;
 					var pendingId = pendingSocketMessageIds.shift();
 					if (typeof pendingId != "undefined") {
@@ -296,7 +296,7 @@ namespace concurrence {
 	export const disconnect = destroySession;
 
 	// APIs for client/, not to be used inside src/
-	export function receiveServerPromise() {
+	export function receiveServerPromise<T>(...args: any[]) : Promise<T> {
 		return new Promise(function(resolve, reject) {
 			var transaction = registerRemoteTransaction(function(event) {
 				transaction.close();
@@ -327,11 +327,10 @@ namespace concurrence {
 		});
 	};
 
-	export function receiveServerEventStream<T>(callback: (value: T) => void, ...args: any[]): ConcurrenceTransaction {
-		var transaction = registerRemoteTransaction(function(event) {
+	export function receiveServerEventStream<T extends Function>(callback: T): ConcurrenceTransaction {
+		const transaction = registerRemoteTransaction(event => {
 			if (event) {
-				event.shift();
-				callback.apply(null, event);
+				callback.apply(null, event.slice(1));
 			} else {
 				transaction.close();
 			}
@@ -365,26 +364,24 @@ namespace concurrence {
 		});
 	};
 
-	export function observeClientEventCallback(callback: (...args: any[]) => void) {
+	export function observeClientEventCallback<T extends Function>(callback: T) : ConcurrenceLocalTransaction<T> {
+		var transactionId: number = ++localTransactionCounter;
 		return {
-			transactionId: ++localTransactionCounter,
 			send: function() {
-				var transactionId = this.transactionId;
 				if (transactionId >= 0) {
 					var message = Array.prototype.slice.call(arguments);
 					var args = message.slice();
 					message.unshift(transactionId);
-					var transaction = this;
 					sendEvent(message).then(function() {
 						// Finally send event if a destroy call hasn't won the race
-						if (transaction.transactionId != null) {
-							callback.apply(null, args);
+						if (transactionId >= 0) {
+							(callback as any as Function).apply(null, args);
 						}
 					});
 				}
-			},
+			} as any as T,
 			close: function() {
-				this.transactionId = -1;
+				transactionId = -1;
 			}
 		};
 	}

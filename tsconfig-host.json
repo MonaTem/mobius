@@ -1,19 +1,16 @@
 {
 	"include": [
-		"server/concurrence.ts",
-		"server/**/*.ts",
-		"server/**/*.js",
-		"src/**/*.ts",
-		"src/**/*.js"
+		"src/concurrence.d.ts",
+		"host/index.ts"
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
-		"outFile": "build/server.js",
+		"outDir": "build/",
 		"allowJs": true,
 		"strict": true,
 		"strictNullChecks": true,
 		"noUnusedLocals": true,
-		"module": "none",
+		"module": "commonjs",
 		"target": "es2017",
 		"downlevelIteration": false,
 		"lib": [
