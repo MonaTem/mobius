@@ -381,8 +381,8 @@ namespace concurrence {
 		return {
 			send: function() {
 				if (transactionId >= 0) {
-					var message = Array.prototype.slice.call(arguments);
-					var args = message.slice();
+					const message = Array.prototype.slice.call(arguments);
+					const args = message.slice();
 					message.unshift(transactionId);
 					sendEvent(message).then(function() {
 						// Finally send event if a destroy call hasn't won the race

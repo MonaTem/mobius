@@ -28,7 +28,7 @@ class ConcurrenceHost {
 			filename: path
 		});
 		this.staleSessionTimeout = setInterval(() => {
-			var now = Date.now();
+			const now = Date.now();
 			for (var i in this.sessions) {
 				if (this.sessions.hasOwnProperty(i)) {
 					if (now - this.sessions[i].lastMessageTime > 5 * 60 * 1000) {
@@ -95,7 +95,7 @@ class ConcurrenceSession {
 		this.host = host;
 		this.sessionID = sessionID;
 		// Server-side version of the API
-		var context = Object.create(global);
+		const context = Object.create(global);
 		context.concurrence = {
 			disconnect : this.destroy.bind(this),
 			dead: false,
@@ -300,7 +300,7 @@ class ConcurrenceSession {
 					reject(new Error("Disconnected from client!"));
 				} else {
 					var value : any = event[1];
-					var type = event[2];
+					const type = event[2];
 					if (type) {
 						// Convert serialized representation into the appropriate Error type
 						if (type != 1 && /Error$/.test(type)) {
@@ -348,7 +348,7 @@ function noCache(res: express.Response) {
 	res.header("Pragma", "no-cache");
 }
 
-var host = new ConcurrenceHost(relativePath("server.js"));
+const host = new ConcurrenceHost(relativePath("server.js"));
 
 server.use(bodyParser.urlencoded({
 	extended: true,

@@ -26,10 +26,10 @@ function toggleRandoms() {
 	concurrence.render("#toggle", randomStream ? "Stop" : "Start");
 }
 toggleRandoms();
-var randomTransaction = concurrence.observe("#toggle", "click", toggleRandoms);
+const randomTransaction = concurrence.observe("#toggle", "click", toggleRandoms);
 
 // Read input from the client
-var logTransaction = concurrence.observe("#log", "click", () => {
+const logTransaction = concurrence.observe("#log", "click", () => {
 	concurrence.read("#input").then(value => console.log("Read input: " + value));
 });
 
@@ -48,10 +48,10 @@ function toggleReceive() {
 	concurrence.render("#connect", receiveStream ? "Disconnect" : "Connect");
 }
 toggleReceive();
-var receiveTransaction = concurrence.observe("#connect", "click", toggleReceive);
+const receiveTransaction = concurrence.observe("#connect", "click", toggleReceive);
 
 // Broadcast when button is pressed
-var broadcastTransaction = concurrence.observe("#broadcast", "click", () => {
+const broadcastTransaction = concurrence.observe("#broadcast", "click", () => {
 	concurrence.read("#broadcastField").then(value => {
 		console.log("Broadcasting: " + value);
 		concurrence.broadcast(value);
@@ -59,7 +59,7 @@ var broadcastTransaction = concurrence.observe("#broadcast", "click", () => {
 });
 
 // Disconnect all events
-var destroyTransaction = concurrence.observe("#destroy", "click", () => {
+const destroyTransaction = concurrence.observe("#destroy", "click", () => {
 	// Force disconnect
 	//concurrence.disconnect();
 	// Graceful disconnect by destroying all server-side streams
