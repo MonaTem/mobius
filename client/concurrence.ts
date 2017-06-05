@@ -10,6 +10,7 @@ namespace concurrence {
 		const r = Math.random() * 16 | 0;
 		return (c == "x" ? r : (r & 3 | 8)).toString(16);
 	});
+	const serverURL = location.href;
 	var activeConnectionCount = 0;
 	export var dead = false;
 
@@ -33,6 +34,7 @@ namespace concurrence {
 	var heartbeatTimeout: number | undefined;
 
 	// Websocket support
+	const socketURL = serverURL.replace(/^http/, "ws") + "?";
 	var WebSocketClass = (window as any).WebSocket as typeof WebSocket | undefined;
 	var websocket: WebSocket | undefined;
 	var pendingSocketMessageIds: number[] = [];
@@ -82,10 +84,10 @@ namespace concurrence {
 			const message = serializeMessage(outgoingMessageId++) + "&destroy=1";
 			sessionID = undefined;
 			if (navigator.sendBeacon) {
-				navigator.sendBeacon(location.href, message);
+				navigator.sendBeacon(serverURL, message);
 			} else {
 				const request = new XMLHttpRequest();
-				request.open("POST", location.href, false);
+				request.open("POST", serverURL, false);
 				request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
 				request.send(message);
 			}
@@ -148,7 +150,7 @@ namespace concurrence {
 	function sendFormMessage(body: string, messageId: number) {
 		// Form post over XMLHttpRequest is used when WebSockets are unavailable or fail
 		const request = new XMLHttpRequest();
-		request.open("POST", location.href, true);
+		request.open("POST", serverURL, true);
 		request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
 		request.onreadystatechange = () => {
 			if (request.readyState == 4) {
@@ -200,7 +202,7 @@ namespace concurrence {
 		const body = serializeMessage(messageId);
 		if (attemptWebSockets && WebSocketClass) {
 			try {
-				const newSocket = new WebSocketClass(location.href.replace(/^http/, "ws") + "?" + body);
+				const newSocket = new WebSocketClass(socketURL + body);
 				// Attempt to open a WebSocket for transactions, but not heartbeats
 				const newSocketOpened = () => {
 					newSocket.removeEventListener("open", newSocketOpened, false);
