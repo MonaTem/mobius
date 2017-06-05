@@ -361,7 +361,7 @@ namespace concurrence {
 					type = errorClass.name;
 				} else {
 					// ES5 support
-					type = errorClass.toString().match(/function (\w+)\(/)[1];
+					type = errorClass.toString().match(/.*? (\w+)/)[0];
 				}
 				serializedError = { message: error.message, stack: error.stack };
 				var anyError : any = error;
