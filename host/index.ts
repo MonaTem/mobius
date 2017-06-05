@@ -38,11 +38,14 @@ class ConcurrenceHost {
 			}
 		}, 60 * 1000);
 	}
-	sessionById(sessionID: string) {
+	sessionById(sessionID: string, createSession: boolean) {
 		var session = this.sessions[sessionID];
 		if (!session) {
 			if (!sessionID) {
-				throw new Error("Session ID not valid!");
+				throw new Error("No session ID specified!");
+			}
+			if (!createSession) {
+				throw new Error("Session ID is not valid!");
 			}
 			session = new ConcurrenceSession(this, sessionID);
 			this.sessions[session.sessionID] = session;
@@ -85,25 +88,17 @@ class ConcurrenceSession {
 	incomingMessageId: number = 0;
 	reorderedMessages: ConcurrenceMessage[] = [];
 	context: any;
-	queuedLocalEvents: ConcurrenceEvent[];
-	queuedLocalEventsResolve: (events: ConcurrenceEvent[] | undefined) => void | undefined;
+	queuedLocalEvents: ConcurrenceEvent[] | undefined;
+	queuedLocalEventsResolve: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
 	localResolveTimeout: NodeJS.Timer | undefined;
 	constructor(host: ConcurrenceHost, sessionID: string) {
 		this.host = host;
 		this.sessionID = sessionID;
-		// this.dead = false;
-		// this.localTransactionCounter = 0;
-		// this.localTransactionCount = 0;
-		// this.remoteTransactionCounter = 0;
-		// this.pendingTransactions = {};
-		// this.pendingTransactionCount = 0;
-		// this.incomingMessageId = 0;
-		// this.reorderedMessages = [];
-		// this.lastMessageTime = Date.now();
 		// Server-side version of the API
 		var context = Object.create(global);
 		context.concurrence = {
 			disconnect : this.destroy.bind(this),
+			dead: false,
 			receiveClientPromise: this.receiveRemotePromise.bind(this),
 			observeServerPromise: this.observeLocalPromise.bind(this),
 			receiveClientEventStream: this.receiveRemoteEventStream.bind(this),
@@ -167,14 +162,16 @@ class ConcurrenceSession {
 			const queuedLocalEvents = this.queuedLocalEvents;
 			const oldResolve = this.queuedLocalEventsResolve;
 			if (queuedLocalEvents) {
-				delete this.queuedLocalEvents;
+				this.queuedLocalEvents = undefined;
 				if (oldResolve) {
+					this.queuedLocalEventsResolve = resolve;
 					oldResolve(queuedLocalEvents);
 				} else {
 					resolve(queuedLocalEvents);
 					return;
 				}
 			} else if (this.localTransactionCount) {
+				this.queuedLocalEventsResolve = resolve;
 				if (oldResolve) {
 					oldResolve(undefined);
 				}
@@ -182,7 +179,6 @@ class ConcurrenceSession {
 				resolve();
 				return;
 			}
-			this.queuedLocalEventsResolve = resolve;
 			if (this.localResolveTimeout !== undefined) {
 				clearTimeout(this.localResolveTimeout);
 			}
@@ -207,13 +203,13 @@ class ConcurrenceSession {
 		setImmediate(() => {
 			const resolve = this.queuedLocalEventsResolve;
 			if (resolve) {
-				delete this.queuedLocalEventsResolve;
+				this.queuedLocalEventsResolve = undefined;
 				const queuedLocalEvents = this.queuedLocalEvents;
-				delete this.queuedLocalEvents;
+				this.queuedLocalEvents = undefined;
 				resolve(queuedLocalEvents);
 				if (this.localResolveTimeout !== undefined) {
 					clearTimeout(this.localResolveTimeout);
-					delete this.localResolveTimeout;
+					this.localResolveTimeout = undefined;
 				}
 			}
 			// If no transactions remain, the session is in a state where no more events
@@ -228,10 +224,12 @@ class ConcurrenceSession {
 		this.localTransactionCount++;
 		const transactionId = ++this.localTransactionCounter;
 		return Promise.resolve(value).then(value => {
+			// Forward the value to the client
 			this.localTransactionCount--;
 			this.sendEvent([transactionId, value]);
 			return value;
 		}, error => {
+			// Serialize the reject error type or string
 			this.localTransactionCount--;
 			var type: number | string = 1;
 			var serializedError = error;
@@ -245,6 +243,9 @@ class ConcurrenceSession {
 		});
 	}
 	observeLocalEventCallback<T extends Function>(callback: T): ConcurrenceLocalTransaction<T> {
+		if (!("call" in callback)) {
+			throw new TypeError("callback is not a function!");
+		}
 		// Record and ship arguments of server-side events
 		const session = this;
 		session.localTransactionCount++;
@@ -298,13 +299,13 @@ class ConcurrenceSession {
 				if (!event) {
 					reject(new Error("Disconnected from client!"));
 				} else {
-					var value = event[1];
+					var value : any = event[1];
 					var type = event[2];
 					if (type) {
 						// Convert serialized representation into the appropriate Error type
-						if (type !== 1 && /Error$/.test(type)) {
-							var ErrorType : typeof Error = (global as any)[type] || Error;
-							var newValue = new ErrorType(value.message);
+						if (type != 1 && /Error$/.test(type)) {
+							const ErrorType : typeof Error = (global as any)[type] || Error;
+							const newValue = new ErrorType(value.message);
 							delete value.message;
 							value = Object.assign(newValue, value);
 						}
@@ -316,7 +317,10 @@ class ConcurrenceSession {
 			});
 		});
 	}
-	receiveRemoteEventStream(callback: (event: ConcurrenceEvent | undefined) => void): ConcurrenceTransaction {
+	receiveRemoteEventStream<T extends Function>(callback: T): ConcurrenceTransaction {
+		if (!("call" in callback)) {
+			throw new TypeError("callback is not a function!");
+		}
 		const transaction = this.registerRemoteTransaction(function(event) {
 			if (event) {
 				event.shift();
@@ -331,13 +335,14 @@ class ConcurrenceSession {
 	destroy() {
 		if (!this.dead) {
 			this.dead = true;
+			this.context.concurrence.dead = true;
 			this.sendQueuedEvents();
 			delete this.host.sessions[this.sessionID];
 		}
 	}
 };
 
-function noCache(res: any) { // Express.Response doesn't seem to haveheader :'(
+function noCache(res: express.Response) {
 	res.header("Cache-Control", "private, no-cache, no-store, must-revalidate");
 	res.header("Expires", new Date(0).toUTCString());
 	res.header("Pragma", "no-cache");
@@ -351,8 +356,8 @@ server.use(bodyParser.urlencoded({
 }));
 
 server.post("/", function(req, res) {
-	noCache(res);
 	new Promise(resolve => {
+		noCache(res);
 		if (req.body.destroy) {
 			// Forcefully clean up sessions
 			host.destroySessionById(req.body.sessionID);
@@ -361,8 +366,9 @@ server.post("/", function(req, res) {
 			resolve();
 		} else {
 			// Process incoming events
-			const session = host.sessionById(req.body.sessionID);
-			if (session.receiveMessage(req.body)) {
+			const body = req.body;
+			const session = host.sessionById(body.sessionID, (body.messageID | 0) == 0);
+			if (session.receiveMessage(body)) {
 				// Wait to send the response until we have events ready or until there are no more server-side transactions open
 				resolve(session.dequeueEvents().then(events => {
 					res.set("Content-Type", "text/plain");
@@ -383,34 +389,39 @@ server.post("/", function(req, res) {
 });
 
 expressWs(server);
-(server as any).ws("/", function(ws: any, req: any) {
-	const body = qs.parse(req.query);
-	const session = host.sessionById(body.sessionID);
-	var messageId = body.messageID | 0;
-	var closed = false;
-	function processMessage(body: ConcurrenceMessage) {
-		if (session.receiveMessage(body)) {
-			session.dequeueEvents().then(events => {
-				if (!closed) {
-					ws.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
-				} else {
-					session.destroy();
-				}
-			});
-		} else {
-			ws.send("");
+(server as any).ws("/", function(ws: any, req: express.Request) {
+	try {
+		const body = qs.parse(req.query);
+		var messageId = body.messageID | 0;
+		const session = host.sessionById(body.sessionID, messageId == 0);
+		var closed = false;
+		function processMessage(body: ConcurrenceMessage) {
+			if (session.receiveMessage(body)) {
+				session.dequeueEvents().then(events => {
+					if (!closed) {
+						ws.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
+					} else {
+						session.destroy();
+					}
+				});
+			} else {
+				ws.send("");
+			}
 		}
-	}
-	processMessage(body);
-	ws.on("message", function(msg: string) {
-		processMessage({
-			messageID: ++messageId,
-			events: msg,
+		processMessage(body);
+		ws.on("message", function(msg: string) {
+			processMessage({
+				messageID: ++messageId,
+				events: msg,
+			});
 		});
-	});
-	ws.on("close", function() {
-		closed = true;
-	});
+		ws.on("close", function() {
+			closed = true;
+		});
+	} catch (e) {
+		console.log(e);
+		ws.close();
+	}
 });
 
 server.listen(3000, function() {

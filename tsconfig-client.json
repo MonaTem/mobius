@@ -16,6 +16,7 @@
 		"module": "none",
 		"target": "es3",
 		"downlevelIteration": true,
+		"typeRoots" : [],
 		"lib": [
 			"es5",
 			"dom",

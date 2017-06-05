@@ -3,9 +3,11 @@
 namespace concurrence {
 	const defer = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { setTimeout(callback, 0) };
 
+	type ConcurrenceEvent = [number] | [number, any] | [number, any, any];
+
 	// Session state
 	var sessionID: string | undefined = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
-		var r = Math.random() * 16 | 0;
+		const r = Math.random() * 16 | 0;
 		return (c == "x" ? r : (r & 3 | 8)).toString(16);
 	});
 	var activeConnectionCount = 0;
@@ -14,21 +16,21 @@ namespace concurrence {
 	// Message ordering
 	var outgoingMessageId = 0;
 	var incomingMessageId = 0;
-	var reorderedMessages : any[][] = [];
+	const reorderedMessages : [ConcurrenceEvent[], number][] = [];
 
 	// Remote transactions
 	var remoteTransactionCounter = 0;
-	var pendingTransactions : { [key: number]: (event: any[] | undefined) => void; } = {};
+	const pendingTransactions : { [key: number]: (event: ConcurrenceEvent | undefined) => void; } = {};
 	var pendingTransactionCount = 0;
 
 	// Local transactions
 	var localTransactionCounter = 0;
-	var queuedLocalEvents: any[] = [];
-	var fencedLocalEvents: { [key: number]: ((event: any[]) => void)[]; } = {};
+	var queuedLocalEvents: ConcurrenceEvent[] = [];
+	const fencedLocalEvents: { [key: number]: ((event: ConcurrenceEvent) => void)[]; } = {};
 
 	// Heartbeat
-	var sessionHeartbeatInterval = 4 * 60 * 1000;
-	var heartbeatTimeout: any;
+	const sessionHeartbeatInterval = 4 * 60 * 1000;
+	var heartbeatTimeout: number | undefined;
 
 	// Websocket support
 	var WebSocketClass = (window as any).WebSocket as typeof WebSocket | undefined;
@@ -77,12 +79,12 @@ namespace concurrence {
 				pendingTransactions[transactionId](undefined);
 			}
 			// Send a "destroy" message so that the server can clean up the session
-			var message = serializeMessage(outgoingMessageId++) + "&destroy=1";
+			const message = serializeMessage(outgoingMessageId++) + "&destroy=1";
 			sessionID = undefined;
 			if (navigator.sendBeacon) {
 				navigator.sendBeacon(location.href, message);
 			} else {
-				var request = new XMLHttpRequest();
+				const request = new XMLHttpRequest();
 				request.open("POST", location.href, false);
 				request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
 				request.send(message);
@@ -91,7 +93,7 @@ namespace concurrence {
 	}
 	window.addEventListener("unload", destroySession, false);
 
-	function processMessage(events: any[][], messageId: number) {
+	function processMessage(events: ConcurrenceEvent[], messageId: number) {
 		// Process messages in order
 		if (messageId > incomingMessageId) {
 			return false;
@@ -127,7 +129,7 @@ namespace concurrence {
 	}
 
 	function receiveMessage(messageText: string, messageId: number) {
-		var message = messageText.length ? JSON.parse("[" + messageText + "]") : [];
+		const message: ConcurrenceEvent[] = messageText.length ? JSON.parse("[" + messageText + "]") : [];
 		if (processMessage(message, messageId)) {
 			// Process any messages we received out of order
 			for (var i = 0; i < reorderedMessages.length; i++) {
@@ -144,7 +146,8 @@ namespace concurrence {
 	}
 
 	function sendFormMessage(body: string, messageId: number) {
-		var request = new XMLHttpRequest();
+		// Form post over XMLHttpRequest is used when WebSockets are unavailable or fail
+		const request = new XMLHttpRequest();
 		request.open("POST", location.href, true);
 		request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
 		request.onreadystatechange = () => {
@@ -165,25 +168,26 @@ namespace concurrence {
 			restartHeartbeat();
 		}
 		activeConnectionCount++;
-		var messageId = outgoingMessageId++;
+		const messageId = outgoingMessageId++;
 		if (websocket) {
 			pendingSocketMessageIds.push(messageId);
-			var message = JSON.stringify(queuedLocalEvents).slice(1, -1);
+			const message = JSON.stringify(queuedLocalEvents).slice(1, -1);
 			if (websocket.readyState == 1) {
+				// Send on open socket
 				queuedLocalEvents = [];
 				websocket.send(message);
 			} else {
 				// Coordinate with existing WebSocket that's in the process of being opened,
 				// falling back to a form POST if necessary
-				var body = serializeMessage(messageId);
-				var existingSocketOpened = () => {
+				const body = serializeMessage(messageId);
+				const existingSocketOpened = () => {
 					if (websocket) {
 						websocket.removeEventListener("open", existingSocketOpened, false);
 						websocket.removeEventListener("error", existingSocketErrored, false);
 						websocket.send(message);
 					}
 				}
-				var existingSocketErrored = () => {
+				const existingSocketErrored = () => {
 					if (websocket) {
 						websocket.removeEventListener("open", existingSocketOpened, false);
 						websocket.removeEventListener("error", existingSocketErrored, false);
@@ -195,16 +199,17 @@ namespace concurrence {
 			}
 			return;
 		}
-		var body = serializeMessage(messageId);
+		// Message will be sent in query string of new connection
+		const body = serializeMessage(messageId);
 		if (attemptWebSockets && WebSocketClass) {
 			// Attempt to open a WebSocket for transactions, but not heartbeats
-			var newSocketOpened = () => {
+			const newSocketOpened = () => {
 				if (websocket) {
 					websocket.removeEventListener("open", newSocketOpened, false);
 					websocket.removeEventListener("error", newSocketErrored, false);
 				}
 			}
-			var newSocketErrored = () => {
+			const newSocketErrored = () => {
 				// WebSocket failed, fallback using form POSTs
 				newSocketOpened();
 				WebSocketClass = undefined;
@@ -218,7 +223,7 @@ namespace concurrence {
 				newSocket.addEventListener("error", newSocketErrored, false);
 				newSocket.addEventListener("message", (event: any) => {
 					activeConnectionCount--;
-					var pendingId = pendingSocketMessageIds.shift();
+					const pendingId = pendingSocketMessageIds.shift();
 					if (typeof pendingId != "undefined") {
 						receiveMessage(event.data, pendingId);
 					}
@@ -226,8 +231,10 @@ namespace concurrence {
 				pendingSocketMessageIds = [messageId];
 				return;
 			} catch (e) {
+				WebSocketClass = undefined;
 			}
 		}
+		// WebSockets failed fast or were unavailable
 		sendFormMessage(body, messageId);
 	}
 
@@ -249,13 +256,13 @@ namespace concurrence {
 		});
 	}
 
-	function registerRemoteTransaction(callback: (event: any) => void) {
+	function registerRemoteTransaction(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceTransaction {
 		if (dead) {
 			throw new Error("Session has died!");
 		}
 		// Expect that the server will run some code in parallel that provides data
 		pendingTransactionCount++;
-		var transactionId = ++remoteTransactionCounter;
+		const transactionId = ++remoteTransactionCounter;
 		pendingTransactions[transactionId] = callback;
 		synchronizeTransactions();
 		return {
@@ -269,15 +276,15 @@ namespace concurrence {
 		};
 	}
 
-	function sendEvent(event: any[]) {
+	function sendEvent(event: ConcurrenceEvent) : Promise<ConcurrenceEvent | undefined> {
 		if (dead) {
 			return Promise.reject(new Error("Session has died!"));
 		}
-		var result = new Promise(function(resolve) {
+		const result = new Promise<ConcurrenceEvent | undefined>((resolve, reject) => {
 			if (pendingTransactionCount) {
 				// Let server decide on the ordering of events since server-side transactions are active
-				var transactionId = event[0];
-				var fencedQueue = fencedLocalEvents[transactionId] || (fencedLocalEvents[transactionId] = []);
+				const transactionId = event[0];
+				const fencedQueue = fencedLocalEvents[transactionId] || (fencedLocalEvents[transactionId] = []);
 				fencedQueue.push(resolve);
 				event[0] = -transactionId;
 			} else {
@@ -296,29 +303,30 @@ namespace concurrence {
 	export const disconnect = destroySession;
 
 	// APIs for client/, not to be used inside src/
-	export function receiveServerPromise<T>(...args: any[]) : Promise<T> {
+	export function receiveServerPromise<T>(...args: any[]) : Promise<T> { // Must be cast to the proper signature
 		return new Promise(function(resolve, reject) {
-			var transaction = registerRemoteTransaction(function(event) {
+			const transaction = registerRemoteTransaction(function(event) {
 				transaction.close();
 				if (!event) {
 					reject(new Error("Disconnected from server!"));
 				} else {
-					var value = event[1];
-					var type = event[2];
+					const value = event[1];
+					const type = event[2];
 					if (type) {
 						// Convert serialized representation into the appropriate Error type
-						if (type !== 1) {
-							type = (window as any)[type] || Error;
-							var newValue = new type(value.message);
+						if (type != 1 && /Error$/.test(type)) {
+							const ErrorType : typeof Error = (window as any)[type] || Error;
+							const error: any = new ErrorType(value.message);
 							delete value.message;
 							for (var i in value) {
 								if (value.hasOwnProperty(i)) {
-									newValue[i] = value[i];
+									error[i] = value[i];
 								}
 							}
-							value = newValue;
+							reject(error);
+						} else {
+							reject(value);
 						}
-						reject(value);
 					} else {
 						resolve(value);
 					}
@@ -328,6 +336,9 @@ namespace concurrence {
 	};
 
 	export function receiveServerEventStream<T extends Function>(callback: T): ConcurrenceTransaction {
+		if (!("call" in callback)) {
+			throw new TypeError("callback is not a function!");
+		}
 		const transaction = registerRemoteTransaction(event => {
 			if (event) {
 				callback.apply(null, event.slice(1));
@@ -365,6 +376,9 @@ namespace concurrence {
 	};
 
 	export function observeClientEventCallback<T extends Function>(callback: T) : ConcurrenceLocalTransaction<T> {
+		if (!("call" in callback)) {
+			throw new TypeError("callback is not a function!");
+		}
 		var transactionId: number = ++localTransactionCounter;
 		return {
 			send: function() {
