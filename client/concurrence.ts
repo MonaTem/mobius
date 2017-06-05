@@ -200,7 +200,7 @@ namespace concurrence {
 		const body = serializeMessage(messageId);
 		if (attemptWebSockets && WebSocketClass) {
 			try {
-				const newSocket = websocket = new WebSocketClass(location.href.replace(/^http/, "ws") + "?" + body);
+				const newSocket = new WebSocketClass(location.href.replace(/^http/, "ws") + "?" + body);
 				// Attempt to open a WebSocket for transactions, but not heartbeats
 				const newSocketOpened = () => {
 					newSocket.removeEventListener("open", newSocketOpened, false);
@@ -224,6 +224,7 @@ namespace concurrence {
 					}
 				}, false);
 				pendingSocketMessageIds = [messageId];
+				websocket = newSocket;
 				return;
 			} catch (e) {
 				WebSocketClass = undefined;
