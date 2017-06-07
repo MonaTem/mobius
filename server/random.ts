@@ -1,5 +1,6 @@
 /// <reference path="concurrence.ts" />
 
 namespace concurrence {
-	export const random = () => concurrence.observeServerPromise<number>(Math.random());
+	const realRandom = concurrence.applyDeterminismWarning(Math, "random", "Math.random()", "concurrence.random()");
+	export const random = () => concurrence.observeServerPromise<number>(realRandom());
 }

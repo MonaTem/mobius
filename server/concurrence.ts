@@ -9,4 +9,6 @@ declare namespace concurrence {
 	export function observeServerPromise<T>(promise: Promise<T> | T): Promise<T>;
 	export function receiveClientEventStream<T extends Function>(callback: T): ConcurrenceTransaction;
 	export function observeServerEventCallback<T extends Function>(callback: T): ConcurrenceLocalTransaction<T>;
+	export function showDeterminismWarning(deprecated: string, instead: string): void;
+	export function applyDeterminismWarning<T, K extends keyof T>(parent: T, key: K, example: string, replacement: string): T[K];
 }

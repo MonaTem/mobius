@@ -18,6 +18,19 @@ server.disable("etag");
 
 server.use(express.static(relativePath("../public")));
 
+function showDeterminismWarning(deprecated: string, instead: string): void {
+	console.log("Called " + deprecated + " which may result in split-brain!\nInstead use " + instead + " " + (new Error() as any).stack.split(/\n\s*/g).slice(3).join("\n\t"));
+}
+
+function applyDeterminismWarning<T>(parent: T, key: keyof T, example: string, replacement: string): T[keyof T] {
+	const original = parent[key];
+	parent[key] = function(this: any) {
+		showDeterminismWarning(example, replacement);
+		return (original as any as Function).apply(this, arguments);
+	} as any as T[keyof T];
+	return original;
+}
+
 class ConcurrenceHost {
 	sessions: { [key: string]: ConcurrenceSession; } = {};
 	script: vm.Script;
@@ -96,6 +109,7 @@ class ConcurrenceSession {
 		this.sessionID = sessionID;
 		// Server-side version of the API
 		const context = Object.create(global);
+		context.global = context;
 		context.concurrence = {
 			disconnect : this.destroy.bind(this),
 			dead: false,
@@ -103,6 +117,8 @@ class ConcurrenceSession {
 			observeServerPromise: this.observeLocalPromise.bind(this),
 			receiveClientEventStream: this.receiveRemoteEventStream.bind(this),
 			observeServerEventCallback: this.observeLocalEventCallback.bind(this),
+			showDeterminismWarning: showDeterminismWarning,
+			applyDeterminismWarning: applyDeterminismWarning
 		};
 		this.context = context;
 		host.script.runInNewContext(context);
