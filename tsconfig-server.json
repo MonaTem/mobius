@@ -1,12 +1,16 @@
 {
 	"include": [
-		"server/concurrence.ts",
-		"server/**/*.ts",
-		"server/**/*.js",
-		"unified/**/*.ts",
-		"unified/**/*.js",
+		"api/concurrence-server.ts",
+		"api/**/*-server.ts",
+		"api/**/*-server.js",
+		"api/**/*.ts",
+		"api/**/*.js",
 		"src/**/*.ts",
 		"src/**/*.js"
+	],
+	"exclude": [
+		"api/**/*-client.ts",
+		"api/**/*-client.js"
 	],
 	"compilerOptions": {
 		"baseUrl": "./",

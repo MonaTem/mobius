@@ -2,10 +2,7 @@
 
 rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
 
-BOTH_FILES = $(call rwildcard, src/, *.ts) $(call rwildcard, src/, *.js) $(call rwildcard, unified/, *.ts) $(call rwildcard, unified/, *.js)
-CLIENT_FILES = $(call rwildcard, client/, *.ts) $(call rwildcard, client/, *.js)
-SERVER_FILES = $(call rwildcard, server/, *.ts) $(call rwildcard, server/, *.js)
-
+API_FILES = $(call rwildcard, api/, *.ts) $(call rwildcard, api/, *.js) $(call rwildcard, src/, *.ts) $(call rwildcard, src/, *.js)
 HOST_FILES = $(call rwildcard, host/, *.ts) $(call rwildcard, host/, *.js)
 
 all: public/client.js build/server.js build/index.js
@@ -22,11 +19,11 @@ cleaner: clean
 node_modules: package.json
 	npm install
 
-public/client.js: $(BOTH_FILES) $(CLIENT_FILES) tsconfig-client.json node_modules
+public/client.js: $(API_FILES) tsconfig-client.json node_modules
 	node_modules/typescript/bin/tsc -p tsconfig-client.json
 
-build/server.js: $(BOTH_FILES) $(SERVER_FILES) tsconfig-server.json node_modules
+build/server.js: $(API_FILES) tsconfig-server.json node_modules
 	node_modules/typescript/bin/tsc -p tsconfig-server.json
 
-build/index.js: $(HOST_FILES) unified/concurrence.d.ts tsconfig-host.json node_modules
+build/index.js: $(HOST_FILES) api/concurrence.d.ts tsconfig-host.json node_modules
 	node_modules/typescript/bin/tsc -p tsconfig-host.json

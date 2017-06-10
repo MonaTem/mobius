@@ -1,5 +1,3 @@
-/// <reference path="../unified/concurrence.d.ts" />
-
 namespace concurrence {
 	const defer = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { setTimeout(callback, 0) };
 

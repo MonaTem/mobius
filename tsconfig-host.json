@@ -1,6 +1,6 @@
 {
 	"include": [
-		"unified/concurrence.d.ts",
+		"api/concurrence.d.ts",
 		"host/index.ts"
 	],
 	"compilerOptions": {

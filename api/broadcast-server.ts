@@ -1,5 +1,3 @@
-/// <reference path="concurrence.ts" />
-
 namespace concurrence {
 	export function broadcast(text: string) {
 		const observers = (global as any).observers;

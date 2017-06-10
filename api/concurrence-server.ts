@@ -1,5 +1,4 @@
-/// <reference path="../unified/concurrence.d.ts" />
-/// <reference path="reduced-dom.d.ts" />
+/// <reference path="../types/reduced-dom.d.ts" />
 
 declare namespace concurrence {
 	export function disconnect(): void;

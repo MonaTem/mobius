@@ -1,5 +1,3 @@
-/// <reference path="concurrence.ts" />
-
 namespace concurrence {
 	// Override the Date object with one that shows determinism errors
 	// see: https://stackoverflow.com/a/22402079/4007
