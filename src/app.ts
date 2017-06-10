@@ -25,7 +25,6 @@ function toggleRandoms() {
 	}
 	concurrence.render("#toggle", randomStream ? "Stop" : "Start");
 }
-toggleRandoms();
 const randomTransaction = concurrence.observe("#toggle", "click", toggleRandoms);
 
 // Read input from the client
@@ -47,7 +46,6 @@ function toggleReceive() {
 	}
 	concurrence.render("#connect", receiveStream ? "Disconnect" : "Connect");
 }
-toggleReceive();
 const receiveTransaction = concurrence.observe("#connect", "click", toggleReceive);
 
 // Broadcast when button is pressed
