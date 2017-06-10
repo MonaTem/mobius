@@ -3,6 +3,8 @@
 		"client/concurrence.ts",
 		"client/**/*.ts",
 		"client/**/*.js",
+		"unified/**/*.ts",
+		"unified/**/*.js",
 		"src/**/*.ts",
 		"src/**/*.js"
 	],

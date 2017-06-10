@@ -9,14 +9,15 @@ import * as bodyParser from "body-parser";
 import * as qs from "qs";
 const expressWs = require("express-ws");
 
+import * as uuid from "uuid";
+import { JSDOM } from "jsdom";
+
 const server = express();
 
 const relativePath = (relative: string) => path.join(__dirname, relative);
 
 server.disable("x-powered-by");
 server.disable("etag");
-
-server.use(express.static(relativePath("../public")));
 
 function showDeterminismWarning(deprecated: string, instead: string): void {
 	console.log("Called " + deprecated + " which may result in split-brain!\nInstead use " + instead + " " + (new Error() as any).stack.split(/\n\s*/g).slice(3).join("\n\t"));
@@ -29,6 +30,10 @@ function applyDeterminismWarning<T>(parent: T, key: keyof T, example: string, re
 		return (original as any as Function).apply(this, arguments);
 	} as any as T[keyof T];
 	return original;
+}
+
+function immediate<T>(value: T) : Promise<T> {
+	return new Promise<T>(resolve => setImmediate(() => resolve(value)));
 }
 
 class ConcurrenceHost {
@@ -52,7 +57,7 @@ class ConcurrenceHost {
 		}, 60 * 1000);
 	}
 	sessionById(sessionID: string, createSession: boolean) {
-		var session = this.sessions[sessionID];
+		let session = this.sessions[sessionID];
 		if (!session) {
 			if (!sessionID) {
 				throw new Error("No session ID specified!");
@@ -61,9 +66,18 @@ class ConcurrenceHost {
 				throw new Error("Session ID is not valid!");
 			}
 			session = new ConcurrenceSession(this, sessionID);
-			this.sessions[session.sessionID] = session;
+			this.sessions[sessionID] = session;
+			session.run();
 		}
 		return session;
+	}
+	newSession() {
+		for (;;) {
+			const sessionID = uuid();
+			if (!this.sessions[sessionID]) {
+				return this.sessions[sessionID] = new ConcurrenceSession(this, sessionID);
+			}
+		}
 	}
 	destroySessionById(sessionID: string) {
 		const session = this.sessions[sessionID];
@@ -95,6 +109,7 @@ class ConcurrenceSession {
 	lastMessageTime: number = Date.now();
 	localTransactionCounter: number = 0;
 	localTransactionCount: number = 0;
+	localPrerenderTransactionCount: number = 0;
 	remoteTransactionCounter: number = 0;
 	pendingTransactions: { [transactionId: number]: (event: ConcurrenceEvent) => void; } = {};
 	pendingTransactionCount: number = 0;
@@ -103,6 +118,7 @@ class ConcurrenceSession {
 	context: any;
 	queuedLocalEvents: ConcurrenceEvent[] | undefined;
 	queuedLocalEventsResolve: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
+	prerenderCallback: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
 	localResolveTimeout: NodeJS.Timer | undefined;
 	constructor(host: ConcurrenceHost, sessionID: string) {
 		this.host = host;
@@ -110,6 +126,7 @@ class ConcurrenceSession {
 		// Server-side version of the API
 		const context = Object.create(global);
 		context.global = context;
+		context.document = undefined;
 		context.concurrence = {
 			disconnect : this.destroy.bind(this),
 			dead: false,
@@ -121,7 +138,9 @@ class ConcurrenceSession {
 			applyDeterminismWarning: applyDeterminismWarning
 		};
 		this.context = context;
-		host.script.runInNewContext(context);
+	}
+	run() {
+		host.script.runInNewContext(this.context);
 	}
 	processMessage(message: ConcurrenceMessage) {
 		// Process messages in order
@@ -216,7 +235,7 @@ class ConcurrenceSession {
 	}
 	sendQueuedEvents() {
 		// Basic implementation of batching by deferring the response
-		setImmediate(() => {
+		immediate(undefined).then(() => {
 			const resolve = this.queuedLocalEventsResolve;
 			if (resolve) {
 				this.queuedLocalEventsResolve = undefined;
@@ -235,18 +254,42 @@ class ConcurrenceSession {
 			}
 		});
 	}
-	observeLocalPromise<T>(value: Promise<T> | T): Promise<T> {
+	sendPrerender() {
+		const prerenderCallback = this.prerenderCallback;
+		if (prerenderCallback) {
+			++this.incomingMessageId;
+			this.prerenderCallback = undefined;
+			const queuedLocalEvents = this.queuedLocalEvents;
+			this.queuedLocalEvents = undefined;
+			immediate(queuedLocalEvents).then(prerenderCallback);
+		}
+	}
+	enterLocalTransaction(includedInPrerender: boolean = true) : number {
+		if (includedInPrerender) {
+			++this.localPrerenderTransactionCount;
+		}
+		return ++this.localTransactionCount;
+	}
+	exitLocalTransaction(includedInPrerender: boolean = true) : number {
+		if (includedInPrerender) {
+			if (--this.localPrerenderTransactionCount == 0) {
+				this.sendPrerender();
+			}
+		}
+		return --this.localTransactionCount;
+	}
+	observeLocalPromise<T>(value: Promise<T> | T, includedInPrerender: boolean = true): Promise<T> {
 		// Record and ship values/errors of server-side promises
-		this.localTransactionCount++;
+		this.enterLocalTransaction(includedInPrerender);
 		const transactionId = ++this.localTransactionCounter;
 		return Promise.resolve(value).then(value => {
 			// Forward the value to the client
-			this.localTransactionCount--;
+			this.exitLocalTransaction(includedInPrerender);
 			this.sendEvent([transactionId, value]);
 			return value;
 		}, error => {
 			// Serialize the reject error type or string
-			this.localTransactionCount--;
+			this.exitLocalTransaction(includedInPrerender);
 			var type: number | string = 1;
 			var serializedError = error;
 			if (error instanceof Error) {
@@ -258,14 +301,14 @@ class ConcurrenceSession {
 			return error;
 		});
 	}
-	observeLocalEventCallback<T extends Function>(callback: T): ConcurrenceLocalTransaction<T> {
+	observeLocalEventCallback<T extends Function>(callback: T, includedInPrerender: boolean = true): ConcurrenceLocalTransaction<T> {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
 		// Record and ship arguments of server-side events
 		const session = this;
-		session.localTransactionCount++;
-		var transactionId = ++this.localTransactionCounter;
+		session.enterLocalTransaction(includedInPrerender);
+		var transactionId = ++session.localTransactionCounter;
 		return {
 			send: function() {
 				if (transactionId >= 0) {
@@ -280,7 +323,7 @@ class ConcurrenceSession {
 			close: function() {
 				if (transactionId >= 0) {
 					transactionId = -1;
-					if ((--session.localTransactionCount) == 0) {
+					if (session.exitLocalTransaction(includedInPrerender) == 0) {
 						// If this was the last server transaction, reevaluate queued events so the session can be potentially collected
 						session.sendQueuedEvents();
 					}
@@ -352,6 +395,7 @@ class ConcurrenceSession {
 		if (!this.dead) {
 			this.dead = true;
 			this.context.concurrence.dead = true;
+			this.sendPrerender();
 			this.sendQueuedEvents();
 			delete this.host.sessions[this.sessionID];
 		}
@@ -370,6 +414,46 @@ server.use(bodyParser.urlencoded({
 	extended: true,
 	type: () => true // Accept all MIME types
 }));
+
+server.get("/", (req, res) => {
+	JSDOM.fromFile(relativePath("../public/index.html")).then(immediate).then(dom => {
+		const document = (dom.window as any).document as Document;
+		const clientScript = document.querySelector("script[src=\"client.js\"]");
+		if (clientScript) {
+			const session = host.newSession();
+			return new Promise<ConcurrenceEvent[] | undefined>(resolve => {
+				session.context.document = document;
+				++session.localPrerenderTransactionCount;
+				session.prerenderCallback = resolve;
+				session.run();
+				if (--session.localPrerenderTransactionCount == 0) {
+					session.sendPrerender();
+				}
+			}).then(events => {
+				session.context.document = undefined;
+				const bootstrapScript = document.createElement("script");
+				bootstrapScript.type = "application/x-concurrence-bootstrap";
+				bootstrapScript.appendChild(document.createTextNode(JSON.stringify({
+					"sessionID": session.sessionID,
+					"events": events
+				})));
+				clientScript.parentNode!.insertBefore(bootstrapScript, clientScript);
+				const serialized = dom.serialize();
+				noCache(res);
+				res.set("Content-Type", "text/html");
+				res.send(serialized);
+			});
+		}
+		const serialized = dom.serialize();
+		noCache(res);
+		res.set("Content-Type", "text/html");
+		res.send(serialized);
+	}).catch(e => {
+		res.status(500);
+		res.set("Content-Type", "text/plain");
+		res.send(util.inspect(e));
+	});
+});
 
 server.post("/", function(req, res) {
 	new Promise(resolve => {
@@ -439,6 +523,8 @@ expressWs(server);
 		ws.close();
 	}
 });
+
+server.use(express.static(relativePath("../public")));
 
 server.listen(3000, function() {
 	console.log("Listening on port 3000");

@@ -1,23 +1,44 @@
-/// <reference path="../src/concurrence.d.ts" />
+/// <reference path="../unified/concurrence.d.ts" />
 
 namespace concurrence {
 	const defer = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { setTimeout(callback, 0) };
 
 	type ConcurrenceEvent = [number] | [number, any] | [number, any, any];
 
-	// Session state
-	var sessionID: string | undefined = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
-		const r = Math.random() * 16 | 0;
-		return (c == "x" ? r : (r & 3 | 8)).toString(16);
-	});
-	const serverURL = location.href;
-	var activeConnectionCount = 0;
-	export var dead = false;
+	function uuid() : string {
+		return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+			const r = Math.random() * 16 | 0;
+			return (c == "x" ? r : (r & 3 | 8)).toString(16);
+		});
+	}
+
+	interface BootstrapData {
+		sessionID: string;
+		events: ConcurrenceEvent[];
+	}
 
 	// Message ordering
 	var outgoingMessageId = 0;
 	var incomingMessageId = 0;
 	const reorderedMessages : [ConcurrenceEvent[], number][] = [];
+
+	// Session state
+	var sessionID: string | undefined;
+	const bootstrapElement = document.querySelector("script[type=\"application/x-concurrence-bootstrap\"]");
+	if (bootstrapElement) {
+		bootstrapElement.parentNode!.removeChild(bootstrapElement);
+		const bootstrapData = JSON.parse(bootstrapElement.textContent || bootstrapElement.innerHTML) as BootstrapData;
+		sessionID = bootstrapData.sessionID;
+		++outgoingMessageId;
+		setTimeout(() => {
+			processMessage(bootstrapData.events, 0);
+		}, 0);
+	} else {
+		sessionID = uuid();
+	}
+	const serverURL = location.href;
+	var activeConnectionCount = 0;
+	export var dead = false;
 
 	// Remote transactions
 	var remoteTransactionCounter = 0;

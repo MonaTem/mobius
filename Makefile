@@ -2,7 +2,7 @@
 
 rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
 
-BOTH_FILES = $(call rwildcard, src/, *.ts) $(call rwildcard, src/, *.js)
+BOTH_FILES = $(call rwildcard, src/, *.ts) $(call rwildcard, src/, *.js) $(call rwildcard, unified/, *.ts) $(call rwildcard, unified/, *.js)
 CLIENT_FILES = $(call rwildcard, client/, *.ts) $(call rwildcard, client/, *.js)
 SERVER_FILES = $(call rwildcard, server/, *.ts) $(call rwildcard, server/, *.js)
 
@@ -28,5 +28,5 @@ public/client.js: $(BOTH_FILES) $(CLIENT_FILES) tsconfig-client.json node_module
 build/server.js: $(BOTH_FILES) $(SERVER_FILES) tsconfig-server.json node_modules
 	node_modules/typescript/bin/tsc -p tsconfig-server.json
 
-build/index.js: $(HOST_FILES) src/concurrence.d.ts tsconfig-host.json node_modules
+build/index.js: $(HOST_FILES) unified/concurrence.d.ts tsconfig-host.json node_modules
 	node_modules/typescript/bin/tsc -p tsconfig-host.json

@@ -1,17 +1,6 @@
 /// <reference path="concurrence.ts" />
 
 namespace concurrence {
-	export function render(selector: string, value: string) {
-		const element: any = document.querySelector(selector);
-		if (element) {
-			if ("value" in element) {
-				element.value = value;
-			}
-			if ("innerText" in element && element.nodeName != "INPUT") {
-				element.innerText = value;
-			}
-		}
-	}
 	export function observe(selector: string, event: string, callback: () => void) : ConcurrenceTransaction {
 		const transaction = concurrence.observeClientEventCallback(callback);
 		const elements = document.querySelectorAll(selector);

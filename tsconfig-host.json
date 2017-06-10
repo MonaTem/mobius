@@ -1,6 +1,6 @@
 {
 	"include": [
-		"src/concurrence.d.ts",
+		"unified/concurrence.d.ts",
 		"host/index.ts"
 	],
 	"compilerOptions": {
@@ -11,12 +11,14 @@
 		"strictNullChecks": true,
 		"noUnusedLocals": true,
 		"noImplicitThis": true,
+		"skipLibCheck": true,
 		"module": "commonjs",
 		"target": "es2017",
 		"downlevelIteration": false,
 		"lib": [
 			"es6",
-			"es2015.promise"
+			"es2015.promise",
+			"dom"
 		],
 		"types": [
 			"node"
