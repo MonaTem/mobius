@@ -118,7 +118,7 @@ class ConcurrenceSession {
 	context: any;
 	queuedLocalEvents: ConcurrenceEvent[] | undefined;
 	queuedLocalEventsResolve: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
-	prerenderCallback: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
+	prerenderCallback: ((events: ConcurrenceEvent[] | undefined, idle: boolean) => void) | undefined;
 	localResolveTimeout: NodeJS.Timer | undefined;
 	constructor(host: ConcurrenceHost, sessionID: string) {
 		this.host = host;
@@ -235,7 +235,7 @@ class ConcurrenceSession {
 	}
 	sendQueuedEvents() {
 		// Basic implementation of batching by deferring the response
-		immediate(undefined).then(() => {
+		return immediate(undefined).then(() => {
 			const resolve = this.queuedLocalEventsResolve;
 			if (resolve) {
 				this.queuedLocalEventsResolve = undefined;
@@ -255,14 +255,17 @@ class ConcurrenceSession {
 		});
 	}
 	sendPrerender() {
-		const prerenderCallback = this.prerenderCallback;
-		if (prerenderCallback) {
-			++this.incomingMessageId;
-			this.prerenderCallback = undefined;
-			const queuedLocalEvents = this.queuedLocalEvents;
-			this.queuedLocalEvents = undefined;
-			immediate(queuedLocalEvents).then(prerenderCallback);
-		}
+		return immediate(undefined).then(() => {
+			const prerenderCallback = this.prerenderCallback;
+			if (prerenderCallback) {
+				++this.incomingMessageId;
+				this.prerenderCallback = undefined;
+				const queuedLocalEvents = this.queuedLocalEvents;
+				this.queuedLocalEvents = undefined;
+				prerenderCallback(queuedLocalEvents, this.localTransactionCount == 0);
+				this.sendQueuedEvents();
+			}
+		});
 	}
 	enterLocalTransaction(includedInPrerender: boolean = true) : number {
 		if (includedInPrerender) {
@@ -415,39 +418,40 @@ server.use(bodyParser.urlencoded({
 	type: () => true // Accept all MIME types
 }));
 
+const indexHTML = fs.readFileSync(relativePath("../public/index.html")).toString();
+
 server.get("/", (req, res) => {
-	JSDOM.fromFile(relativePath("../public/index.html")).then(immediate).then(dom => {
+	new Promise(resolve => {
+		const dom = new JSDOM(indexHTML);
 		const document = (dom.window as any).document as Document;
 		const clientScript = document.querySelector("script[src=\"client.js\"]");
 		if (clientScript) {
 			const session = host.newSession();
-			return new Promise<ConcurrenceEvent[] | undefined>(resolve => {
+			return resolve(new Promise(resolve => {
 				session.context.document = document;
 				++session.localPrerenderTransactionCount;
-				session.prerenderCallback = resolve;
+				session.prerenderCallback = (events, idle) => resolve({ sessionID: session.sessionID, events: events, idle: idle });
 				session.run();
 				if (--session.localPrerenderTransactionCount == 0) {
 					session.sendPrerender();
 				}
-			}).then(events => {
+			}).then(data => {
 				session.context.document = undefined;
 				const bootstrapScript = document.createElement("script");
 				bootstrapScript.type = "application/x-concurrence-bootstrap";
-				bootstrapScript.appendChild(document.createTextNode(JSON.stringify({
-					"sessionID": session.sessionID,
-					"events": events
-				})));
+				bootstrapScript.appendChild(document.createTextNode(JSON.stringify(data)));
 				clientScript.parentNode!.insertBefore(bootstrapScript, clientScript);
 				const serialized = dom.serialize();
 				noCache(res);
 				res.set("Content-Type", "text/html");
 				res.send(serialized);
-			});
+			}));
 		}
 		const serialized = dom.serialize();
 		noCache(res);
 		res.set("Content-Type", "text/html");
 		res.send(serialized);
+		resolve();
 	}).catch(e => {
 		res.status(500);
 		res.set("Content-Type", "text/plain");

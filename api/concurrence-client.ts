@@ -13,6 +13,7 @@ namespace concurrence {
 	interface BootstrapData {
 		sessionID: string;
 		events: ConcurrenceEvent[];
+		idle: boolean;
 	}
 
 	// Message ordering
@@ -23,10 +24,12 @@ namespace concurrence {
 	// Session state
 	var sessionID: string | undefined;
 	const bootstrapElement = document.querySelector("script[type=\"application/x-concurrence-bootstrap\"]");
+	let idleDuringPrerender: boolean = false;
 	if (bootstrapElement) {
 		bootstrapElement.parentNode!.removeChild(bootstrapElement);
 		const bootstrapData = JSON.parse(bootstrapElement.textContent || bootstrapElement.innerHTML) as BootstrapData;
 		sessionID = bootstrapData.sessionID;
+		idleDuringPrerender = bootstrapData.idle;
 		++outgoingMessageId;
 		setTimeout(() => {
 			processMessage(bootstrapData.events, 0);
@@ -258,6 +261,13 @@ namespace concurrence {
 	function synchronizeTransactions() {
 		// Deferred sending of events so that we many from a single event loop can be batched
 		defer(() => {
+			if (idleDuringPrerender) {
+				setTimeout(() => {
+					idleDuringPrerender = false;
+					synchronizeTransactions();
+				}, 1);
+				return;
+			}
 			if (!dead) {
 				if ((pendingTransactionCount != 0 && activeConnectionCount == 0) || queuedLocalEvents.length) {
 					sendMessages(true);
