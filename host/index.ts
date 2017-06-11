@@ -39,12 +39,14 @@ function immediate<T>(value: T) : Promise<T> {
 class ConcurrenceHost {
 	sessions: { [key: string]: ConcurrenceSession; } = {};
 	script: vm.Script;
+	htmlSource: string;
 	staleSessionTimeout: any;
-	constructor(path: string) {
+	constructor(scriptPath: string, htmlPath: string) {
 		this.sessions = {};
-		this.script = new vm.Script(fs.readFileSync(path).toString(), {
-			filename: path
+		this.script = new vm.Script(fs.readFileSync(scriptPath).toString(), {
+			filename: scriptPath
 		});
+		this.htmlSource = fs.readFileSync(htmlPath).toString();
 		this.staleSessionTimeout = setInterval(() => {
 			const now = Date.now();
 			for (var i in this.sessions) {
@@ -102,6 +104,75 @@ interface ConcurrenceMessage {
 	messageID: string | number | undefined;
 }
 
+const enum ConcurrenceRenderingMode {
+	ClientOnly = 0,
+	Prerendering = 1,
+	FullEmulation = 2,
+};
+
+const renderingMode : ConcurrenceRenderingMode = ConcurrenceRenderingMode.ClientOnly;
+
+class ConcurrenceServerSideRenderer {
+	session: ConcurrenceSession;
+	dom: JSDOM;
+	document: Document;
+	clientScript: Element | undefined;
+	messageIdInput: HTMLInputElement | undefined;
+	resolve: ((html: string) => void) | undefined;
+	constructor(session: ConcurrenceSession) {
+		this.session = session;
+		this.dom = new JSDOM(host.htmlSource);
+		this.document = (this.dom.window as any).document as Document;
+		const clientScript = this.document.querySelector("script[src=\"client.js\"]");
+		if (!clientScript) {
+			throw new Error("HTML does not contain a client.js reference!");
+		}
+		this.clientScript = clientScript;
+		if (renderingMode >= ConcurrenceRenderingMode.FullEmulation) {
+			const formNode = this.document.createElement("form");
+			formNode.setAttribute("action", "?js=no");
+			formNode.setAttribute("method", "POST");
+			formNode.setAttribute("id", "concurrence-form");
+			const sessionInput = this.document.createElement("input");
+			sessionInput.setAttribute("name", "sessionID");
+			sessionInput.setAttribute("type", "hidden");
+			sessionInput.setAttribute("value", session.sessionID);
+			formNode.appendChild(sessionInput);
+			const messageIdInput = this.messageIdInput = this.document.createElement("input");
+			messageIdInput.setAttribute("name", "messageID");
+			messageIdInput.setAttribute("type", "hidden");
+			formNode.appendChild(messageIdInput);
+			const body = this.document.body;
+			migrateChildren(body, formNode);
+			body.appendChild(formNode);
+		}
+	}
+	renderPage() {
+		const session = this.session;
+		const queuedLocalEvents = session.queuedLocalEvents;
+		session.queuedLocalEvents = undefined;
+		const messageIdInput = this.messageIdInput;
+		if (messageIdInput) {
+			messageIdInput.setAttribute("value", (++session.incomingMessageId).toString());
+		}
+		const clientScript = this.clientScript;
+		if (clientScript) {
+			this.clientScript = undefined;
+			const bootstrapScript = this.document.createElement("script");
+			bootstrapScript.type = "application/x-concurrence-bootstrap";
+			bootstrapScript.appendChild(this.document.createTextNode(JSON.stringify({ sessionID: this.session.sessionID, events: queuedLocalEvents, idle: this.session.localTransactionCount == 0 })));
+			const parentNode = clientScript.parentNode!;
+			parentNode.insertBefore(bootstrapScript, clientScript);
+			const result = this.dom.serialize();
+			parentNode.removeChild(bootstrapScript);
+			parentNode.removeChild(clientScript);
+			return result;
+		} else {
+			return this.dom.serialize();
+		}
+	}
+}
+
 class ConcurrenceSession {
 	host: ConcurrenceHost;
 	sessionID: string;
@@ -118,8 +189,8 @@ class ConcurrenceSession {
 	context: any;
 	queuedLocalEvents: ConcurrenceEvent[] | undefined;
 	queuedLocalEventsResolve: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
-	prerenderCallback: ((events: ConcurrenceEvent[] | undefined, idle: boolean) => void) | undefined;
 	localResolveTimeout: NodeJS.Timer | undefined;
+	serverSideRenderer: ConcurrenceServerSideRenderer | undefined;
 	constructor(host: ConcurrenceHost, sessionID: string) {
 		this.host = host;
 		this.sessionID = sessionID;
@@ -254,18 +325,29 @@ class ConcurrenceSession {
 			}
 		});
 	}
-	sendPrerender() {
-		return immediate(undefined).then(() => {
-			const prerenderCallback = this.prerenderCallback;
-			if (prerenderCallback) {
-				++this.incomingMessageId;
-				this.prerenderCallback = undefined;
-				const queuedLocalEvents = this.queuedLocalEvents;
-				this.queuedLocalEvents = undefined;
-				prerenderCallback(queuedLocalEvents, this.localTransactionCount == 0);
-				this.sendQueuedEvents();
+	startServerSideRendering(): ConcurrenceServerSideRenderer {
+		if (this.serverSideRenderer) {
+			return this.serverSideRenderer;
+		}
+		const renderer = new ConcurrenceServerSideRenderer(this);
+		this.serverSideRenderer = renderer;
+		this.context.document = renderer.document;
+		return renderer;
+	}
+	completeServerSideRendering(destroyRenderer?: boolean) {
+		const renderer = this.serverSideRenderer;
+		if (renderer) {
+			const resolve = renderer.resolve;
+			if (resolve) {
+				renderer.resolve = undefined;
+				resolve(renderer.renderPage());
 			}
-		});
+			if (destroyRenderer || (renderingMode == ConcurrenceRenderingMode.Prerendering)) {
+				this.context.document = undefined;
+				this.serverSideRenderer = undefined;
+			}
+			this.sendQueuedEvents();
+		}
 	}
 	enterLocalTransaction(includedInPrerender: boolean = true) : number {
 		if (includedInPrerender) {
@@ -276,7 +358,7 @@ class ConcurrenceSession {
 	exitLocalTransaction(includedInPrerender: boolean = true) : number {
 		if (includedInPrerender) {
 			if (--this.localPrerenderTransactionCount == 0) {
-				this.sendPrerender();
+				immediate(undefined).then(() => this.completeServerSideRendering());
 			}
 		}
 		return --this.localTransactionCount;
@@ -398,7 +480,7 @@ class ConcurrenceSession {
 		if (!this.dead) {
 			this.dead = true;
 			this.context.concurrence.dead = true;
-			this.sendPrerender();
+			this.completeServerSideRendering(true);
 			this.sendQueuedEvents();
 			delete this.host.sessions[this.sessionID];
 		}
@@ -411,58 +493,47 @@ function noCache(res: express.Response) {
 	res.header("Pragma", "no-cache");
 }
 
-const host = new ConcurrenceHost(relativePath("server.js"));
+const host = new ConcurrenceHost(relativePath("server.js"), relativePath("../public/index.html"));
 
 server.use(bodyParser.urlencoded({
 	extended: true,
 	type: () => true // Accept all MIME types
 }));
 
-const indexHTML = fs.readFileSync(relativePath("../public/index.html")).toString();
+function migrateChildren(fromNode: Node, toNode: Node) {
+	var firstChild: Node | null;
+	while (firstChild = fromNode.firstChild) {
+		toNode.appendChild(firstChild);
+	}
+}
 
-server.get("/", (req, res) => {
-	new Promise(resolve => {
-		const dom = new JSDOM(indexHTML);
-		const document = (dom.window as any).document as Document;
-		const clientScript = document.querySelector("script[src=\"client.js\"]");
-		if (clientScript) {
+if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
+	server.get("/", (req, res) => {
+		new Promise<string>(resolve => {
 			const session = host.newSession();
-			return resolve(new Promise(resolve => {
-				session.context.document = document;
-				++session.localPrerenderTransactionCount;
-				session.prerenderCallback = (events, idle) => resolve({ sessionID: session.sessionID, events: events, idle: idle });
-				session.run();
-				if (--session.localPrerenderTransactionCount == 0) {
-					session.sendPrerender();
-				}
-			}).then(data => {
-				session.context.document = undefined;
-				const bootstrapScript = document.createElement("script");
-				bootstrapScript.type = "application/x-concurrence-bootstrap";
-				bootstrapScript.appendChild(document.createTextNode(JSON.stringify(data)));
-				clientScript.parentNode!.insertBefore(bootstrapScript, clientScript);
-				const serialized = dom.serialize();
-				noCache(res);
-				res.set("Content-Type", "text/html");
-				res.send(serialized);
-			}));
-		}
-		const serialized = dom.serialize();
-		noCache(res);
-		res.set("Content-Type", "text/html");
-		res.send(serialized);
-		resolve();
-	}).catch(e => {
-		res.status(500);
-		res.set("Content-Type", "text/plain");
-		res.send(util.inspect(e));
+			session.startServerSideRendering().resolve = resolve;
+			++session.localPrerenderTransactionCount;
+			session.run();
+			if (--session.localPrerenderTransactionCount == 0) {
+				immediate(undefined).then(() => session.completeServerSideRendering());
+			}
+		}).then(html => {
+			noCache(res);
+			res.set("Content-Type", "text/html");
+			res.send(html);
+		}).catch(e => {
+			res.status(500);
+			res.set("Content-Type", "text/plain");
+			res.send(util.inspect(e));
+		});
 	});
-});
+}
 
 server.post("/", function(req, res) {
 	new Promise(resolve => {
 		noCache(res);
-		if (req.body.destroy) {
+		const body = req.body;
+		if (body.destroy) {
 			// Forcefully clean up sessions
 			host.destroySessionById(req.body.sessionID);
 			res.set("Content-Type", "text/plain");
@@ -470,19 +541,37 @@ server.post("/", function(req, res) {
 			resolve();
 		} else {
 			// Process incoming events
-			const body = req.body;
 			const session = host.sessionById(body.sessionID, (body.messageID | 0) == 0);
-			if (session.receiveMessage(body)) {
-				// Wait to send the response until we have events ready or until there are no more server-side transactions open
-				resolve(session.dequeueEvents().then(events => {
+			if (renderingMode >= ConcurrenceRenderingMode.FullEmulation && req.query["js"] == "no") {
+				const renderer = session.serverSideRenderer;
+				if (renderer) {
+					// TODO: Apply button presses
+					resolve(new Promise(resolve => {
+						renderer.resolve = resolve;
+						session.completeServerSideRendering();
+					}).then(html => {
+						res.set("Content-Type", "text/html");
+						res.send(html);
+					}));
+				} else {
 					res.set("Content-Type", "text/plain");
-					res.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
-				}));
+					res.send("JavaScript free rendering abandoned :'(");
+					resolve();
+				}
 			} else {
-				// Out of order messages don't get any events
-				res.set("Content-Type", "text/plain");
-				res.send("");
-				resolve();
+				session.completeServerSideRendering(true);
+				if (session.receiveMessage(body)) {
+					// Wait to send the response until we have events ready or until there are no more server-side transactions open
+					resolve(session.dequeueEvents().then(events => {
+						res.set("Content-Type", "text/plain");
+						res.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
+					}));
+				} else {
+					// Out of order messages don't get any events
+					res.set("Content-Type", "text/plain");
+					res.send("");
+					resolve();
+				}
 			}
 		}
 	}).catch(e => {
@@ -498,6 +587,7 @@ expressWs(server);
 		const body = qs.parse(req.query);
 		var messageId = body.messageID | 0;
 		const session = host.sessionById(body.sessionID, messageId == 0);
+		session.completeServerSideRendering(true);
 		var closed = false;
 		function processMessage(body: ConcurrenceMessage) {
 			if (session.receiveMessage(body)) {

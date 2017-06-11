@@ -34,6 +34,10 @@ namespace concurrence {
 		setTimeout(() => {
 			processMessage(bootstrapData.events, 0);
 		}, 0);
+		const concurrenceForm = document.getElementById("concurrence-form") as HTMLFormElement;
+		if (concurrenceForm) {
+			concurrenceForm.onsubmit = function() { return false; };
+		}
 	} else {
 		sessionID = uuid();
 	}
