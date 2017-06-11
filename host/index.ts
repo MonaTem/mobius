@@ -36,6 +36,15 @@ function immediate<T>(value: T) : Promise<T> {
 	return new Promise<T>(resolve => setImmediate(() => resolve(value)));
 }
 
+function compatibleStringify(value: any): string {
+	return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\/script/g, "<\\/script");
+}
+
+function roundTrip<T>(obj: T) : T {
+	// Round-trip values through JSON so that the server receives exactly the same type of values as the client
+	return JSON.parse(JSON.stringify([obj]))[0] as T;
+}
+
 class ConcurrenceHost {
 	sessions: { [key: string]: ConcurrenceSession; } = {};
 	script: vm.Script;
@@ -160,7 +169,7 @@ class ConcurrenceServerSideRenderer {
 			this.clientScript = undefined;
 			const bootstrapScript = this.document.createElement("script");
 			bootstrapScript.type = "application/x-concurrence-bootstrap";
-			bootstrapScript.appendChild(this.document.createTextNode(JSON.stringify({ sessionID: this.session.sessionID, events: queuedLocalEvents, idle: this.session.localTransactionCount == 0 })));
+			bootstrapScript.appendChild(this.document.createTextNode(compatibleStringify({ sessionID: this.session.sessionID, events: queuedLocalEvents, idle: this.session.localTransactionCount == 0 })));
 			const parentNode = clientScript.parentNode!;
 			parentNode.insertBefore(bootstrapScript, clientScript);
 			const result = this.dom.serialize();
@@ -371,7 +380,7 @@ class ConcurrenceSession {
 			// Forward the value to the client
 			this.exitLocalTransaction(includedInPrerender);
 			this.sendEvent([transactionId, value]);
-			return value;
+			return roundTrip(value);
 		}, error => {
 			// Serialize the reject error type or string
 			this.exitLocalTransaction(includedInPrerender);
@@ -397,12 +406,13 @@ class ConcurrenceSession {
 		return {
 			send: function() {
 				if (transactionId >= 0) {
+					const args = Array.prototype.slice.call(arguments);
 					if (!session.dead) {
-						const message = Array.prototype.slice.call(arguments);
+						const message = args.slice();
 						message.unshift(transactionId);
 						session.sendEvent(message);
 					}
-					(callback as any as Function).apply(null, arguments);
+					(callback as any as Function).apply(null, roundTrip(args));
 				}
 			} as any as T,
 			close: function() {

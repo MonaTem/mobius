@@ -10,6 +10,11 @@ namespace concurrence {
 		});
 	}
 
+	function roundTrip<T>(obj: T) : T {
+		// Round-trip values through JSON so that the client receives exactly the same type of values as the server
+		return JSON.parse(JSON.stringify([obj]))[0] as T;
+	}
+
 	interface BootstrapData {
 		sessionID: string;
 		events: ConcurrenceEvent[];
@@ -382,7 +387,7 @@ namespace concurrence {
 
 	export function observeClientPromise<T>(value: Promise<T> | T) : Promise<T> {
 		var transactionId = ++localTransactionCounter;
-		return Promise.resolve(value).then(value => sendEvent([transactionId, value]).then(() => value), error => {
+		return Promise.resolve(value).then(value => sendEvent([transactionId, value]).then(() => roundTrip(value)), error => {
 			// Convert Error types to a representation that can be reconstituted on the server
 			var type : any = 1;
 			var serializedError: any = error;
@@ -420,7 +425,7 @@ namespace concurrence {
 					sendEvent(message).then(function() {
 						// Finally send event if a destroy call hasn't won the race
 						if (transactionId >= 0) {
-							(callback as any as Function).apply(null, args);
+							(callback as any as Function).apply(null, roundTrip(args));
 						}
 					});
 				}
