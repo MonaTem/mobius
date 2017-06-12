@@ -2,7 +2,7 @@ namespace concurrence {
 	export function observe(selector: string, event: string, callback: () => void) : ConcurrenceTransaction {
 		const transaction = concurrence.observeClientEventCallback(callback);
 		const elements = document.querySelectorAll(selector);
-		for (var i = 0; i < elements.length; i++) {
+		for (let i = 0; i < elements.length; i++) {
 			elements[i].addEventListener(event, () => transaction.send(), false);
 		}
 		return transaction;

@@ -22,12 +22,12 @@ namespace concurrence {
 	}
 
 	// Message ordering
-	var outgoingMessageId = 0;
-	var incomingMessageId = 0;
+	let outgoingMessageId = 0;
+	let incomingMessageId = 0;
 	const reorderedMessages : [ConcurrenceEvent[], number][] = [];
 
 	// Session state
-	var sessionID: string | undefined;
+	let sessionID: string | undefined;
 	const bootstrapElement = document.querySelector("script[type=\"application/x-concurrence-bootstrap\"]");
 	let idleDuringPrerender: boolean = false;
 	if (bootstrapElement) {
@@ -47,31 +47,31 @@ namespace concurrence {
 		sessionID = uuid();
 	}
 	const serverURL = location.href;
-	var activeConnectionCount = 0;
-	export var dead = false;
+	let activeConnectionCount = 0;
+	export let dead = false;
 
 	// Remote transactions
-	var remoteTransactionCounter = 0;
+	let remoteTransactionCounter = 0;
 	const pendingTransactions : { [key: number]: (event: ConcurrenceEvent | undefined) => void; } = {};
-	var pendingTransactionCount = 0;
+	let pendingTransactionCount = 0;
 
 	// Local transactions
-	var localTransactionCounter = 0;
-	var queuedLocalEvents: ConcurrenceEvent[] = [];
+	let localTransactionCounter = 0;
+	let queuedLocalEvents: ConcurrenceEvent[] = [];
 	const fencedLocalEvents: { [key: number]: ((event: ConcurrenceEvent) => void)[]; } = {};
 
 	// Heartbeat
 	const sessionHeartbeatInterval = 4 * 60 * 1000;
-	var heartbeatTimeout: number | undefined;
+	let heartbeatTimeout: number | undefined;
 
 	// Websocket support
 	const socketURL = serverURL.replace(/^http/, "ws") + "?";
-	var WebSocketClass = (window as any).WebSocket as typeof WebSocket | undefined;
-	var websocket: WebSocket | undefined;
-	var pendingSocketMessageIds: number[] = [];
+	let WebSocketClass = (window as any).WebSocket as typeof WebSocket | undefined;
+	let websocket: WebSocket | undefined;
+	let pendingSocketMessageIds: number[] = [];
 
 	function serializeMessage(messageId: number | undefined) {
-		var message = "sessionID=" + sessionID;
+		let message = "sessionID=" + sessionID;
 		if (messageId) {
 			message += "&messageID=" + messageId;
 		}
@@ -108,7 +108,7 @@ namespace concurrence {
 				websocket = undefined;
 			}
 			// Abandon pending transactions
-			for (var transactionId in pendingTransactions) {
+			for (let transactionId in pendingTransactions) {
 				pendingTransactions[transactionId](undefined);
 			}
 			// Send a "destroy" message so that the server can clean up the session
@@ -136,13 +136,13 @@ namespace concurrence {
 		}
 		incomingMessageId++;
 		// Read each event and dispatch the appropriate transaction in order
-		for (var i = 0; i < events.length; i++) {
-			var event = events[i];
-			var transactionId = event[0];
-			var transaction;
+		for (let i = 0; i < events.length; i++) {
+			const event = events[i];
+			let transactionId = event[0];
+			let transaction: ((event: ConcurrenceEvent | undefined) => void) | undefined;
 			if (transactionId < 0) {
 				// Fenced client-side event
-				var fencedQueue = fencedLocalEvents[-transactionId];
+				let fencedQueue = fencedLocalEvents[-transactionId];
 				transaction = fencedQueue.shift();
 				if (fencedQueue.length == 0) {
 					delete fencedLocalEvents[-transactionId];
@@ -165,8 +165,8 @@ namespace concurrence {
 		const message: ConcurrenceEvent[] = messageText.length ? JSON.parse("[" + messageText + "]") : [];
 		if (processMessage(message, messageId)) {
 			// Process any messages we received out of order
-			for (var i = 0; i < reorderedMessages.length; i++) {
-				var entry = reorderedMessages[i];
+			for (let i = 0; i < reorderedMessages.length; i++) {
+				const entry = reorderedMessages[i];
 				if (processMessage(entry[0], entry[1])) {
 					i = 0;
 					reorderedMessages.splice(i, 1);
@@ -354,7 +354,7 @@ namespace concurrence {
 							const ErrorType : typeof Error = (window as any)[type] || Error;
 							const error: any = new ErrorType(value.message);
 							delete value.message;
-							for (var i in value) {
+							for (let i in value) {
 								if (value.hasOwnProperty(i)) {
 									error[i] = value[i];
 								}
@@ -386,13 +386,13 @@ namespace concurrence {
 	}
 
 	export function observeClientPromise<T>(value: Promise<T> | T) : Promise<T> {
-		var transactionId = ++localTransactionCounter;
+		let transactionId = ++localTransactionCounter;
 		return Promise.resolve(value).then(value => sendEvent([transactionId, value]).then(() => roundTrip(value)), error => {
 			// Convert Error types to a representation that can be reconstituted on the server
-			var type : any = 1;
-			var serializedError: any = error;
+			let type : any = 1;
+			let serializedError: any = error;
 			if (error instanceof Error) {
-				var errorClass : any = error.constructor;
+				let errorClass : any = error.constructor;
 				if ("name" in errorClass) {
 					type = errorClass.name;
 				} else {
@@ -400,8 +400,8 @@ namespace concurrence {
 					type = errorClass.toString().match(/.*? (\w+)/)[0];
 				}
 				serializedError = { message: error.message, stack: error.stack };
-				var anyError : any = error;
-				for (var i in anyError) {
+				let anyError : any = error;
+				for (let i in anyError) {
 					if (anyError.hasOwnProperty(i)) {
 						serializedError[i] = anyError[i];
 					}
@@ -415,7 +415,7 @@ namespace concurrence {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
-		var transactionId: number = ++localTransactionCounter;
+		let transactionId: number = ++localTransactionCounter;
 		return {
 			send: function() {
 				if (transactionId >= 0) {

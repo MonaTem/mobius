@@ -14,13 +14,13 @@ namespace concurrence {
 		Date.prototype = proto;
 		return Date as typeof __Date;
 		function Date(this: any) {
-			var args = Array.prototype.slice.call(arguments);
+			let args = Array.prototype.slice.call(arguments);
 			args.unshift(global);
 			if (this instanceof __Date) {
 				if (args.length == 1) {
 					concurrence.showDeterminismWarning("new Date()", "concurrence.now()");
 				}
-				var result = new (Function.prototype.bind.apply(__Date, args));
+				let result = new (Function.prototype.bind.apply(__Date, args));
 				(Object as any).setPrototypeOf(result, proto);
 				return result;
 			} else {

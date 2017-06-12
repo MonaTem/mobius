@@ -2,7 +2,7 @@
 
 declare namespace concurrence {
 	export function disconnect(): void;
-	export var dead: boolean;
+	export let dead: boolean;
 
 	// APIs for server/, not to be used inside src/
 	export function receiveClientPromise<T>(...args: any[]): Promise<T>;

@@ -58,7 +58,7 @@ class ConcurrenceHost {
 		this.htmlSource = fs.readFileSync(htmlPath).toString();
 		this.staleSessionTimeout = setInterval(() => {
 			const now = Date.now();
-			for (var i in this.sessions) {
+			for (let i in this.sessions) {
 				if (this.sessions.hasOwnProperty(i)) {
 					if (now - this.sessions[i].lastMessageTime > 5 * 60 * 1000) {
 						this.sessions[i].destroy();
@@ -97,7 +97,7 @@ class ConcurrenceHost {
 		}
 	}
 	destroy() {
-		for (var i in this.sessions) {
+		for (let i in this.sessions) {
 			if (this.sessions.hasOwnProperty(i)) {
 				this.sessions[i].destroy();
 			}
@@ -131,7 +131,7 @@ class ConcurrenceServerSideRenderer {
 	constructor(session: ConcurrenceSession) {
 		this.session = session;
 		this.dom = new JSDOM(host.htmlSource);
-		this.document = (this.dom.window as any).document as Document;
+		this.document = (this.dom.window as Window).document as Document;
 		const clientScript = this.document.querySelector("script[src=\"client.js\"]");
 		if (!clientScript) {
 			throw new Error("HTML does not contain a client.js reference!");
@@ -224,7 +224,7 @@ class ConcurrenceSession {
 	}
 	processMessage(message: ConcurrenceMessage) {
 		// Process messages in order
-		const messageId = (message.messageID as any) | 0;
+		const messageId = (message.messageID as number) | 0;
 		if (messageId > this.incomingMessageId) {
 			return false;
 		}
@@ -236,10 +236,10 @@ class ConcurrenceSession {
 		const jsonEvents = message.events;
 		if (jsonEvents) {
 			const events = JSON.parse("[" + jsonEvents + "]");
-			for (var i = 0; i < events.length; i++) {
+			for (let i = 0; i < events.length; i++) {
 				const event = events[i];
-				var transactionId = event[0];
-				var transaction;
+				let transactionId = event[0];
+				let transaction;
 				if (transactionId < 0) {
 					// Server decided the ordering on "fenced" events
 					this.sendEvent([transactionId]);
@@ -259,7 +259,7 @@ class ConcurrenceSession {
 		this.lastMessageTime = Date.now();
 		if (this.processMessage(message)) {
 			// Process any messages we received out of order
-			for (var i = 0; i < this.reorderedMessages.length; i++) {
+			for (let i = 0; i < this.reorderedMessages.length; i++) {
 				if (this.processMessage(this.reorderedMessages[i])) {
 					i = 0;
 					this.reorderedMessages.splice(i, 1);
@@ -384,8 +384,8 @@ class ConcurrenceSession {
 		}, error => {
 			// Serialize the reject error type or string
 			this.exitLocalTransaction(includedInPrerender);
-			var type: number | string = 1;
-			var serializedError = error;
+			let type: number | string = 1;
+			let serializedError = error;
 			if (error instanceof Error) {
 				// Convert Error types to a representation that can be reconstituted on the client
 				type = error.constructor.name;
@@ -402,7 +402,7 @@ class ConcurrenceSession {
 		// Record and ship arguments of server-side events
 		const session = this;
 		session.enterLocalTransaction(includedInPrerender);
-		var transactionId = ++session.localTransactionCounter;
+		let transactionId = ++session.localTransactionCounter;
 		return {
 			send: function() {
 				if (transactionId >= 0) {
@@ -453,7 +453,7 @@ class ConcurrenceSession {
 				if (!event) {
 					reject(new Error("Disconnected from client!"));
 				} else {
-					var value : any = event[1];
+					let value : any = event[1];
 					const type = event[2];
 					if (type) {
 						// Convert serialized representation into the appropriate Error type
@@ -511,7 +511,7 @@ server.use(bodyParser.urlencoded({
 }));
 
 function migrateChildren(fromNode: Node, toNode: Node) {
-	var firstChild: Node | null;
+	let firstChild: Node | null;
 	while (firstChild = fromNode.firstChild) {
 		toNode.appendChild(firstChild);
 	}
@@ -595,10 +595,10 @@ expressWs(server);
 (server as any).ws("/", function(ws: any, req: express.Request) {
 	try {
 		const body = qs.parse(req.query);
-		var messageId = body.messageID | 0;
+		let messageId = body.messageID | 0;
 		const session = host.sessionById(body.sessionID, messageId == 0);
 		session.completeServerSideRendering(true);
-		var closed = false;
+		let closed = false;
 		function processMessage(body: ConcurrenceMessage) {
 			if (session.receiveMessage(body)) {
 				session.dequeueEvents().then(events => {

@@ -2,7 +2,7 @@ namespace concurrence {
 	export function broadcast(text: string) {
 		const observers = (global as any).observers;
 		if (observers) {
-			for (var i = 0; i < observers.length; i++) {
+			for (let i = 0; i < observers.length; i++) {
 				observers[i](text);
 			}
 		}

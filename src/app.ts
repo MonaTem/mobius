@@ -8,7 +8,7 @@ Promise.all([concurrence.random(), concurrence.random()]).then(value => {
 });
 
 // Stream of events from server to client
-var randomStream : ConcurrenceTransaction | undefined;
+let randomStream : ConcurrenceTransaction | undefined;
 function toggleRandoms() {
 	if (randomStream) {
 		console.log("Destroying random stream");
@@ -33,7 +33,7 @@ const logTransaction = concurrence.observe("#log", "click", () => {
 });
 
 // Receive broadcasted values
-var receiveStream : ConcurrenceTransaction | undefined;
+let receiveStream : ConcurrenceTransaction | undefined;
 function toggleReceive() {
 	if (receiveStream) {
 		receiveStream.close();
