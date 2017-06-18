@@ -16,6 +16,10 @@ const server = express();
 
 const relativePath = (relative: string) => path.join(__dirname, relative);
 
+const readFile = (path: string) => fs.readFileSync(path).toString();
+
+const secrets = JSON.parse(readFile(relativePath("../secrets.json")));
+
 server.disable("x-powered-by");
 server.disable("etag");
 
@@ -205,10 +209,12 @@ class ConcurrenceSession {
 		this.sessionID = sessionID;
 		// Server-side version of the API
 		const context = Object.create(global);
+		context.require = require;
 		context.global = context;
 		context.document = undefined;
 		context.concurrence = {
 			disconnect : this.destroy.bind(this),
+			secrets: secrets,
 			dead: false,
 			receiveClientPromise: this.receiveRemotePromise.bind(this),
 			observeServerPromise: this.observeLocalPromise.bind(this),

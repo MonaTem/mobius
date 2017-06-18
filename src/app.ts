@@ -7,6 +7,8 @@ Promise.all([concurrence.random(), concurrence.random()]).then(value => {
 	concurrence.render("#host", JSON.stringify(value));
 });
 
+concurrence.mysql.query("localhost", "SELECT 1 + 1 AS solution").then(result => console.log(result)).catch(error => console.log("error", error));
+
 // Stream of events from server to client
 let randomStream : ConcurrenceTransaction | undefined;
 function toggleRandoms() {

@@ -62,7 +62,7 @@ namespace concurrence {
 
 	// Heartbeat
 	const sessionHeartbeatInterval = 4 * 60 * 1000;
-	let heartbeatTimeout: number | undefined;
+	let heartbeatTimeout: any;
 
 	// Websocket support
 	const socketURL = serverURL.replace(/^http/, "ws") + "?";
