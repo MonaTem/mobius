@@ -44,9 +44,15 @@ function compatibleStringify(value: any): string {
 	return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\/script/g, "<\\/script");
 }
 
+const validateRoundTrips = true;
+
 function roundTrip<T>(obj: T) : T {
-	// Round-trip values through JSON so that the server receives exactly the same type of values as the client
-	return JSON.parse(JSON.stringify([obj]))[0] as T;
+	if (validateRoundTrips) {
+		// Round-trip values through JSON so that the server receives exactly the same type of values as the client
+		return JSON.parse(JSON.stringify([obj]))[0] as T;
+	} else {
+		return obj;
+	}
 }
 
 class ConcurrenceHost {
