@@ -339,8 +339,8 @@ namespace concurrence {
 	export const disconnect = destroySession;
 
 	// APIs for client/, not to be used inside src/
-	export function receiveServerPromise<T>(...args: any[]) : Promise<T> { // Must be cast to the proper signature
-		return new Promise(function(resolve, reject) {
+	export function receiveServerPromise<T extends ConcurrenceJsonValue>(...args: any[]) : Promise<T> { // Must be cast to the proper signature
+		return new Promise<T>(function(resolve, reject) {
 			const transaction = registerRemoteTransaction(function(event) {
 				transaction.close();
 				if (!event) {
@@ -385,7 +385,7 @@ namespace concurrence {
 		return transaction;
 	}
 
-	export function observeClientPromise<T>(value: Promise<T> | T) : Promise<T> {
+	export function observeClientPromise<T extends ConcurrenceJsonValue>(value: Promise<T> | T) : Promise<T> {
 		let transactionId = ++localTransactionCounter;
 		return Promise.resolve(value).then(value => sendEvent([transactionId, value]).then(() => roundTrip(value)), error => {
 			// Convert Error types to a representation that can be reconstituted on the server

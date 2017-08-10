@@ -384,7 +384,7 @@ class ConcurrenceSession {
 		}
 		return --this.localTransactionCount;
 	}
-	observeLocalPromise<T>(value: Promise<T> | T, includedInPrerender: boolean = true): Promise<T> {
+	observeLocalPromise<T extends ConcurrenceJsonValue>(value: Promise<T> | T, includedInPrerender: boolean = true): Promise<T> {
 		// Record and ship values/errors of server-side promises
 		this.enterLocalTransaction(includedInPrerender);
 		const transactionId = ++this.localTransactionCounter;
@@ -457,8 +457,8 @@ class ConcurrenceSession {
 			}
 		};
 	}
-	receiveRemotePromise() {
-		return new Promise((resolve, reject) => {
+	receiveRemotePromise<T extends ConcurrenceJsonValue>() {
+		return new Promise<T>((resolve, reject) => {
 			const transaction = this.registerRemoteTransaction(event => {
 				transaction.close();
 				if (!event) {
