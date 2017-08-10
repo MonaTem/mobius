@@ -412,13 +412,12 @@ class ConcurrenceSession {
 		return {
 			send: function() {
 				if (transactionId >= 0) {
-					const args = Array.prototype.slice.call(arguments);
+					let args = [...arguments];
 					if (!session.dead) {
-						const message = args.slice();
-						message.unshift(transactionId);
-						session.sendEvent(message);
+						session.sendEvent([transactionId, ...args] as ConcurrenceEvent);
 					}
-					(callback as any as Function).apply(null, roundTrip(args));
+					args = roundTrip(args);
+					setImmediate(() => (callback as any as Function).apply(null, args));
 				}
 			} as any as T,
 			close: function() {

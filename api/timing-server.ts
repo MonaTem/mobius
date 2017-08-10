@@ -14,7 +14,7 @@ namespace concurrence {
 		Date.prototype = proto;
 		return Date as typeof __Date;
 		function Date(this: any) {
-			let args = Array.prototype.slice.call(arguments);
+			let args = [...arguments];
 			args.unshift(global);
 			if (this instanceof __Date) {
 				if (args.length == 1) {
