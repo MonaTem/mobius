@@ -210,7 +210,7 @@ class ConcurrenceSession {
 	queuedLocalEventsResolve: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
 	localResolveTimeout: NodeJS.Timer | undefined;
 	serverSideRenderer: ConcurrenceServerSideRenderer | undefined;
-	constructor(host: ConcurrenceHost, sessionID: string) {
+	constructor(host: ConcurrenceHost, sessionID: string, request: express.Request) {
 		this.host = host;
 		this.sessionID = sessionID;
 		// Server-side version of the API
@@ -218,6 +218,7 @@ class ConcurrenceSession {
 		context.require = require;
 		context.global = context;
 		context.document = undefined;
+		context.request = request;
 		context.concurrence = {
 			disconnect : this.destroy.bind(this),
 			secrets: secrets,
