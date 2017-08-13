@@ -34,7 +34,7 @@ namespace concurrence {
 		return concurrence.observeServerPromise(realNow.call(Date));
 	}
 	const realSetInterval = concurrence.applyDeterminismWarning(global, "setInterval", "setInterval(callback, millis)", "concurrence.interval(callback, millis)");
-	export function interval(callback: () => void, millis: number): ConcurrenceTransaction {
+	export function interval(callback: () => void, millis: number): ConcurrenceChannel {
 		const transaction = concurrence.observeServerEventCallback<typeof callback>(callback, false);
 		const interval = realSetInterval(_ => {
 			if (concurrence.dead) {

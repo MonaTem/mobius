@@ -10,7 +10,7 @@ Promise.all([concurrence.random(), concurrence.random()]).then(value => {
 concurrence.mysql.query("localhost", "SELECT 1 + 1 AS solution").then(result => console.log(result)).catch(error => console.log("error", error));
 
 // Stream of events from server to client
-let randomStream : ConcurrenceTransaction | undefined;
+let randomStream : ConcurrenceChannel | undefined;
 function toggleRandoms() {
 	if (randomStream) {
 		console.log("Destroying random stream");
@@ -35,7 +35,7 @@ const logTransaction = concurrence.observe("#log", "click", () => {
 });
 
 // Receive broadcasted values
-let receiveStream : ConcurrenceTransaction | undefined;
+let receiveStream : ConcurrenceChannel | undefined;
 function toggleReceive() {
 	if (receiveStream) {
 		receiveStream.close();

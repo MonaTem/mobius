@@ -1,5 +1,5 @@
 namespace concurrence {
-	export function observe(selector: string, event: string, callback: () => void) : ConcurrenceTransaction {
+	export function observe(selector: string, event: string, callback: () => void) : ConcurrenceChannel {
 		const transaction = concurrence.observeClientEventCallback(callback);
 		const elements = document.querySelectorAll(selector);
 		for (let i = 0; i < elements.length; i++) {

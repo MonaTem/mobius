@@ -13,7 +13,7 @@ namespace concurrence {
 			}
 		}
 	}
-	export function receive(callback: (message: string) => void): ConcurrenceTransaction {
+	export function receive(callback: (message: string) => void): ConcurrenceChannel {
 		const transaction = concurrence.observeServerEventCallback<typeof callback>(callback, false);
 		const observers = global.observers || (global.observers = []);
 		const dispatch = (message: string) => transaction.send(message);

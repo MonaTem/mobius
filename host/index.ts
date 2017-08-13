@@ -77,26 +77,26 @@ class ConcurrenceHost {
 			}
 		}, 60 * 1000);
 	}
-	sessionById(sessionID: string, createSession: boolean) {
+	sessionById(sessionID: string, newSessionFromRequest: Express.Request | undefined) {
 		let session = this.sessions[sessionID];
 		if (!session) {
 			if (!sessionID) {
 				throw new Error("No session ID specified!");
 			}
-			if (!createSession) {
+			if (!newSessionFromRequest) {
 				throw new Error("Session ID is not valid!");
 			}
-			session = new ConcurrenceSession(this, sessionID);
+			session = new ConcurrenceSession(this, sessionID, newSessionFromRequest);
 			this.sessions[sessionID] = session;
 			session.run();
 		}
 		return session;
 	}
-	newSession() {
+	newSession(request: Express.Request) {
 		for (;;) {
 			const sessionID = uuid();
 			if (!this.sessions[sessionID]) {
-				return this.sessions[sessionID] = new ConcurrenceSession(this, sessionID);
+				return this.sessions[sessionID] = new ConcurrenceSession(this, sessionID, request);
 			}
 		}
 	}
@@ -179,7 +179,7 @@ class ConcurrenceServerSideRenderer {
 			this.clientScript = undefined;
 			const bootstrapScript = this.document.createElement("script");
 			bootstrapScript.type = "application/x-concurrence-bootstrap";
-			bootstrapScript.appendChild(this.document.createTextNode(compatibleStringify({ sessionID: this.session.sessionID, events: queuedLocalEvents, idle: this.session.localTransactionCount == 0 })));
+			bootstrapScript.appendChild(this.document.createTextNode(compatibleStringify({ sessionID: this.session.sessionID, events: queuedLocalEvents, idle: this.session.localChannelCount == 0 })));
 			const parentNode = clientScript.parentNode!;
 			parentNode.insertBefore(bootstrapScript, clientScript);
 			const result = this.dom.serialize();
@@ -197,12 +197,12 @@ class ConcurrenceSession {
 	sessionID: string;
 	dead: boolean = false;
 	lastMessageTime: number = Date.now();
-	localTransactionCounter: number = 0;
-	localTransactionCount: number = 0;
-	localPrerenderTransactionCount: number = 0;
-	remoteTransactionCounter: number = 0;
-	pendingTransactions: { [transactionId: number]: (event: ConcurrenceEvent) => void; } = {};
-	pendingTransactionCount: number = 0;
+	localChannelCounter: number = 0;
+	localChannelCount: number = 0;
+	localPrerenderChannelCount: number = 0;
+	remoteChannelCounter: number = 0;
+	pendingChannels: { [channelId: number]: (event: ConcurrenceEvent) => void; } = {};
+	pendingChannelCount: number = 0;
 	incomingMessageId: number = 0;
 	reorderedMessages: ConcurrenceMessage[] = [];
 	context: any;
@@ -210,7 +210,7 @@ class ConcurrenceSession {
 	queuedLocalEventsResolve: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
 	localResolveTimeout: NodeJS.Timer | undefined;
 	serverSideRenderer: ConcurrenceServerSideRenderer | undefined;
-	constructor(host: ConcurrenceHost, sessionID: string, request: express.Request) {
+	constructor(host: ConcurrenceHost, sessionID: string, request: Express.Request) {
 		this.host = host;
 		this.sessionID = sessionID;
 		// Server-side version of the API
@@ -245,24 +245,24 @@ class ConcurrenceSession {
 			return true;
 		}
 		this.incomingMessageId++;
-		// Read each event and dispatch the appropriate transaction in order
+		// Read each event and dispatch the appropriate message in order
 		const jsonEvents = message.events;
 		if (jsonEvents) {
 			const events = JSON.parse("[" + jsonEvents + "]");
 			for (let i = 0; i < events.length; i++) {
 				const event = events[i];
-				let transactionId = event[0];
-				let transaction;
-				if (transactionId < 0) {
+				const channelId = event[0];
+				let channel;
+				if (channelId < 0) {
 					// Server decided the ordering on "fenced" events
-					this.sendEvent([transactionId]);
-					transaction = this.pendingTransactions[-transactionId];
+					this.sendEvent([channelId]);
+					channel = this.pendingChannels[-channelId];
 				} else {
 					// Regular client-side events are handled normally
-					transaction = this.pendingTransactions[transactionId];
+					channel = this.pendingChannels[channelId];
 				}
-				if (transaction) {
-					transaction(event);
+				if (channel) {
+					channel(event);
 				}
 			}
 		}
@@ -286,7 +286,7 @@ class ConcurrenceSession {
 	}
 	dequeueEvents() : Promise<ConcurrenceEvent[] | undefined> {
 		return new Promise<ConcurrenceEvent[] | undefined>((resolve, reject) => {
-			// Wait until events are ready, a new event handler comes in, or no more local transactions exist
+			// Wait until events are ready, a new event handler comes in, or no more local channels exist
 			const queuedLocalEvents = this.queuedLocalEvents;
 			const oldResolve = this.queuedLocalEventsResolve;
 			if (queuedLocalEvents) {
@@ -298,7 +298,7 @@ class ConcurrenceSession {
 					resolve(queuedLocalEvents);
 					return;
 				}
-			} else if (this.localTransactionCount) {
+			} else if (this.localChannelCount) {
 				this.queuedLocalEventsResolve = resolve;
 				if (oldResolve) {
 					oldResolve(undefined);
@@ -340,9 +340,9 @@ class ConcurrenceSession {
 					this.localResolveTimeout = undefined;
 				}
 			}
-			// If no transactions remain, the session is in a state where no more events
+			// If no channels remain, the session is in a state where no more events
 			// can be sent from either the client or server. Session can be destroyed
-			if (this.pendingTransactionCount + this.localTransactionCount == 0) {
+			if (this.pendingChannelCount + this.localChannelCount == 0) {
 				this.destroy();
 			}
 		});
@@ -371,32 +371,32 @@ class ConcurrenceSession {
 			this.sendQueuedEvents();
 		}
 	}
-	enterLocalTransaction(includedInPrerender: boolean = true) : number {
+	enterLocalChannel(includedInPrerender: boolean = true) : number {
 		if (includedInPrerender) {
-			++this.localPrerenderTransactionCount;
+			++this.localPrerenderChannelCount;
 		}
-		return ++this.localTransactionCount;
+		return ++this.localChannelCount;
 	}
-	exitLocalTransaction(includedInPrerender: boolean = true) : number {
+	exitLocalChannel(includedInPrerender: boolean = true) : number {
 		if (includedInPrerender) {
-			if (--this.localPrerenderTransactionCount == 0) {
+			if (--this.localPrerenderChannelCount == 0) {
 				immediate(undefined).then(() => this.completeServerSideRendering());
 			}
 		}
-		return --this.localTransactionCount;
+		return --this.localChannelCount;
 	}
 	observeLocalPromise<T extends ConcurrenceJsonValue>(value: Promise<T> | T, includedInPrerender: boolean = true): Promise<T> {
 		// Record and ship values/errors of server-side promises
-		this.enterLocalTransaction(includedInPrerender);
-		const transactionId = ++this.localTransactionCounter;
+		this.enterLocalChannel(includedInPrerender);
+		const channelId = ++this.localChannelCounter;
 		return Promise.resolve(value).then(value => {
 			// Forward the value to the client
-			this.exitLocalTransaction(includedInPrerender);
-			this.sendEvent([transactionId, value]);
+			this.exitLocalChannel(includedInPrerender);
+			this.sendEvent([channelId, value]);
 			return roundTrip(value);
 		}, error => {
 			// Serialize the reject error type or string
-			this.exitLocalTransaction(includedInPrerender);
+			this.exitLocalChannel(includedInPrerender);
 			let type: number | string = 1;
 			let serializedError = error;
 			if (error instanceof Error) {
@@ -404,34 +404,34 @@ class ConcurrenceSession {
 				type = error.constructor.name;
 				serializedError = Object.assign({ message: error.message, stack: error.stack }, error);
 			}
-			this.sendEvent([transactionId, serializedError, type]);
+			this.sendEvent([channelId, serializedError, type]);
 			return error;
 		});
 	}
-	observeLocalEventCallback<T extends Function>(callback: T, includedInPrerender: boolean = true): ConcurrenceLocalTransaction<T> {
+	observeLocalEventCallback<T extends Function>(callback: T, includedInPrerender: boolean = true): ConcurrenceLocalChannel<T> {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
 		// Record and ship arguments of server-side events
 		const session = this;
-		session.enterLocalTransaction(includedInPrerender);
-		let transactionId = ++session.localTransactionCounter;
+		session.enterLocalChannel(includedInPrerender);
+		let channelId = ++session.localChannelCounter;
 		return {
 			send: function() {
-				if (transactionId >= 0) {
+				if (channelId >= 0) {
 					let args = [...arguments];
 					if (!session.dead) {
-						session.sendEvent([transactionId, ...args] as ConcurrenceEvent);
+						session.sendEvent([channelId, ...args] as ConcurrenceEvent);
 					}
 					args = roundTrip(args);
 					setImmediate(() => (callback as any as Function).apply(null, args));
 				}
 			} as any as T,
 			close: function() {
-				if (transactionId >= 0) {
-					transactionId = -1;
-					if (session.exitLocalTransaction(includedInPrerender) == 0) {
-						// If this was the last server transaction, reevaluate queued events so the session can be potentially collected
+				if (channelId >= 0) {
+					channelId = -1;
+					if (session.exitLocalChannel(includedInPrerender) == 0) {
+						// If this was the last server channel, reevaluate queued events so the session can be potentially collected
 						session.sendQueuedEvents();
 					}
 				}
@@ -439,19 +439,19 @@ class ConcurrenceSession {
 		};
 	}
 
-	registerRemoteTransaction(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceTransaction {
+	registerRemoteChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
 		if (this.dead) {
 			throw new Error("Session has died!");
 		}
-		this.pendingTransactionCount++;
-		const transactionId = ++this.remoteTransactionCounter;
-		this.pendingTransactions[transactionId] = callback;
+		this.pendingChannelCount++;
+		const channelId = ++this.remoteChannelCounter;
+		this.pendingChannels[channelId] = callback;
 		return {
 			close: () => {
-				if (this.pendingTransactions[transactionId]) {
-					delete this.pendingTransactions[transactionId];
-					if ((--this.pendingTransactionCount) == 0) {
-						// If this was the last client transaction, reevaluate queued events so the session can be potentially collected
+				if (this.pendingChannels[channelId]) {
+					delete this.pendingChannels[channelId];
+					if ((--this.pendingChannelCount) == 0) {
+						// If this was the last client channel, reevaluate queued events so the session can be potentially collected
 						this.sendQueuedEvents();
 					}
 				}
@@ -460,8 +460,8 @@ class ConcurrenceSession {
 	}
 	receiveRemotePromise<T extends ConcurrenceJsonValue>() {
 		return new Promise<T>((resolve, reject) => {
-			const transaction = this.registerRemoteTransaction(event => {
-				transaction.close();
+			const channel = this.registerRemoteChannel(event => {
+				channel.close();
 				if (!event) {
 					reject(new Error("Disconnected from client!"));
 				} else {
@@ -483,19 +483,19 @@ class ConcurrenceSession {
 			});
 		});
 	}
-	receiveRemoteEventStream<T extends Function>(callback: T): ConcurrenceTransaction {
+	receiveRemoteEventStream<T extends Function>(callback: T): ConcurrenceChannel {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
-		const transaction = this.registerRemoteTransaction(function(event) {
+		const channel = this.registerRemoteChannel(function(event) {
 			if (event) {
 				event.shift();
 				callback.apply(null, event);
 			} else {
-				transaction.close();
+				channel.close();
 			}
 		});
-		return transaction;
+		return channel;
 	}
 
 	destroy() {
@@ -532,11 +532,11 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
 	server.get("/", (req, res) => {
 		new Promise<string>(resolve => {
-			const session = host.newSession();
+			const session = host.newSession(req);
 			session.startServerSideRendering().resolve = resolve;
-			++session.localPrerenderTransactionCount;
+			++session.localPrerenderChannelCount;
 			session.run();
-			if (--session.localPrerenderTransactionCount == 0) {
+			if (--session.localPrerenderChannelCount == 0) {
 				immediate(undefined).then(() => session.completeServerSideRendering());
 			}
 		}).then(html => {
@@ -563,7 +563,7 @@ server.post("/", function(req, res) {
 			resolve();
 		} else {
 			// Process incoming events
-			const session = host.sessionById(body.sessionID, (body.messageID | 0) == 0);
+			const session = host.sessionById(body.sessionID, (body.messageID | 0) == 0 ? req : undefined);
 			if (renderingMode >= ConcurrenceRenderingMode.FullEmulation && req.query["js"] == "no") {
 				const renderer = session.serverSideRenderer;
 				if (renderer) {
@@ -583,7 +583,7 @@ server.post("/", function(req, res) {
 			} else {
 				session.completeServerSideRendering(true);
 				if (session.receiveMessage(body)) {
-					// Wait to send the response until we have events ready or until there are no more server-side transactions open
+					// Wait to send the response until we have events ready or until there are no more server-side channels open
 					resolve(session.dequeueEvents().then(events => {
 						res.set("Content-Type", "text/plain");
 						res.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
@@ -608,7 +608,7 @@ expressWs(server);
 	try {
 		const body = qs.parse(req.query);
 		let messageId = body.messageID | 0;
-		const session = host.sessionById(body.sessionID, messageId == 0);
+		const session = host.sessionById(body.sessionID, messageId == 0 ? req : undefined);
 		session.completeServerSideRendering(true);
 		let closed = false;
 		function processMessage(body: ConcurrenceMessage) {

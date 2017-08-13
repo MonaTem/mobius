@@ -50,13 +50,13 @@ namespace concurrence {
 	let activeConnectionCount = 0;
 	export let dead = false;
 
-	// Remote transactions
-	let remoteTransactionCounter = 0;
-	const pendingTransactions : { [key: number]: (event: ConcurrenceEvent | undefined) => void; } = {};
-	let pendingTransactionCount = 0;
+	// Remote channels
+	let remoteChannelCounter = 0;
+	const pendingChannels : { [key: number]: (event: ConcurrenceEvent | undefined) => void; } = {};
+	let pendingChannelCount = 0;
 
-	// Local transactions
-	let localTransactionCounter = 0;
+	// Local channels
+	let localChannelCounter = 0;
 	let queuedLocalEvents: ConcurrenceEvent[] = [];
 	const fencedLocalEvents: { [key: number]: ((event: ConcurrenceEvent) => void)[]; } = {};
 
@@ -107,9 +107,9 @@ namespace concurrence {
 				}
 				websocket = undefined;
 			}
-			// Abandon pending transactions
-			for (let transactionId in pendingTransactions) {
-				pendingTransactions[transactionId](undefined);
+			// Abandon pending channels
+			for (let channelId in pendingChannels) {
+				pendingChannels[channelId](undefined);
 			}
 			// Send a "destroy" message so that the server can clean up the session
 			const message = serializeMessage(outgoingMessageId++) + "&destroy=1";
@@ -135,29 +135,29 @@ namespace concurrence {
 			return true;
 		}
 		incomingMessageId++;
-		// Read each event and dispatch the appropriate transaction in order
+		// Read each event and dispatch the appropriate event in order
 		for (let i = 0; i < events.length; i++) {
 			const event = events[i];
-			let transactionId = event[0];
-			let transaction: ((event: ConcurrenceEvent | undefined) => void) | undefined;
-			if (transactionId < 0) {
+			const channelId = event[0];
+			let channel: ((event: ConcurrenceEvent | undefined) => void) | undefined;
+			if (channelId < 0) {
 				// Fenced client-side event
-				let fencedQueue = fencedLocalEvents[-transactionId];
-				transaction = fencedQueue.shift();
+				let fencedQueue = fencedLocalEvents[-channelId];
+				channel = fencedQueue.shift();
 				if (fencedQueue.length == 0) {
-					delete fencedLocalEvents[-transactionId];
+					delete fencedLocalEvents[-channelId];
 				}
 			} else {
 				// Server-side event
-				transaction = pendingTransactions[transactionId];
+				channel = pendingChannels[channelId];
 			}
-			if (transaction) {
-				transaction(event);
+			if (channel) {
+				channel(event);
 			} else {
 				throw new Error("Guru meditation error!");
 			}
 		}
-		synchronizeTransactions();
+		synchronizeChannels();
 		return true;
 	}
 
@@ -234,7 +234,7 @@ namespace concurrence {
 		if (attemptWebSockets && WebSocketClass) {
 			try {
 				const newSocket = new WebSocketClass(socketURL + body);
-				// Attempt to open a WebSocket for transactions, but not heartbeats
+				// Attempt to open a WebSocket for channels, but not heartbeats
 				const newSocketOpened = () => {
 					newSocket.removeEventListener("open", newSocketOpened, false);
 					newSocket.removeEventListener("error", newSocketErrored, false);
@@ -267,18 +267,18 @@ namespace concurrence {
 		sendFormMessage(body, messageId);
 	}
 
-	function synchronizeTransactions() {
+	function synchronizeChannels() {
 		// Deferred sending of events so that we many from a single event loop can be batched
 		defer(() => {
 			if (idleDuringPrerender) {
 				setTimeout(() => {
 					idleDuringPrerender = false;
-					synchronizeTransactions();
+					synchronizeChannels();
 				}, 1);
 				return;
 			}
 			if (!dead) {
-				if ((pendingTransactionCount != 0 && activeConnectionCount == 0) || queuedLocalEvents.length) {
+				if ((pendingChannelCount != 0 && activeConnectionCount == 0) || queuedLocalEvents.length) {
 					sendMessages(true);
 					restartHeartbeat();
 				} else if (websocket && pendingSocketMessageIds.length == 0) {
@@ -292,21 +292,21 @@ namespace concurrence {
 		});
 	}
 
-	function registerRemoteTransaction(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceTransaction {
+	function registerRemoteChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
 		if (dead) {
 			throw new Error("Session has died!");
 		}
 		// Expect that the server will run some code in parallel that provides data
-		pendingTransactionCount++;
-		const transactionId = ++remoteTransactionCounter;
-		pendingTransactions[transactionId] = callback;
-		synchronizeTransactions();
+		pendingChannelCount++;
+		const channelId = ++remoteChannelCounter;
+		pendingChannels[channelId] = callback;
+		synchronizeChannels();
 		return {
 			close: () => {
 				// Cleanup the bookkeeping
-				if (pendingTransactions[transactionId]) {
-					pendingTransactionCount--;
-					delete pendingTransactions[transactionId];
+				if (pendingChannels[channelId]) {
+					pendingChannelCount--;
+					delete pendingChannels[channelId];
 				}
 			}
 		};
@@ -317,21 +317,21 @@ namespace concurrence {
 			return Promise.reject(new Error("Session has died!"));
 		}
 		const result = new Promise<ConcurrenceEvent | undefined>((resolve, reject) => {
-			if (pendingTransactionCount) {
-				// Let server decide on the ordering of events since server-side transactions are active
-				const transactionId = event[0];
-				const fencedQueue = fencedLocalEvents[transactionId] || (fencedLocalEvents[transactionId] = []);
+			if (pendingChannelCount) {
+				// Let server decide on the ordering of events since server-side channels are active
+				const channelId = event[0];
+				const fencedQueue = fencedLocalEvents[channelId] || (fencedLocalEvents[channelId] = []);
 				fencedQueue.push(resolve);
-				event[0] = -transactionId;
+				event[0] = -channelId;
 			} else {
-				// No pending server-side transactions, resolve immediately
+				// No pending server-side channels, resolve immediately
 				resolve();
 			}
 		});
 		// Queue an event to be sent to the server in the next flush
 		queuedLocalEvents.push(event);
 		if (queuedLocalEvents.length == 1) {
-			synchronizeTransactions();
+			synchronizeChannels();
 		}
 		return result;
 	}
@@ -341,8 +341,8 @@ namespace concurrence {
 	// APIs for client/, not to be used inside src/
 	export function receiveServerPromise<T extends ConcurrenceJsonValue>(...args: any[]) : Promise<T> { // Must be cast to the proper signature
 		return new Promise<T>(function(resolve, reject) {
-			const transaction = registerRemoteTransaction(function(event) {
-				transaction.close();
+			const channel = registerRemoteChannel(function(event) {
+				channel.close();
 				if (!event) {
 					reject(new Error("Disconnected from server!"));
 				} else {
@@ -371,23 +371,23 @@ namespace concurrence {
 		});
 	};
 
-	export function receiveServerEventStream<T extends Function>(callback: T): ConcurrenceTransaction {
+	export function receiveServerEventStream<T extends Function>(callback: T): ConcurrenceChannel {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
-		const transaction = registerRemoteTransaction(event => {
+		const channel = registerRemoteChannel(event => {
 			if (event) {
 				callback.apply(null, event.slice(1));
 			} else {
-				transaction.close();
+				channel.close();
 			}
 		});
-		return transaction;
+		return channel;
 	}
 
 	export function observeClientPromise<T extends ConcurrenceJsonValue>(value: Promise<T> | T) : Promise<T> {
-		let transactionId = ++localTransactionCounter;
-		return Promise.resolve(value).then(value => sendEvent([transactionId, value]).then(() => roundTrip(value)), error => {
+		let channelId = ++localChannelCounter;
+		return Promise.resolve(value).then(value => sendEvent([channelId, value]).then(() => roundTrip(value)), error => {
 			// Convert Error types to a representation that can be reconstituted on the server
 			let type : any = 1;
 			let serializedError: any = error;
@@ -407,31 +407,31 @@ namespace concurrence {
 					}
 				}
 			}
-			return sendEvent([transactionId, serializedError, type]).then(() => Promise.reject(error));
+			return sendEvent([channelId, serializedError, type]).then(() => Promise.reject(error));
 		});
 	};
 
-	export function observeClientEventCallback<T extends Function>(callback: T) : ConcurrenceLocalTransaction<T> {
+	export function observeClientEventCallback<T extends Function>(callback: T) : ConcurrenceLocalChannel<T> {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
-		let transactionId: number = ++localTransactionCounter;
+		let channelId: number = ++localChannelCounter;
 		return {
 			send: function() {
-				if (transactionId >= 0) {
+				if (channelId >= 0) {
 					const message = Array.prototype.slice.call(arguments);
 					const args = message.slice();
-					message.unshift(transactionId);
+					message.unshift(channelId);
 					sendEvent(message).then(function() {
 						// Finally send event if a destroy call hasn't won the race
-						if (transactionId >= 0) {
+						if (channelId >= 0) {
 							(callback as any as Function).apply(null, roundTrip(args));
 						}
 					});
 				}
 			} as any as T,
 			close: function() {
-				transactionId = -1;
+				channelId = -1;
 			}
 		};
 	}
