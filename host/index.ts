@@ -12,6 +12,9 @@ const expressWs = require("express-ws");
 import * as uuid from "uuid";
 import { JSDOM } from "jsdom";
 
+import * as preact from "preact";
+preact.options.event = e => ({} as any as Event);
+
 const server = express();
 
 const relativePath = (relative: string) => path.join(__dirname, relative);
@@ -137,7 +140,8 @@ class ConcurrenceServerSideRenderer {
 	document: Document;
 	clientScript: Element | undefined;
 	messageIdInput: HTMLInputElement | undefined;
-	resolve: ((html: string) => void) | undefined;
+	initialPage: Promise<void>;
+	resolveInitialPage: (() => void) | undefined;
 	constructor(session: ConcurrenceSession) {
 		this.session = session;
 		this.dom = new JSDOM(host.htmlSource);
@@ -165,6 +169,7 @@ class ConcurrenceServerSideRenderer {
 			migrateChildren(body, formNode);
 			body.appendChild(formNode);
 		}
+		this.initialPage = new Promise<void>(resolve => this.resolveInitialPage = resolve);
 	}
 	renderPage() {
 		const session = this.session;
@@ -209,16 +214,19 @@ class ConcurrenceSession {
 	queuedLocalEvents: ConcurrenceEvent[] | undefined;
 	queuedLocalEventsResolve: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
 	localResolveTimeout: NodeJS.Timer | undefined;
-	serverSideRenderer: ConcurrenceServerSideRenderer | undefined;
+	serverSideRenderer: ConcurrenceServerSideRenderer;
 	constructor(host: ConcurrenceHost, sessionID: string, request: Express.Request) {
 		this.host = host;
 		this.sessionID = sessionID;
+		this.serverSideRenderer = new ConcurrenceServerSideRenderer(this);
 		// Server-side version of the API
 		const context = Object.create(global);
 		context.require = require;
 		context.global = context;
-		context.document = undefined;
+		// Preact requires a document on the global object to be able to create nodes
+		(global as any).document = context.document = this.serverSideRenderer.document;
 		context.request = request;
+		context.preact = preact;
 		context.concurrence = {
 			disconnect : this.destroy.bind(this),
 			secrets: secrets,
@@ -228,7 +236,17 @@ class ConcurrenceSession {
 			receiveClientEventStream: this.receiveRemoteEventStream.bind(this),
 			observeServerEventCallback: this.observeLocalEventCallback.bind(this),
 			showDeterminismWarning: showDeterminismWarning,
-			applyDeterminismWarning: applyDeterminismWarning
+			applyDeterminismWarning: applyDeterminismWarning,
+			createRenderPromise: function<T extends ConcurrenceJsonValue | void>(handler: (document: Document, resolve: (value: T) => void, reject: (error: any) => void) => void) : Promise<T> {
+				// Always run on the client and expect a promise from it
+				const clientPromise: Promise<T> = this.receiveClientPromise();
+				// If prerendering, additionally execute on the server
+				const document = context.document;
+				if (document) {
+					return new Promise<T>((resolve, reject) => handler(document, resolve, reject));
+				}
+				return clientPromise;
+			}
 		};
 		this.context = context;
 	}
@@ -263,6 +281,10 @@ class ConcurrenceSession {
 				}
 				if (channel) {
 					channel(event);
+				} else if (channelId < 0) {
+					throw new Error("Guru meditation error. Received event on unknown client channel with ID " + -channelId + "(fenced)");
+				} else {
+					throw new Error("Guru meditation error. Received event on unknown client channel with ID " + channelId);
 				}
 			}
 		}
@@ -347,27 +369,20 @@ class ConcurrenceSession {
 			}
 		});
 	}
-	startServerSideRendering(): ConcurrenceServerSideRenderer {
-		if (this.serverSideRenderer) {
-			return this.serverSideRenderer;
+	prerender() {
+		this.incomingMessageId++;
+		++this.localPrerenderChannelCount;
+		this.run();
+		if (--this.localPrerenderChannelCount == 0) {
+			immediate(undefined).then(() => this.completeServerSideRendering());
 		}
-		const renderer = new ConcurrenceServerSideRenderer(this);
-		this.serverSideRenderer = renderer;
-		this.context.document = renderer.document;
-		return renderer;
+		return this.serverSideRenderer.initialPage;
 	}
-	completeServerSideRendering(destroyRenderer?: boolean) {
-		const renderer = this.serverSideRenderer;
-		if (renderer) {
-			const resolve = renderer.resolve;
-			if (resolve) {
-				renderer.resolve = undefined;
-				resolve(renderer.renderPage());
-			}
-			if (destroyRenderer || (renderingMode == ConcurrenceRenderingMode.Prerendering)) {
-				this.context.document = undefined;
-				this.serverSideRenderer = undefined;
-			}
+	completeServerSideRendering() {
+		const resolve = this.serverSideRenderer.resolveInitialPage;
+		if (resolve) {
+			this.serverSideRenderer.resolveInitialPage = undefined;
+			resolve();
 			this.sendQueuedEvents();
 		}
 	}
@@ -392,7 +407,7 @@ class ConcurrenceSession {
 		return Promise.resolve(value).then(value => {
 			// Forward the value to the client
 			this.exitLocalChannel(includedInPrerender);
-			this.sendEvent([channelId, value]);
+			this.sendEvent(typeof value == "undefined" ? [channelId] : [channelId, value]);
 			return roundTrip(value);
 		}, error => {
 			// Serialize the reject error type or string
@@ -419,12 +434,11 @@ class ConcurrenceSession {
 		return {
 			send: function() {
 				if (channelId >= 0) {
-					let args = [...arguments];
+					let args = roundTrip([...arguments]);
+					setImmediate(() => (callback as any as Function).apply(null, args));
 					if (!session.dead) {
 						session.sendEvent([channelId, ...args] as ConcurrenceEvent);
 					}
-					args = roundTrip(args);
-					setImmediate(() => (callback as any as Function).apply(null, args));
 				}
 			} as any as T,
 			close: function() {
@@ -502,7 +516,7 @@ class ConcurrenceSession {
 		if (!this.dead) {
 			this.dead = true;
 			this.context.concurrence.dead = true;
-			this.completeServerSideRendering(true);
+			this.completeServerSideRendering();
 			this.sendQueuedEvents();
 			delete this.host.sessions[this.sessionID];
 		}
@@ -533,12 +547,7 @@ if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
 	server.get("/", (req, res) => {
 		new Promise<string>(resolve => {
 			const session = host.newSession(req);
-			session.startServerSideRendering().resolve = resolve;
-			++session.localPrerenderChannelCount;
-			session.run();
-			if (--session.localPrerenderChannelCount == 0) {
-				immediate(undefined).then(() => session.completeServerSideRendering());
-			}
+			resolve(session.prerender().then(() => session.serverSideRenderer.renderPage()));
 		}).then(html => {
 			noCache(res);
 			res.set("Content-Type", "text/html");
@@ -564,24 +573,14 @@ server.post("/", function(req, res) {
 		} else {
 			// Process incoming events
 			const session = host.sessionById(body.sessionID, (body.messageID | 0) == 0 ? req : undefined);
+			session.completeServerSideRendering();
 			if (renderingMode >= ConcurrenceRenderingMode.FullEmulation && req.query["js"] == "no") {
-				const renderer = session.serverSideRenderer;
-				if (renderer) {
-					// TODO: Apply button presses
-					resolve(new Promise(resolve => {
-						renderer.resolve = resolve;
-						session.completeServerSideRendering();
-					}).then(html => {
-						res.set("Content-Type", "text/html");
-						res.send(html);
-					}));
-				} else {
-					res.set("Content-Type", "text/plain");
-					res.send("JavaScript free rendering abandoned :'(");
-					resolve();
-				}
+				// TODO: Apply button presses
+				session.serverSideRenderer.initialPage.then(html => {
+					res.set("Content-Type", "text/html");
+					res.send(html);
+				});
 			} else {
-				session.completeServerSideRendering(true);
 				if (session.receiveMessage(body)) {
 					// Wait to send the response until we have events ready or until there are no more server-side channels open
 					resolve(session.dequeueEvents().then(events => {
@@ -608,10 +607,9 @@ expressWs(server);
 	try {
 		const body = qs.parse(req.query);
 		let messageId = body.messageID | 0;
-		const session = host.sessionById(body.sessionID, messageId == 0 ? req : undefined);
-		session.completeServerSideRendering(true);
+		const session = host.sessionById(body.sessionID, (messageId == 0) ? req : undefined);
 		let closed = false;
-		function processMessage(body: ConcurrenceMessage) {
+		function processBody(body: ConcurrenceMessage) {
 			if (session.receiveMessage(body)) {
 				session.dequeueEvents().then(events => {
 					if (!closed) {
@@ -621,12 +619,12 @@ expressWs(server);
 					}
 				});
 			} else {
-				ws.send("");
+				ws.close();
 			}
 		}
-		processMessage(body);
+		processBody(body);
 		ws.on("message", function(msg: string) {
-			processMessage({
+			processBody({
 				messageID: ++messageId,
 				events: msg,
 			});

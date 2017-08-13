@@ -1,3 +1,4 @@
+///<reference types="preact"/>
 namespace concurrence {
 	const defer = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { setTimeout(callback, 0) };
 
@@ -385,9 +386,9 @@ namespace concurrence {
 		return channel;
 	}
 
-	export function observeClientPromise<T extends ConcurrenceJsonValue>(value: Promise<T> | T) : Promise<T> {
+	export function observeClientPromise<T extends ConcurrenceJsonValue | void>(value: Promise<T> | T) : Promise<T> {
 		let channelId = ++localChannelCounter;
-		return Promise.resolve(value).then(value => sendEvent([channelId, value]).then(() => roundTrip(value)), error => {
+		return Promise.resolve(value).then(value => sendEvent(typeof value == "undefined" ? [channelId] : [channelId, value]).then(() => roundTrip(value)), error => {
 			// Convert Error types to a representation that can be reconstituted on the server
 			let type : any = 1;
 			let serializedError: any = error;
@@ -409,6 +410,10 @@ namespace concurrence {
 			}
 			return sendEvent([channelId, serializedError, type]).then(() => Promise.reject(error));
 		});
+	};
+
+	export function createRenderPromise<T extends ConcurrenceJsonValue | void>(handler: (document: Document, resolve: (value: T) => void, reject: (error: any) => void) => void) : Promise<T> {
+		return observeClientPromise(new Promise<T>((resolve, reject) => handler(document, resolve, reject)));
 	};
 
 	export function observeClientEventCallback<T extends Function>(callback: T) : ConcurrenceLocalChannel<T> {
@@ -435,4 +440,5 @@ namespace concurrence {
 			}
 		};
 	}
+
 }

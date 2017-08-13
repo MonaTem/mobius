@@ -1,3 +1,4 @@
 node_modules
 public/client.js
 build/
+*.js.map

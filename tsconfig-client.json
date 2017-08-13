@@ -1,21 +1,30 @@
 {
 	"include": [
+		"node_modules/preact/dist/preact.js",
 		"api/concurrence-client.ts",
 		"api/**/*-client.ts",
 		"api/**/*-client.js",
 		"api/**/*.ts",
 		"api/**/*.js",
+		"api/**/*.tsx",
+		"api/**/*.jsx",
 		"src/**/*.ts",
-		"src/**/*.js"
+		"src/**/*.js",
+		"src/**/*.tsx",
+		"src/**/*.jsx"
 	],
 	"exclude": [
 		"api/**/*-server.ts",
-		"api/**/*-server.js"
+		"api/**/*-server.js",
+		"api/**/*-server.tsx",
+		"api/**/*-server.jsx"
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
 		"outFile": "public/client.js",
 		"allowJs": true,
+		"jsx": "React",
+		"jsxFactory": "preact.h",
 		"strict": true,
 		"strictNullChecks": true,
 		"noUnusedLocals": true,

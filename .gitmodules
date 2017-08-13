@@ -1,0 +1,3 @@
+[submodule "preact"]
+	path = preact
+	url = git://github.com/rpetrich/preact

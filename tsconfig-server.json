@@ -5,17 +5,25 @@
 		"api/**/*-server.js",
 		"api/**/*.ts",
 		"api/**/*.js",
+		"api/**/*.tsx",
+		"api/**/*.jsx",
 		"src/**/*.ts",
-		"src/**/*.js"
+		"src/**/*.js",
+		"src/**/*.tsx",
+		"src/**/*.jsx"
 	],
 	"exclude": [
 		"api/**/*-client.ts",
-		"api/**/*-client.js"
+		"api/**/*-client.js",
+		"api/**/*-client.tsx",
+		"api/**/*-client.jsx"
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
 		"outFile": "build/server.js",
 		"allowJs": true,
+		"jsx": "React",
+		"jsxFactory": "preact.h",
 		"strict": true,
 		"strictNullChecks": true,
 		"noUnusedLocals": true,
