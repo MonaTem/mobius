@@ -1,5 +1,7 @@
 /// <reference types="preact" />
 
+declare const self: NodeJS.Global;
+
 namespace concurrence {
 
 	type PreactNode = Node & {

@@ -6,7 +6,7 @@ namespace concurrence {
 				return cachedCookies;
 			}
 			var result: {[key: string]: string} = {};
-			var list = (((global as any)["request"]["headers"]["Cookie"] || "") as string).split(/;\s*/g);
+			var list = (((self as any)["request"]["headers"]["Cookie"] || "") as string).split(/;\s*/g);
 			for (var i = 0; i < list.length; i++) {
 				var split : string[] = list[i].split(/=/);
 				if (split.length > 1) {

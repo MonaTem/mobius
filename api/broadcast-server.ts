@@ -6,7 +6,7 @@ declare module NodeJS  {
 
 namespace concurrence {
 	export function broadcast(inboxName: string, message: ConcurrenceJsonValue) {
-		const inboxes = sharedGlobal.observers;
+		const inboxes = global.observers;
 		if (inboxes && Object.hasOwnProperty.call(inboxes, inboxName)) {
 			const observers = inboxes[inboxName];
 			for (let i = 0; i < observers.length; i++) {
@@ -16,7 +16,7 @@ namespace concurrence {
 	}
 	export function receive(inboxName: string, callback: (message: ConcurrenceJsonValue) => void): ConcurrenceChannel {
 		const transaction = concurrence.observeServerEventCallback<typeof callback>(callback, false);
-		const inboxes = sharedGlobal.observers || (sharedGlobal.observers = {});
+		const inboxes = global.observers || (global.observers = {});
 		const observers = Object.hasOwnProperty.call(inboxes, inboxName) ? inboxes[inboxName] : (inboxes[inboxName] = []);
 		const dispatch = (message: ConcurrenceJsonValue) => transaction.send(message);
 		observers.push(dispatch);

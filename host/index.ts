@@ -224,9 +224,8 @@ class ConcurrenceSession {
 		// Server-side version of the API
 		const context = Object.create(global);
 		context.require = require;
-		context.global = context;
-		context.sharedGlobal = global;
-		context.self = global;
+		context.self = context;
+		context.global = global;
 		context.document = this.serverSideRenderer.document;
 		context.request = request;
 		context.concurrence = {
@@ -504,7 +503,7 @@ class ConcurrenceSession {
 					if (type) {
 						// Convert serialized representation into the appropriate Error type
 						if (type != 1 && /Error$/.test(type)) {
-							const ErrorType : typeof Error = (global as any)[type] || Error;
+							const ErrorType : typeof Error = (self as any)[type] || Error;
 							const newValue = new ErrorType(value.message);
 							delete value.message;
 							value = Object.assign(newValue, value);

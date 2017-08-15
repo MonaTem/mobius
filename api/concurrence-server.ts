@@ -15,7 +15,3 @@ declare namespace concurrence {
 
 	export let secrets: { [key: string]: any };
 }
-
-declare const document : Document | undefined;
-
-declare const sharedGlobal : NodeJS.Global;

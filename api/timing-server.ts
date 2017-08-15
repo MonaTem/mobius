@@ -1,7 +1,7 @@
 namespace concurrence {
 	// Override the Date object with one that shows determinism errors
 	// see: https://stackoverflow.com/a/22402079/4007
-	global.Date = function(__Date) {
+	self.Date = function(__Date) {
 		// Copy that property!
 		for (let i of Object.getOwnPropertyNames(__Date)) {
 			if (!(i in Date)) {
@@ -15,7 +15,7 @@ namespace concurrence {
 		return Date as typeof __Date;
 		function Date(this: any) {
 			let args = [...arguments];
-			args.unshift(global);
+			args.unshift(self);
 			if (this instanceof __Date) {
 				if (args.length == 1) {
 					concurrence.showDeterminismWarning("new Date()", "concurrence.now()");
@@ -25,7 +25,7 @@ namespace concurrence {
 				return result;
 			} else {
 				concurrence.showDeterminismWarning("Date()", "concurrence.now()");
-				return __Date.apply(global, args);
+				return __Date.apply(self, args);
 			}
 		}
 	}(Date);
@@ -33,7 +33,7 @@ namespace concurrence {
 	export function now(): Promise<number> {
 		return concurrence.observeServerPromise(realNow.call(Date));
 	}
-	const realSetInterval = concurrence.applyDeterminismWarning(global, "setInterval", "setInterval(callback, millis)", "concurrence.interval(callback, millis)");
+	const realSetInterval = concurrence.applyDeterminismWarning(self, "setInterval", "setInterval(callback, millis)", "concurrence.interval(callback, millis)");
 	export function interval(callback: () => void, millis: number): ConcurrenceChannel {
 		const transaction = concurrence.observeServerEventCallback<typeof callback>(callback, false);
 		const interval = realSetInterval(_ => {
@@ -46,7 +46,7 @@ namespace concurrence {
 		}, millis);
 		return transaction;
 	}
-	const realSetTimeout = concurrence.applyDeterminismWarning(global, "setTimeout", "setTimeout(callback, millis)", "concurrence.timeout(millis).then(callback)");
+	const realSetTimeout = concurrence.applyDeterminismWarning(self, "setTimeout", "setTimeout(callback, millis)", "concurrence.timeout(millis).then(callback)");
 	export function timeout(millis: number): Promise<void> {
 		return concurrence.observeServerPromise<void>(new Promise<void>(resolve => { realSetTimeout(() => resolve(), millis) }), false);
 	}
