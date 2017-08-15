@@ -3,8 +3,8 @@
 namespace concurrence {
 
 	type PreactNode = Node & {
-		__l?: { [ event: string ]: () => void },
-		__c?: { [ event: string ]: ConcurrenceChannel }
+		__l?: { [ event: string ]: (event: any) => void },
+		__c?: { [ event: string ]: [ConcurrenceChannel, (event: any) => void] }
 	};
 
 	export function observe(selector: string, event: string, callback: () => void) : ConcurrenceChannel {
@@ -17,7 +17,7 @@ namespace concurrence {
 		if (c) {
 			for (let name in c) {
 				if (Object.hasOwnProperty.call(c, name)) {
-					c[name].close();
+					c[name][0].close();
 					delete c[name];
 				}
 			}
@@ -31,14 +31,20 @@ namespace concurrence {
 		const listeners = node.__l;
 		if (listeners) {
 			const c = node.__c || (node.__c = {});
-			if (Object.hasOwnProperty.call(c, name)) {
-				c[name].close();
-				delete c[name];
-			}
 			if (Object.hasOwnProperty.call(listeners, name)) {
-				const channel = concurrence.receiveClientEventStream(listeners[name]);
+				const listener = listeners[name];
+				let tuple = c[name];
+				if (tuple) {
+					tuple[1] = listener;
+				} else {
+					tuple = c[name] = [concurrence.receiveClientEventStream(function() {
+						return tuple[1].apply(null, [].slice.call(arguments));
+					}), listener];
+				}
 				listeners[name] = ignoreEvent;
-				c[name] = channel;
+			} else if (Object.hasOwnProperty.call(c, name)) {
+				c[name][0].close();
+				delete c[name];
 			}
 		}
 	}

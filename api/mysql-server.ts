@@ -25,16 +25,27 @@ namespace concurrence {
 			}
 			return Promise.resolve(pool);
 		}
-		export function query(host: string, query: string, ...params: any[]) : Promise<{ [column: string] : any}[]> {
-			return concurrence.observeServerPromise(getPool(host).then(pool => new Promise<{ [column: string] : any}[]>((resolve, reject) => {
+		export function execute(host: string, sql: string, ...params: any[]) : Promise<ExecuteResult> {
+			return concurrence.observeServerPromise(getPool(host).then(pool => new Promise<ExecuteResult & ConcurrenceJsonMap>((resolve, reject) => {
 				pool.query({
-					sql: query,
+					sql: sql,
 					values: params
-				}, (error: any, results: { [column: string] : any}[]) => {
+				}, (error: any, result: any) => {
 					if (error) {
 						reject(error);
 					} else {
-						resolve(results);
+						let wrappedResult : ExecuteResult & ConcurrenceJsonMap = {};
+						if (result instanceof Array) {
+							wrappedResult.records = result;
+						} else {
+							if (typeof result.insertId == "number") {
+								wrappedResult.insertId = result.insertId;
+							}
+							if (typeof result.affectedRows == "number") {
+								wrappedResult.affectedRows = result.affectedRows;
+							}
+						}
+						resolve(wrappedResult);
 					}
 				});
 			})));

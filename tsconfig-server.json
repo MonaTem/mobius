@@ -1,5 +1,6 @@
 {
 	"include": [
+		"node_modules/preact/dist/preact.js",
 		"api/concurrence-server.ts",
 		"api/**/*-server.ts",
 		"api/**/*-server.js",

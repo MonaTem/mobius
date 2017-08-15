@@ -4,6 +4,11 @@ namespace concurrence {
 
 	type ConcurrenceEvent = [number] | [number, any] | [number, any, any];
 
+	function logOrdering(from: "client" | "server", type: "open" | "close" | "message", channelId: number) {
+		// const stack = (new Error().stack || "").toString().split(/\n\s*/).slice(2).map(s => s.replace(/^at\s*/, ""));
+		// console.log(from + " " + type + " " + channelId, stack);
+	}
+
 	function uuid() : string {
 		return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
 			const r = Math.random() * 16 | 0;
@@ -13,7 +18,7 @@ namespace concurrence {
 
 	function roundTrip<T>(obj: T) : T {
 		// Round-trip values through JSON so that the client receives exactly the same type of values as the server
-		return JSON.parse(JSON.stringify([obj]))[0] as T;
+		return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify([obj]))[0] as T;
 	}
 
 	interface BootstrapData {
@@ -300,12 +305,20 @@ namespace concurrence {
 		// Expect that the server will run some code in parallel that provides data
 		pendingChannelCount++;
 		const channelId = ++remoteChannelCounter;
-		pendingChannels[channelId] = callback;
+		logOrdering("server", "open", channelId);
+		pendingChannels[channelId] = function() {
+			const args = [].slice.call(arguments);
+			defer(() => {
+				logOrdering("server", "message", channelId);
+				callback.apply(null, args);
+			});
+		}
 		synchronizeChannels();
 		return {
-			close: () => {
+			close() {
 				// Cleanup the bookkeeping
 				if (pendingChannels[channelId]) {
+					logOrdering("server", "close", channelId);
 					pendingChannelCount--;
 					delete pendingChannels[channelId];
 				}
@@ -341,8 +354,8 @@ namespace concurrence {
 
 	// APIs for client/, not to be used inside src/
 	export function receiveServerPromise<T extends ConcurrenceJsonValue>(...args: any[]) : Promise<T> { // Must be cast to the proper signature
-		return new Promise<T>(function(resolve, reject) {
-			const channel = registerRemoteChannel(function(event) {
+		return new Promise<T>((resolve, reject) => {
+			const channel = registerRemoteChannel(event => {
 				channel.close();
 				if (!event) {
 					reject(new Error("Disconnected from server!"));
@@ -388,7 +401,12 @@ namespace concurrence {
 
 	export function observeClientPromise<T extends ConcurrenceJsonValue | void>(value: Promise<T> | T) : Promise<T> {
 		let channelId = ++localChannelCounter;
-		return Promise.resolve(value).then(value => sendEvent(typeof value == "undefined" ? [channelId] : [channelId, value]).then(() => roundTrip(value)), error => {
+		logOrdering("client", "open", channelId);
+		return Promise.resolve(value).then(roundTripped => sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]).then(() => {
+			logOrdering("client", "message", channelId);
+			logOrdering("client", "close", channelId);
+			return roundTrip(value);
+		}), error => {
 			// Convert Error types to a representation that can be reconstituted on the server
 			let type : any = 1;
 			let serializedError: any = error;
@@ -408,7 +426,11 @@ namespace concurrence {
 					}
 				}
 			}
-			return sendEvent([channelId, serializedError, type]).then(() => Promise.reject(error));
+			return sendEvent([channelId, serializedError, type]).then(() => {
+				logOrdering("client", "message", channelId);
+				logOrdering("client", "close", channelId);
+				return Promise.reject(error)
+			});
 		});
 	};
 
@@ -421,21 +443,24 @@ namespace concurrence {
 			throw new TypeError("callback is not a function!");
 		}
 		let channelId: number = ++localChannelCounter;
+		logOrdering("client", "open", channelId);
 		return {
 			send: function() {
 				if (channelId >= 0) {
 					const message = Array.prototype.slice.call(arguments);
 					const args = message.slice();
 					message.unshift(channelId);
-					sendEvent(message).then(function() {
+					sendEvent(roundTrip(message)).then(() => {
 						// Finally send event if a destroy call hasn't won the race
 						if (channelId >= 0) {
+							logOrdering("client", "message", channelId);
 							(callback as any as Function).apply(null, roundTrip(args));
 						}
 					});
 				}
 			} as any as T,
-			close: function() {
+			close() {
+				logOrdering("client", "close", channelId);
 				channelId = -1;
 			}
 		};

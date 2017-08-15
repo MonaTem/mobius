@@ -1,4 +1,6 @@
 namespace concurrence {
-	export function broadcast(text: string) {};
-	export const receive = concurrence.receiveServerEventStream as (callback: (value: string) => void) => ConcurrenceChannel;
+	export function broadcast(inboxName: string, message: ConcurrenceJsonValue) {};
+	export function receive(inboxName: string, callback: (message: ConcurrenceJsonValue) => void) {
+		return concurrence.receiveServerEventStream(callback);
+	}
 }

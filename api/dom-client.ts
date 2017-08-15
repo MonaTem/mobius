@@ -4,7 +4,7 @@ namespace concurrence {
 
 	type PreactNode = Node & {
 		__l?: { [ event: string ]: (event: any) => void },
-		__c?: { [ event: string ]: ConcurrenceChannel }
+		__c?: { [ event: string ]: [ConcurrenceLocalChannel<any>, (event: any) => void] }
 	};
 
 	export function observe(selector: string, event: string, callback: () => void) : ConcurrenceChannel {
@@ -22,7 +22,7 @@ namespace concurrence {
 		if (c) {
 			for (let name in c) {
 				if (Object.hasOwnProperty.call(c, name)) {
-					c[name].close();
+					c[name][0].close();
 					delete c[name];
 				}
 			}
@@ -33,20 +33,26 @@ namespace concurrence {
 		const listeners = node.__l;
 		if (listeners) {
 			const c = node.__c || (node.__c = {});
-			if (Object.hasOwnProperty.call(c, name)) {
-				c[name].close();
-				delete c[name];
-			}
 			if (Object.hasOwnProperty.call(listeners, name)) {
-				const channel = concurrence.observeClientEventCallback(listeners[name]);
-				listeners[name] = (event) => {
+				const listener = listeners[name];
+				let tuple = c[name];
+				if (tuple) {
+					tuple[1] = listener;
+				} else {
+					tuple = c[name] = [concurrence.observeClientEventCallback(function() {
+						return tuple[1].apply(null, [].slice.call(arguments));
+					}), listener];
+				}
+				listeners[name] = event => {
 					if ("value" in event.target) {
-						channel.send({ value: event.target.value });
+						tuple[0].send({ value: event.target.value });
 					} else {
-						channel.send({});
+						tuple[0].send({});
 					}
 				}
-				c[name] = channel;
+			} else if (Object.hasOwnProperty.call(c, name)) {
+				c[name][0].close();
+				delete c[name];
 			}
 		}
 	}

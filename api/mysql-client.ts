@@ -1,5 +1,5 @@
 namespace concurrence {
 	export namespace mysql {
-		export const query = concurrence.receiveServerPromise as (host: string, query: string) => Promise<{ [column: string] : any}[]>;
+		export const execute = concurrence.receiveServerPromise as (host: string, sql: string, ...params: any[]) => Promise<ExecuteResult>;
 	}
 }

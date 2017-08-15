@@ -17,3 +17,5 @@ declare namespace concurrence {
 }
 
 declare const document : Document | undefined;
+
+declare const sharedGlobal : NodeJS.Global;

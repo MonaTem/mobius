@@ -12,9 +12,6 @@ const expressWs = require("express-ws");
 import * as uuid from "uuid";
 import { JSDOM } from "jsdom";
 
-import * as preact from "preact";
-preact.options.event = e => ({} as any as Event);
-
 const server = express();
 
 const relativePath = (relative: string) => path.join(__dirname, relative);
@@ -28,6 +25,11 @@ server.disable("etag");
 
 function showDeterminismWarning(deprecated: string, instead: string): void {
 	console.log("Called " + deprecated + " which may result in split-brain!\nInstead use " + instead + " " + (new Error() as any).stack.split(/\n\s*/g).slice(3).join("\n\t"));
+}
+
+function logOrdering(from: "client" | "server", type: "open" | "close" | "message", channelId: number, session: ConcurrenceSession) {
+	// const stack = (new Error().stack || "").toString().split(/\n\s*/).slice(2).map(s => s.replace(/^at\s*/, ""));
+	// console.log(from + " " + type + " " + channelId + " on " + session.sessionID, stack);
 }
 
 function applyDeterminismWarning<T>(parent: T, key: keyof T, example: string, replacement: string): T[keyof T] {
@@ -52,7 +54,7 @@ const validateRoundTrips = true;
 function roundTrip<T>(obj: T) : T {
 	if (validateRoundTrips) {
 		// Round-trip values through JSON so that the server receives exactly the same type of values as the client
-		return JSON.parse(JSON.stringify([obj]))[0] as T;
+		return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify([obj]))[0] as T;
 	} else {
 		return obj;
 	}
@@ -223,10 +225,10 @@ class ConcurrenceSession {
 		const context = Object.create(global);
 		context.require = require;
 		context.global = context;
-		// Preact requires a document on the global object to be able to create nodes
-		(global as any).document = context.document = this.serverSideRenderer.document;
+		context.sharedGlobal = global;
+		context.self = global;
+		context.document = this.serverSideRenderer.document;
 		context.request = request;
-		context.preact = preact;
 		context.concurrence = {
 			disconnect : this.destroy.bind(this),
 			secrets: secrets,
@@ -281,10 +283,9 @@ class ConcurrenceSession {
 				}
 				if (channel) {
 					channel(event);
-				} else if (channelId < 0) {
-					throw new Error("Guru meditation error. Received event on unknown client channel with ID " + -channelId + "(fenced)");
 				} else {
-					throw new Error("Guru meditation error. Received event on unknown client channel with ID " + channelId);
+					// Client-side event source was destroyed on the server between the time it generated an event and the time the server received it
+					// This event will be silently dropped--dispatching would cause split brain!
 				}
 			}
 		}
@@ -404,10 +405,13 @@ class ConcurrenceSession {
 		// Record and ship values/errors of server-side promises
 		this.enterLocalChannel(includedInPrerender);
 		const channelId = ++this.localChannelCounter;
+		logOrdering("server", "open", channelId, this);
 		return Promise.resolve(value).then(value => {
 			// Forward the value to the client
 			this.exitLocalChannel(includedInPrerender);
-			this.sendEvent(typeof value == "undefined" ? [channelId] : [channelId, value]);
+			logOrdering("server", "message", channelId, this);
+			this.sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]);
+			logOrdering("server", "close", channelId, this);
 			return roundTrip(value);
 		}, error => {
 			// Serialize the reject error type or string
@@ -419,7 +423,9 @@ class ConcurrenceSession {
 				type = error.constructor.name;
 				serializedError = Object.assign({ message: error.message, stack: error.stack }, error);
 			}
+			logOrdering("server", "message", channelId, this);
 			this.sendEvent([channelId, serializedError, type]);
+			logOrdering("server", "close", channelId, this);
 			return error;
 		});
 	}
@@ -431,18 +437,23 @@ class ConcurrenceSession {
 		const session = this;
 		session.enterLocalChannel(includedInPrerender);
 		let channelId = ++session.localChannelCounter;
+		logOrdering("server", "open", channelId, this);
 		return {
 			send: function() {
 				if (channelId >= 0) {
-					let args = roundTrip([...arguments]);
-					setImmediate(() => (callback as any as Function).apply(null, args));
+					let args = [...arguments];
+					setImmediate(() => {
+						logOrdering("server", "message", channelId, session);
+						(callback as any as Function).apply(null, roundTrip(args));
+					});
 					if (!session.dead) {
-						session.sendEvent([channelId, ...args] as ConcurrenceEvent);
+						session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent);
 					}
 				}
 			} as any as T,
-			close: function() {
+			close() {
 				if (channelId >= 0) {
+					logOrdering("server", "close", channelId, session);
 					channelId = -1;
 					if (session.exitLocalChannel(includedInPrerender) == 0) {
 						// If this was the last server channel, reevaluate queued events so the session can be potentially collected
@@ -457,16 +468,25 @@ class ConcurrenceSession {
 		if (this.dead) {
 			throw new Error("Session has died!");
 		}
-		this.pendingChannelCount++;
-		const channelId = ++this.remoteChannelCounter;
-		this.pendingChannels[channelId] = callback;
+		const session = this;
+		session.pendingChannelCount++;
+		const channelId = ++session.remoteChannelCounter;
+		logOrdering("client", "open", channelId, this);
+		// this.pendingChannels[channelId] = callback;
+		session.pendingChannels[channelId] = function() {
+			immediate([].slice.call(arguments)).then(args => {
+				logOrdering("client", "message", channelId, session);
+				callback.apply(null, args);
+			});
+		};
 		return {
-			close: () => {
-				if (this.pendingChannels[channelId]) {
-					delete this.pendingChannels[channelId];
-					if ((--this.pendingChannelCount) == 0) {
+			close() {
+				if (session.pendingChannels[channelId]) {
+					logOrdering("client", "close", channelId, session);
+					delete session.pendingChannels[channelId];
+					if ((--session.pendingChannelCount) == 0) {
 						// If this was the last client channel, reevaluate queued events so the session can be potentially collected
-						this.sendQueuedEvents();
+						session.sendQueuedEvents();
 					}
 				}
 			}
