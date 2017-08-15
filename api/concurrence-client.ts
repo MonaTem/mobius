@@ -434,10 +434,6 @@ namespace concurrence {
 		});
 	};
 
-	export function createRenderPromise<T extends ConcurrenceJsonValue | void>(handler: (document: Document, resolve: (value: T) => void, reject: (error: any) => void) => void) : Promise<T> {
-		return observeClientPromise(new Promise<T>((resolve, reject) => handler(document, resolve, reject)));
-	};
-
 	export function observeClientEventCallback<T extends Function>(callback: T) : ConcurrenceLocalChannel<T> {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");

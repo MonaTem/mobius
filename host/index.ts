@@ -237,17 +237,7 @@ class ConcurrenceSession {
 			receiveClientEventStream: this.receiveRemoteEventStream.bind(this),
 			observeServerEventCallback: this.observeLocalEventCallback.bind(this),
 			showDeterminismWarning: showDeterminismWarning,
-			applyDeterminismWarning: applyDeterminismWarning,
-			createRenderPromise: function<T extends ConcurrenceJsonValue | void>(handler: (document: Document, resolve: (value: T) => void, reject: (error: any) => void) => void) : Promise<T> {
-				// Always run on the client and expect a promise from it
-				const clientPromise: Promise<T> = this.receiveClientPromise();
-				// If prerendering, additionally execute on the server
-				const document = context.document;
-				if (document) {
-					return new Promise<T>((resolve, reject) => handler(document, resolve, reject));
-				}
-				return clientPromise;
-			}
+			applyDeterminismWarning: applyDeterminismWarning
 		};
 		this.context = context;
 	}

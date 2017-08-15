@@ -74,7 +74,7 @@ class BroadcastWidget extends preact.Component<{}, { value: string }> {
 	render() {
 		return (
 			<div>
-				<TextField value={this.state.value} onChange={(event: any) => this.setState({ value: event.value })}/>
+				<TextField value={this.state.value} onChange={value => this.setState({ value })}/>
 				<button onClick={this.send.bind(this)}>Send</button>
 			</div>
 		);
@@ -198,7 +198,7 @@ class ItemsWidget extends preact.Component<{}, { items: ItemRecord[] }> {
 }
 
 
-concurrence.render((
+concurrence.host((
 	<div>
 		<strong>Random numbers:</strong>
 		<StartStopWidget>
@@ -213,7 +213,7 @@ concurrence.render((
 		<NewItemWidget/>
 		<ItemsWidget/>
 	</div>
-), "#host");
+));
 
 // Log current time
 concurrence.now().then(value => console.log(value));

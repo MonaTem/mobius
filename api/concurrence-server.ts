@@ -7,7 +7,6 @@ declare namespace concurrence {
 	// APIs for server/, not to be used inside src/
 	export function receiveClientPromise<T extends ConcurrenceJsonValue | void>(...args: any[]): Promise<T>;
 	export function observeServerPromise<T extends ConcurrenceJsonValue | void>(promise: Promise<T> | T, includedInPrerender?: boolean): Promise<T>;
-	export function createRenderPromise<T extends ConcurrenceJsonValue | void>(handler: (document: Document, resolve: (value: T) => void, reject: (error: any) => void) => void) : Promise<T>;
 	export function receiveClientEventStream<T extends Function>(callback: T): ConcurrenceChannel;
 	export function observeServerEventCallback<T extends Function>(callback: T, includedInPrerender?: boolean): ConcurrenceLocalChannel<T>;
 	export function showDeterminismWarning(deprecated: string, instead: string): void;
