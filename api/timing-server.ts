@@ -35,16 +35,16 @@ namespace concurrence {
 	}
 	const realSetInterval = concurrence.applyDeterminismWarning(self, "setInterval", "setInterval(callback, millis)", "concurrence.interval(callback, millis)");
 	export function interval(callback: () => void, millis: number): ConcurrenceChannel {
-		const transaction = concurrence.observeServerEventCallback<typeof callback>(callback, false);
+		const channel = concurrence.observeServerEventCallback<typeof callback>(callback, false);
 		const interval = realSetInterval(_ => {
 			if (concurrence.dead) {
-				transaction.close();
+				channel.close();
 				clearInterval(interval);
 			} else {
-				transaction.send();
+				channel.send();
 			}
 		}, millis);
-		return transaction;
+		return channel;
 	}
 	const realSetTimeout = concurrence.applyDeterminismWarning(self, "setTimeout", "setTimeout(callback, millis)", "concurrence.timeout(millis).then(callback)");
 	export function timeout(millis: number): Promise<void> {

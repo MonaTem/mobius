@@ -7,15 +7,6 @@ namespace concurrence {
 		__c?: { [ event: string ]: [ConcurrenceLocalChannel<any>, (event: any) => void] }
 	};
 
-	export function observe(selector: string, event: string, callback: () => void) : ConcurrenceChannel {
-		const transaction = concurrence.observeClientEventCallback(callback);
-		const elements = document.querySelectorAll(selector);
-		for (let i = 0; i < elements.length; i++) {
-			elements[i].addEventListener(event, () => transaction.send(), false);
-		}
-		return transaction;
-	}
-
 	const preactOptions = preact.options as any;
 	preactOptions.nodeRemoved = (node: PreactNode) => {
 		const c = node.__c;

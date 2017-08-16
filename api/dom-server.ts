@@ -9,10 +9,6 @@ namespace concurrence {
 		__c?: { [ event: string ]: [ConcurrenceChannel, (event: any) => void] }
 	};
 
-	export function observe(selector: string, event: string, callback: () => void) : ConcurrenceChannel {
-		return concurrence.receiveClientEventStream(callback);
-	}
-
 	const preactOptions = preact.options as any;
 	preactOptions.nodeRemoved = (node: PreactNode) => {
 		const c = node.__c;
