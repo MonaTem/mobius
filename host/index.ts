@@ -164,7 +164,7 @@ const enum ConcurrenceRenderingMode {
 	ForcedEmulation = 3,
 };
 
-const renderingMode : ConcurrenceRenderingMode = ConcurrenceRenderingMode.ForcedEmulation;
+const renderingMode : ConcurrenceRenderingMode = ConcurrenceRenderingMode.Prerendering;
 
 class ConcurrencePageRenderer {
 	session: ConcurrenceSession;
