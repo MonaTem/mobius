@@ -60,17 +60,36 @@ function roundTrip<T>(obj: T) : T {
 	}
 }
 
+let patchedJSDOM = false;
+function patchJSDOM(document: Document) {
+	if (!patchedJSDOM) {
+		patchedJSDOM = true;
+		const HTMLInputElementPrototype = document.createElement("input").constructor.prototype;
+		const descriptor = Object.create(Object.getOwnPropertyDescriptor(HTMLInputElementPrototype, "value"));
+		const oldSet = descriptor.set;
+		descriptor.set = function(value: string) {
+			oldSet.call(this, value);
+			this.setAttribute("value", value);
+		}
+		Object.defineProperty(HTMLInputElementPrototype, "value", descriptor);
+	}
+}
+
 class ConcurrenceHost {
 	sessions: { [key: string]: ConcurrenceSession; } = {};
 	script: vm.Script;
 	htmlSource: string;
+	dom: JSDOM;
+	document: Document;
 	staleSessionTimeout: any;
 	constructor(scriptPath: string, htmlPath: string) {
 		this.sessions = {};
 		this.script = new vm.Script(fs.readFileSync(scriptPath).toString(), {
 			filename: scriptPath
 		});
-		this.htmlSource = fs.readFileSync(htmlPath).toString();
+		this.dom = new JSDOM(fs.readFileSync(htmlPath).toString());
+		this.document = (this.dom.window as Window).document as Document;
+		patchJSDOM(this.document);
 		this.staleSessionTimeout = setInterval(() => {
 			const now = Date.now();
 			for (let i in this.sessions) {
@@ -89,13 +108,23 @@ class ConcurrenceHost {
 				throw new Error("No session ID specified!");
 			}
 			if (!newSessionFromRequest) {
-				throw new Error("Session ID is not valid!");
+				throw new Error("Session ID is not valid: " + sessionID);
 			}
 			session = new ConcurrenceSession(this, sessionID, newSessionFromRequest);
 			this.sessions[sessionID] = session;
 			session.run();
 		}
 		return session;
+	}
+	serializeBody(body: Element) {
+		const realBody = this.document.body;
+		const parent = realBody.parentElement!;
+		parent.replaceChild(body, realBody);
+		try {
+			return this.dom.serialize();
+		} finally {
+			parent.replaceChild(realBody, body);
+		}
 	}
 	newSession(request: Express.Request) {
 		for (;;) {
@@ -132,69 +161,109 @@ const enum ConcurrenceRenderingMode {
 	ClientOnly = 0,
 	Prerendering = 1,
 	FullEmulation = 2,
+	ForcedEmulation = 3,
 };
 
-const renderingMode : ConcurrenceRenderingMode = ConcurrenceRenderingMode.ClientOnly;
+const renderingMode : ConcurrenceRenderingMode = ConcurrenceRenderingMode.ForcedEmulation;
 
-class ConcurrenceServerSideRenderer {
+class ConcurrencePageRenderer {
 	session: ConcurrenceSession;
-	dom: JSDOM;
-	document: Document;
-	clientScript: Element | undefined;
+	body: Element;
+	bootstrapScript: Element | undefined;
+	formNode: Element | undefined;
 	messageIdInput: HTMLInputElement | undefined;
-	initialPage: Promise<void>;
-	resolveInitialPage: (() => void) | undefined;
+	channelCount: number = 0;
+	pageIsReady: Promise<string> | undefined;
+	resolvePageIsReady: ((html: string) => void) | undefined;
 	constructor(session: ConcurrenceSession) {
 		this.session = session;
-		this.dom = new JSDOM(host.htmlSource);
-		this.document = (this.dom.window as Window).document as Document;
-		const clientScript = this.document.querySelector("script[src=\"client.js\"]");
+		const document = session.host.document;
+		this.body = document.body.cloneNode(true) as Element;
+		const clientScript = this.body.querySelector("script[src=\"client.js\"]");
 		if (!clientScript) {
-			throw new Error("HTML does not contain a client.js reference!");
+			throw new Error("HTML does not contain a client.js reference: " + this.body.outerHTML);
 		}
-		this.clientScript = clientScript;
+		if (renderingMode >= ConcurrenceRenderingMode.ForcedEmulation) {
+			clientScript.parentElement!.removeChild(clientScript);
+		} else if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
+			const bootstrapScript = this.bootstrapScript = document.createElement("script");
+			bootstrapScript.type = "application/x-concurrence-bootstrap";
+			clientScript.parentNode!.insertBefore(bootstrapScript, clientScript);
+		}
 		if (renderingMode >= ConcurrenceRenderingMode.FullEmulation) {
-			const formNode = this.document.createElement("form");
+			const formNode = this.formNode = document.createElement("form");
 			formNode.setAttribute("action", "?js=no");
 			formNode.setAttribute("method", "POST");
 			formNode.setAttribute("id", "concurrence-form");
-			const sessionInput = this.document.createElement("input");
+			const sessionInput = document.createElement("input");
 			sessionInput.setAttribute("name", "sessionID");
 			sessionInput.setAttribute("type", "hidden");
 			sessionInput.setAttribute("value", session.sessionID);
 			formNode.appendChild(sessionInput);
-			const messageIdInput = this.messageIdInput = this.document.createElement("input");
+			const messageIdInput = this.messageIdInput = document.createElement("input");
 			messageIdInput.setAttribute("name", "messageID");
 			messageIdInput.setAttribute("type", "hidden");
 			formNode.appendChild(messageIdInput);
-			const body = this.document.body;
-			migrateChildren(body, formNode);
-			body.appendChild(formNode);
 		}
-		this.initialPage = new Promise<void>(resolve => this.resolveInitialPage = resolve);
 	}
-	renderPage() {
+	enterLocalChannel() {
+		++this.channelCount;
+	}
+	exitLocalChannel() {
+		if (--this.channelCount == 0) {
+			immediate(undefined).then(() => {
+				if (this.channelCount == 0) {
+					this.destroy();
+				}
+			});
+		}
+	}
+	destroy() {
+		const resolve = this.resolvePageIsReady;
+		if (resolve) {
+			this.resolvePageIsReady = undefined;
+			this.pageIsReady = undefined;
+			resolve(this.generateHTML());
+			this.session.sendQueuedEvents();
+		}
+	}
+	render() {
+		if (this.channelCount == 0) {
+			return Promise.resolve(this.generateHTML());
+		}
+		return this.pageIsReady || (this.pageIsReady = this.pageIsReady = new Promise<string>(resolve => this.resolvePageIsReady = resolve));
+	}
+	generateHTML() {
 		const session = this.session;
-		const queuedLocalEvents = session.queuedLocalEvents;
-		session.queuedLocalEvents = undefined;
+		const bootstrapScript = this.bootstrapScript;
+		if (bootstrapScript) {
+			const queuedLocalEvents = session.queuedLocalEvents;
+			session.queuedLocalEvents = undefined;
+			bootstrapScript.appendChild(session.host.document.createTextNode(compatibleStringify({ sessionID: this.session.sessionID, events: queuedLocalEvents, idle: session.localChannelCount == 0 })))
+		}
 		const messageIdInput = this.messageIdInput;
 		if (messageIdInput) {
 			messageIdInput.setAttribute("value", (++session.incomingMessageId).toString());
 		}
-		const clientScript = this.clientScript;
-		if (clientScript) {
-			this.clientScript = undefined;
-			const bootstrapScript = this.document.createElement("script");
-			bootstrapScript.type = "application/x-concurrence-bootstrap";
-			bootstrapScript.appendChild(this.document.createTextNode(compatibleStringify({ sessionID: this.session.sessionID, events: queuedLocalEvents, idle: this.session.localChannelCount == 0 })));
-			const parentNode = clientScript.parentNode!;
-			parentNode.insertBefore(bootstrapScript, clientScript);
-			const result = this.dom.serialize();
-			parentNode.removeChild(bootstrapScript);
-			parentNode.removeChild(clientScript);
-			return result;
-		} else {
-			return this.dom.serialize();
+		const formNode = this.formNode;
+		if (formNode) {
+			migrateChildren(this.body, formNode);
+			this.body.appendChild(formNode);
+		}
+		try {
+			return session.host.serializeBody(this.body);
+		} finally {
+			if (formNode) {
+				migrateChildren(formNode, this.body);
+				this.body.removeChild(formNode);
+			}
+			if (bootstrapScript) {
+				const parentElement = bootstrapScript.parentElement;
+				if (parentElement) {
+					parentElement.removeChild(bootstrapScript);
+				}
+				this.bootstrapScript = undefined;
+			}
 		}
 	}
 }
@@ -216,17 +285,19 @@ class ConcurrenceSession {
 	queuedLocalEvents: ConcurrenceEvent[] | undefined;
 	queuedLocalEventsResolve: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
 	localResolveTimeout: NodeJS.Timer | undefined;
-	serverSideRenderer: ConcurrenceServerSideRenderer;
+	pageRenderer: ConcurrencePageRenderer;
 	constructor(host: ConcurrenceHost, sessionID: string, request: Express.Request) {
 		this.host = host;
 		this.sessionID = sessionID;
-		this.serverSideRenderer = new ConcurrenceServerSideRenderer(this);
+		this.pageRenderer = new ConcurrencePageRenderer(this);
 		// Server-side version of the API
 		const context = Object.create(global);
-		context.require = require;
 		context.self = context;
 		context.global = global;
-		context.document = this.serverSideRenderer.document;
+		context.require = require;
+		context.document = Object.create(this.host.document, {
+			body: { value: this.pageRenderer.body }
+		});
 		context.request = request;
 		context.concurrence = {
 			disconnect : this.destroy.bind(this),
@@ -359,36 +430,21 @@ class ConcurrenceSession {
 			}
 		});
 	}
-	prerender() {
-		this.incomingMessageId++;
-		++this.localPrerenderChannelCount;
-		this.run();
-		if (--this.localPrerenderChannelCount == 0) {
-			immediate(undefined).then(() => this.completeServerSideRendering());
-		}
-		return this.serverSideRenderer.initialPage;
-	}
-	completeServerSideRendering() {
-		const resolve = this.serverSideRenderer.resolveInitialPage;
-		if (resolve) {
-			this.serverSideRenderer.resolveInitialPage = undefined;
-			resolve();
-			this.sendQueuedEvents();
-		}
-	}
-	enterLocalChannel(includedInPrerender: boolean = true) : number {
-		if (includedInPrerender) {
-			++this.localPrerenderChannelCount;
+	enterLocalChannel(delayPageLoading: boolean = true) : number {
+		if (delayPageLoading) {
+			this.pageRenderer.enterLocalChannel();
 		}
 		return ++this.localChannelCount;
 	}
-	exitLocalChannel(includedInPrerender: boolean = true) : number {
-		if (includedInPrerender) {
-			if (--this.localPrerenderChannelCount == 0) {
-				immediate(undefined).then(() => this.completeServerSideRendering());
-			}
+	exitLocalChannel(resumePageLoading: boolean = true) : number {
+		if (resumePageLoading) {
+			this.pageRenderer.exitLocalChannel();
 		}
 		return --this.localChannelCount;
+	}
+	waitForEvents() {
+		this.enterLocalChannel();
+		immediate(undefined).then(() => this.exitLocalChannel());
 	}
 	observeLocalPromise<T extends ConcurrenceJsonValue>(value: Promise<T> | T, includedInPrerender: boolean = true): Promise<T> {
 		// Record and ship values/errors of server-side promises
@@ -397,14 +453,14 @@ class ConcurrenceSession {
 		logOrdering("server", "open", channelId, this);
 		return Promise.resolve(value).then(value => {
 			// Forward the value to the client
-			this.exitLocalChannel(includedInPrerender);
+			immediate(undefined).then(() => this.exitLocalChannel(includedInPrerender));
 			logOrdering("server", "message", channelId, this);
 			this.sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]);
 			logOrdering("server", "close", channelId, this);
 			return roundTrip(value);
 		}, error => {
 			// Serialize the reject error type or string
-			this.exitLocalChannel(includedInPrerender);
+			immediate(undefined).then(() => this.exitLocalChannel(includedInPrerender));
 			let type: number | string = 1;
 			let serializedError = error;
 			if (error instanceof Error) {
@@ -428,6 +484,7 @@ class ConcurrenceSession {
 		let channelId = ++session.localChannelCounter;
 		logOrdering("server", "open", channelId, this);
 		return {
+			channelId,
 			send: function() {
 				if (channelId >= 0) {
 					let args = [...arguments];
@@ -441,8 +498,9 @@ class ConcurrenceSession {
 				}
 			} as any as T,
 			close() {
-				if (channelId >= 0) {
-					logOrdering("server", "close", channelId, session);
+				if (this.channelId >= 0) {
+					logOrdering("server", "close", this.channelId, session);
+					this.channelId = -1;
 					channelId = -1;
 					if (session.exitLocalChannel(includedInPrerender) == 0) {
 						// If this was the last server channel, reevaluate queued events so the session can be potentially collected
@@ -469,10 +527,12 @@ class ConcurrenceSession {
 			});
 		};
 		return {
+			channelId,
 			close() {
 				if (session.pendingChannels[channelId]) {
-					logOrdering("client", "close", channelId, session);
-					delete session.pendingChannels[channelId];
+					logOrdering("client", "close", this.channelId, session);
+					delete session.pendingChannels[this.channelId];
+					this.channelId = -1;
 					if ((--session.pendingChannelCount) == 0) {
 						// If this was the last client channel, reevaluate queued events so the session can be potentially collected
 						session.sendQueuedEvents();
@@ -525,7 +585,7 @@ class ConcurrenceSession {
 		if (!this.dead) {
 			this.dead = true;
 			this.context.concurrence.dead = true;
-			this.completeServerSideRendering();
+			this.pageRenderer.destroy();
 			this.sendQueuedEvents();
 			delete this.host.sessions[this.sessionID];
 		}
@@ -556,7 +616,10 @@ if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
 	server.get("/", (req, res) => {
 		new Promise<string>(resolve => {
 			const session = host.newSession(req);
-			resolve(session.prerender().then(() => session.serverSideRenderer.renderPage()));
+			session.run();
+			session.waitForEvents();
+			session.incomingMessageId++;
+			resolve(session.pageRenderer.render());
 		}).then(html => {
 			noCache(res);
 			res.set("Content-Type", "text/html");
@@ -582,10 +645,32 @@ server.post("/", function(req, res) {
 		} else {
 			// Process incoming events
 			const session = host.sessionById(body.sessionID, (body.messageID | 0) == 0 ? req : undefined);
-			session.completeServerSideRendering();
 			if (renderingMode >= ConcurrenceRenderingMode.FullEmulation && req.query["js"] == "no") {
-				// TODO: Apply button presses
-				session.serverSideRenderer.initialPage.then(html => {
+				const inputEvents: ConcurrenceEvent[] = [];
+				const buttonEvents: ConcurrenceEvent[] = [];
+				for (let key in body) {
+					const match = key.match(/^channelID(\d+)$/);
+					if (match && Object.hasOwnProperty.call(body, key)) {
+						const element = session.pageRenderer.body.querySelector("[name=\"" + key + "\"]");
+						if (element) {
+							const event: ConcurrenceEvent = [Number(match[1]), { value: body[key] }];
+							switch (element.nodeName) {
+								case "INPUT":
+									if ((element as HTMLInputElement).value != body[key]) {
+										inputEvents.unshift(event);
+									}
+									break;
+								case "BUTTON":
+									buttonEvents.unshift(event);
+									break;
+							}
+						}
+					}
+				}
+				body.events = JSON.stringify(inputEvents.concat(buttonEvents)).slice(1, -1);
+				session.receiveMessage(body);
+				session.waitForEvents();
+				session.pageRenderer.render().then(html => {
 					res.set("Content-Type", "text/html");
 					res.send(html);
 				});

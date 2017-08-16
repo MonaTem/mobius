@@ -1,6 +1,3 @@
-//import * as uuid from "uuid";
-const mysql = require("mysql");
-
 declare module NodeJS  {
 	interface Global {
 		mysqlPools: { [name: string] : any } | undefined;

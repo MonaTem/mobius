@@ -315,12 +315,14 @@ namespace concurrence {
 		}
 		synchronizeChannels();
 		return {
+			channelId,
 			close() {
 				// Cleanup the bookkeeping
-				if (pendingChannels[channelId]) {
-					logOrdering("server", "close", channelId);
+				if (pendingChannels[this.channelId]) {
+					logOrdering("server", "close", this.channelId);
 					pendingChannelCount--;
-					delete pendingChannels[channelId];
+					delete pendingChannels[this.channelId];
+					this.channelId = -1
 				}
 			}
 		};
@@ -438,26 +440,29 @@ namespace concurrence {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
-		let channelId: number = ++localChannelCounter;
+		const channelId: number = ++localChannelCounter;
 		logOrdering("client", "open", channelId);
 		return {
-			send: function() {
-				if (channelId >= 0) {
+			channelId,
+			send() {
+				if (this.channelId >= 0) {
 					const message = Array.prototype.slice.call(arguments);
 					const args = message.slice();
-					message.unshift(channelId);
+					message.unshift(this.channelId);
 					sendEvent(roundTrip(message)).then(() => {
 						// Finally send event if a destroy call hasn't won the race
-						if (channelId >= 0) {
-							logOrdering("client", "message", channelId);
+						if (this.channelId >= 0) {
+							logOrdering("client", "message", this.channelId);
 							(callback as any as Function).apply(null, roundTrip(args));
 						}
 					});
 				}
 			} as any as T,
 			close() {
-				logOrdering("client", "close", channelId);
-				channelId = -1;
+				if (this.channelId >= 0) {
+					logOrdering("client", "close", this.channelId);
+					this.channelId = -1;
+				}
 			}
 		};
 	}

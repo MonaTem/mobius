@@ -4,7 +4,7 @@ declare const self: NodeJS.Global;
 
 namespace concurrence {
 
-	type PreactNode = Node & {
+	type PreactNode = Element & {
 		__l?: { [ event: string ]: (event: any) => void },
 		__c?: { [ event: string ]: [ConcurrenceChannel, (event: any) => void] }
 	};
@@ -19,6 +19,7 @@ namespace concurrence {
 		if (c) {
 			for (let name in c) {
 				if (Object.hasOwnProperty.call(c, name)) {
+					node.removeAttribute("name");
 					c[name][0].close();
 					delete c[name];
 				}
@@ -39,12 +40,15 @@ namespace concurrence {
 				if (tuple) {
 					tuple[1] = listener;
 				} else {
-					tuple = c[name] = [concurrence.receiveClientEventStream(function() {
+					const channel = concurrence.receiveClientEventStream(function() {
 						return tuple[1].apply(null, [].slice.call(arguments));
-					}), listener];
+					});
+					node.setAttribute("name", "channelID" + channel.channelId);
+					tuple = c[name] = [channel, listener];
 				}
 				listeners[name] = ignoreEvent;
 			} else if (Object.hasOwnProperty.call(c, name)) {
+				node.removeAttribute("name");
 				c[name][0].close();
 				delete c[name];
 			}
