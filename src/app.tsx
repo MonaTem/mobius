@@ -94,7 +94,7 @@ type DbRecordChange<T extends DbRecord> = ConcurrenceJsonMap & {
 	record: T;
 };
 
-function newItemsFromChange<T extends DbRecord>(items: T[], message: DbRecordChange<T>) {
+function updatedRecordsFromChange<T extends DbRecord>(items: T[], message: DbRecordChange<T>) {
 	switch (message.operation) {
 		case "create": {
 			let found = false;
@@ -186,24 +186,25 @@ class ItemWidget extends preact.Component<{ item: Item }, { pendingText: string 
 	}
 }
 
-class ItemsWidget extends preact.Component<{}, { items: Item[] }> {
+class ListWidget<T extends DbRecord> extends preact.Component<{ fetch: () => PromiseLike<T[]> | T[], topic: string, render: (record: T) => JSX.Element | null }, { records: T[], message: string | undefined }> {
 	constructor(props: any, context: any) {
 		super(props, context);
-		this.state = { items: [] };
-		concurrence.mysql.query("localhost", "SELECT id, text FROM concurrence_todo.items ORDER BY id DESC").then(result => {
-			this.setState({ items: result as Item[] });
+		this.state = { records: [], message: "Loading..." };
+		this.receiveChannel = concurrence.receive(this.props.topic, (change: DbRecordChange<T>) => {
+			this.setState({ records: updatedRecordsFromChange(this.state.records, change) });
 		});
+		Promise.resolve(this.props.fetch()).then(records => this.setState({ records, message: undefined })).catch(e => this.setState({ message: e.toString() }));
 	}
 	render() {
-		return <div>{this.state.items.map(item => <ItemWidget item={item}/>)}</div>;
+		return <div>{typeof this.state.message != "undefined" ? this.state.message : this.state.records.map(this.props.render)}</div>;
 	}
-	receiveChannel: ConcurrenceChannel = concurrence.receive("item-changes", (message: DbRecordChange<Item>) => {
-		this.setState({ items: newItemsFromChange(this.state.items, message) });
-	});
+	receiveChannel: ConcurrenceChannel;
 	componentWillUnmount() {
 		this.receiveChannel.close();
 	}
 }
+
+const ItemsWidget = () => <ListWidget fetch={() => concurrence.mysql.query("localhost", "SELECT id, text FROM concurrence_todo.items ORDER BY id DESC")} render={(item: Item) => <ItemWidget item={item} key={item.id}/>} topic="item-changes" />;
 
 
 concurrence.host((
