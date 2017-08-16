@@ -142,27 +142,33 @@ namespace concurrence {
 		}
 		incomingMessageId++;
 		// Read each event and dispatch the appropriate event in order
-		for (let i = 0; i < events.length; i++) {
-			const event = events[i];
-			const channelId = event[0];
-			let channel: ((event: ConcurrenceEvent | undefined) => void) | undefined;
-			if (channelId < 0) {
-				// Fenced client-side event
-				let fencedQueue = fencedLocalEvents[-channelId];
-				channel = fencedQueue.shift();
-				if (fencedQueue.length == 0) {
-					delete fencedLocalEvents[-channelId];
+		function processEvents() {
+			const event = events.shift();
+			if (event) {
+				const channelId = event[0];
+				let channel: ((event: ConcurrenceEvent | undefined) => void) | undefined;
+				if (channelId < 0) {
+					// Fenced client-side event
+					let fencedQueue = fencedLocalEvents[-channelId];
+					channel = fencedQueue.shift();
+					if (fencedQueue.length == 0) {
+						delete fencedLocalEvents[-channelId];
+					}
+				} else {
+					// Server-side event
+					channel = pendingChannels[channelId];
 				}
-			} else {
-				// Server-side event
-				channel = pendingChannels[channelId];
-			}
-			if (channel) {
-				channel(event);
-			} else {
-				throw new Error("Guru meditation error!");
+				if (channel) {
+					channel(event);
+				} else {
+					throw new Error("Guru meditation error!");
+				}
+				if (event.length) {
+					defer(processEvents);
+				}
 			}
 		}
+		processEvents();
 		synchronizeChannels();
 		return true;
 	}
