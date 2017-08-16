@@ -88,11 +88,36 @@ class BroadcastWidget extends preact.Component<{}, { value: string }> {
 	}
 }
 
-type ItemRecord = { id: number, text: string };
-type ItemOperation = ConcurrenceJsonMap & {
+type DbRecord = { id: number };
+type DbRecordChange<T extends DbRecord> = ConcurrenceJsonMap & {
 	operation: "create" | "modify" | "delete";
-	record: ItemRecord;
+	record: T;
 };
+
+function newItemsFromChange<T extends DbRecord>(items: T[], message: DbRecordChange<T>) {
+	switch (message.operation) {
+		case "create": {
+			let found = false;
+			items = items.map(item => {
+				if (item.id == message.record.id) {
+					found = true;
+					return message.record;
+				}
+				return item;
+			});
+			if (!found) {
+				items.unshift(message.record);
+			}
+			return items;
+		}
+		case "modify":
+			return items.map(item => item.id == message.record.id ? message.record : item);
+		case "delete":
+			return items.filter(item => item.id != message.record.id);
+	}
+}
+
+type Item = DbRecord & { text: string };
 
 class NewItemWidget extends preact.Component<{}, { value: string }> {
 	constructor(props: any, context: any) {
@@ -110,7 +135,7 @@ class NewItemWidget extends preact.Component<{}, { value: string }> {
 	onChange = (value: string) => this.setState({ value })
 	send = () => {
 		concurrence.mysql.modify("localhost", "INSERT INTO concurrence_todo.items (text) VALUES (?)", this.state.value).then(result => {
-			const message: ItemOperation = {
+			const message: DbRecordChange<Item> = {
 				operation: "create",
 				record: { id: result.insertId as number, text: this.state.value }
 			};
@@ -120,7 +145,7 @@ class NewItemWidget extends preact.Component<{}, { value: string }> {
 	}
 }
 
-class ItemWidget extends preact.Component<{ item: ItemRecord }, { pendingText: string | undefined, inProgress: boolean }> {
+class ItemWidget extends preact.Component<{ item: Item }, { pendingText: string | undefined, inProgress: boolean }> {
 	constructor(props: any, context: any) {
 		super(props, context);
 		this.state = { pendingText: undefined, inProgress: false };
@@ -137,7 +162,7 @@ class ItemWidget extends preact.Component<{ item: ItemRecord }, { pendingText: s
 	setPendingText = (pendingText: string) => this.setState({ pendingText })
 	save = () => {
 		if (typeof this.state.pendingText != "undefined") {
-			const message: ItemOperation = {
+			const message: DbRecordChange<Item> = {
 				operation: "modify",
 				record: { id: this.props.item.id, text: this.state.pendingText }
 			};
@@ -150,7 +175,7 @@ class ItemWidget extends preact.Component<{ item: ItemRecord }, { pendingText: s
 	}
 	delete = () => {
 		this.setState({ inProgress: true });
-		const message: ItemOperation = {
+		const message: DbRecordChange<Item> = {
 			operation: "delete",
 			record: this.props.item
 		};
@@ -161,42 +186,19 @@ class ItemWidget extends preact.Component<{ item: ItemRecord }, { pendingText: s
 	}
 }
 
-class ItemsWidget extends preact.Component<{}, { items: ItemRecord[] }> {
+class ItemsWidget extends preact.Component<{}, { items: Item[] }> {
 	constructor(props: any, context: any) {
 		super(props, context);
 		this.state = { items: [] };
 		concurrence.mysql.query("localhost", "SELECT id, text FROM concurrence_todo.items ORDER BY id DESC").then(result => {
-			this.setState({ items: result as ItemRecord[] });
+			this.setState({ items: result as Item[] });
 		});
 	}
 	render() {
 		return <div>{this.state.items.map(item => <ItemWidget item={item}/>)}</div>;
 	}
-	receiveChannel: ConcurrenceChannel = concurrence.receive("item-changes", (message: ItemOperation) => {
-		let items = this.state.items;
-		switch (message.operation) {
-			case "create": {
-				let found = false;
-				items = items.map(item => {
-					if (item.id == message.record.id) {
-						found = true;
-						return message.record;
-					}
-					return item;
-				});
-				if (!found) {
-					items = [message.record].concat(items);
-				}
-				break;
-			}
-			case "modify":
-				items = items.map(item => item.id == message.record.id ? message.record : item);
-				break;
-			case "delete":
-				items = items.filter(item => item.id != message.record.id);
-				break;
-		}
-		this.setState({ items });
+	receiveChannel: ConcurrenceChannel = concurrence.receive("item-changes", (message: DbRecordChange<Item>) => {
+		this.setState({ items: newItemsFromChange(this.state.items, message) });
 	});
 	componentWillUnmount() {
 		this.receiveChannel.close();
