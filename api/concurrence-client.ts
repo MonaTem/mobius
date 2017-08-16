@@ -444,7 +444,7 @@ namespace concurrence {
 		logOrdering("client", "open", channelId);
 		return {
 			channelId,
-			send() {
+			send: function(this: ConcurrenceChannel) {
 				if (this.channelId >= 0) {
 					const message = Array.prototype.slice.call(arguments);
 					const args = message.slice();
