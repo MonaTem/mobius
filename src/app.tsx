@@ -1,17 +1,17 @@
-class StartStopWidget extends preact.Component<{}, { started: boolean }> {
+class ShowHideWidget extends preact.Component<{}, { visible: boolean }> {
 	constructor(props: any, context: any) {
 		super(props, context);
-		this.state = { started: false };
+		this.state = { visible: false };
 	}
 	render(props: preact.ComponentProps<this>) {
-		if (this.state.started) {
-			return <div><button onClick={this.stop}>Stop</button><div>{props.children}</div></div>
+		if (this.state.visible) {
+			return <div><button onClick={this.hide}>Hide</button><div>{props.children}</div></div>
 		} else {
-			return <div><button onClick={this.start}>Start</button></div>
+			return <div><button onClick={this.show}>Show</button></div>
 		}
 	}
-	start = () => this.setState({ started: true })
-	stop = () => this.setState({ started: false })
+	show = () => this.setState({ visible: true })
+	hide = () => this.setState({ visible: false })
 }
 
 
@@ -49,18 +49,19 @@ class TextField extends preact.Component<{ value: string, onChange: (value: stri
 }
 
 
-class ReceiveWidget extends preact.Component<{}, { message: string }> {
+class ReceiveWidget extends preact.Component<{}, { messages: string[] }> {
 	constructor(props: any, context: any) {
 		super(props, context);
 		console.log("Receiving messages");
-		this.state = { message: "" };
+		this.state = { messages: [] };
 	}
 	receiveChannel: ConcurrenceChannel = concurrence.receive("messages", value => {
 		console.log("Received: " + value);
-		this.setState({ message: "Received: " + value });
+		this.setState({ messages: [value as string].concat(this.state.messages) });
 	});
 	render() {
-		return <span>{this.state.message}</span>;
+		const messages = this.state.messages;
+		return <span>{messages.length > 0 ? messages.map(message => <div>{message}</div>) : "No Messages"}</span>;
 	}
 	componentWillUnmount() {
 		console.log("Destroying message stream");
@@ -206,17 +207,19 @@ class ItemsWidget extends preact.Component<{}, { items: ItemRecord[] }> {
 concurrence.host((
 	<div>
 		<strong>Random numbers:</strong>
-		<StartStopWidget>
+		<ShowHideWidget>
 			<RandomWidget/>
-		</StartStopWidget>
+		</ShowHideWidget>
 		<strong>Messaging:</strong>
-		<StartStopWidget>
+		<ShowHideWidget>
 			<ReceiveWidget/>
-		</StartStopWidget>
+		</ShowHideWidget>
 		<BroadcastWidget/>
 		<strong>To Do App:</strong>
-		<NewItemWidget/>
-		<ItemsWidget/>
+		<ShowHideWidget>
+			<NewItemWidget/>
+			<ItemsWidget/>
+		</ShowHideWidget>
 	</div>
 ));
 
