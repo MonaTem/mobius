@@ -5,11 +5,13 @@ class StartStopWidget extends preact.Component<{}, { started: boolean }> {
 	}
 	render(props: preact.ComponentProps<this>) {
 		if (this.state.started) {
-			return <div><button onClick={() => this.setState({ started: false })}>Stop</button><div>{props.children}</div></div>
+			return <div><button onClick={this.stop}>Stop</button><div>{props.children}</div></div>
 		} else {
-			return <div><button onClick={() => this.setState({ started: true })}>Start</button></div>
+			return <div><button onClick={this.start}>Start</button></div>
 		}
 	}
+	start = () => this.setState({ started: true })
+	stop = () => this.setState({ started: false })
 }
 
 
@@ -20,13 +22,13 @@ class RandomWidget extends preact.Component<{}, { value: string }> {
 		this.state = { value: "" };
 		this.updateRandom();
 	}
-	randomChannel: ConcurrenceChannel = concurrence.interval(() => this.updateRandom(), 1000);
-	updateRandom() {
+	updateRandom = () => {
 		concurrence.random().then(value => {
 			console.log(value);
 			this.setState({ value: value.toString() });
 		});
 	}
+	randomChannel: ConcurrenceChannel = concurrence.interval(this.updateRandom, 1000);
 	render() {
 		return <span>So random: {this.state.value}</span>;
 	}
@@ -38,11 +40,11 @@ class RandomWidget extends preact.Component<{}, { value: string }> {
 
 
 class TextField extends preact.Component<{ value: string, onChange: (value: string) => void }, { value: string }> {
+	onChange = (event: any) => {
+		this.props.onChange(event.value as string);
+	}
 	render() {
-		const onChange = (event: any) => {
-			this.props.onChange(event.value as string);
-		}
-		return <input value={this.props.value} onChange={onChange} onKeyUp={onChange}/>
+		return <input value={this.props.value} onChange={this.onChange} onKeyUp={this.onChange}/>
 	}
 }
 
@@ -74,12 +76,13 @@ class BroadcastWidget extends preact.Component<{}, { value: string }> {
 	render() {
 		return (
 			<div>
-				<TextField value={this.state.value} onChange={value => this.setState({ value })}/>
-				<button onClick={this.send.bind(this)}>Send</button>
+				<TextField value={this.state.value} onChange={this.updateValue}/>
+				<button onClick={this.send}>Send</button>
 			</div>
 		);
 	}
-	send() {
+	updateValue = (value: string) => this.setState({ value })
+	send = () => {
 		concurrence.broadcast("messages", this.state.value);
 	}
 }
@@ -98,12 +101,13 @@ class NewItemWidget extends preact.Component<{}, { value: string }> {
 	render() {
 		return (
 			<div>
-				<TextField value={this.state.value} onChange={value => this.setState({ value: value })} />
-				<button onClick={this.send.bind(this)}>Add</button>
+				<TextField value={this.state.value} onChange={this.onChange} />
+				<button onClick={this.send}>Add</button>
 			</div>
 		);
 	}
-	send() {
+	onChange = (value: string) => this.setState({ value })
+	send = () => {
 		concurrence.mysql.modify("localhost", "INSERT INTO concurrence_todo.items (text) VALUES (?)", this.state.value).then(result => {
 			const message: ItemOperation = {
 				operation: "create",
@@ -123,13 +127,14 @@ class ItemWidget extends preact.Component<{ item: ItemRecord }, { pendingText: s
 	render() {
 		return (
 			<div>
-				<TextField value={typeof this.state.pendingText != "undefined" ? this.state.pendingText : this.props.item.text} onChange={pendingText => this.setState({ pendingText })}/>
-				<button onClick={this.delete.bind(this)} disabled={this.state.inProgress}>Delete</button>
-				{typeof this.state.pendingText != "undefined" ? <button onClick={this.save.bind(this)} disabled={this.state.inProgress}>Save</button> : null}
+				<TextField value={typeof this.state.pendingText != "undefined" ? this.state.pendingText : this.props.item.text} onChange={this.setPendingText}/>
+				<button onClick={this.delete} disabled={this.state.inProgress}>Delete</button>
+				{typeof this.state.pendingText != "undefined" ? <button onClick={this.save} disabled={this.state.inProgress}>Save</button> : null}
 			</div>
 		);
 	}
-	save() {
+	setPendingText = (pendingText: string) => this.setState({ pendingText })
+	save = () => {
 		if (typeof this.state.pendingText != "undefined") {
 			const message: ItemOperation = {
 				operation: "modify",
@@ -142,7 +147,7 @@ class ItemWidget extends preact.Component<{ item: ItemRecord }, { pendingText: s
 			}).catch(e => console.log(e));
 		}
 	}
-	delete() {
+	delete = () => {
 		this.setState({ inProgress: true });
 		const message: ItemOperation = {
 			operation: "delete",
