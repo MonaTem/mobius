@@ -75,18 +75,49 @@ function patchJSDOM(document: Document) {
 	}
 }
 
+const enum ConcurrenceSandboxMode {
+	Simple = 0,
+	Full = 1,
+};
+
+const sandboxMode: ConcurrenceSandboxMode = ConcurrenceSandboxMode.Full;
+
+interface ConcurrenceSandboxContext {
+	self: ConcurrenceSandboxContext,
+	global: NodeJS.Global,
+	require: (name: string) => any,
+	document: Document,
+	request: Express.Request,
+	concurrence: any
+};
+
 class ConcurrenceHost {
 	sessions: { [key: string]: ConcurrenceSession; } = {};
-	script: vm.Script;
+	sandbox: (context: ConcurrenceSandboxContext) => void;
 	htmlSource: string;
 	dom: JSDOM;
 	document: Document;
 	staleSessionTimeout: any;
 	constructor(scriptPath: string, htmlPath: string) {
-		this.sessions = {};
-		this.script = new vm.Script(fs.readFileSync(scriptPath).toString(), {
-			filename: scriptPath
-		});
+		const serverScript = fs.readFileSync(scriptPath).toString();
+		if (sandboxMode == ConcurrenceSandboxMode.Simple) {
+			// Full sandboxing, creating a new global context each time
+			const vmScript = new vm.Script(serverScript, {
+				filename: scriptPath
+			});
+			this.sandbox = vmScript.runInNewContext.bind(vmScript) as (context: ConcurrenceSandboxContext) => void;
+		} else {
+			// Simple sandboxing, relying on function scope
+			const context = {
+				app: (context: ConcurrenceSandboxContext) => {
+				},
+			};
+			vm.runInNewContext("function app(self){with(self){return(function(self,global,require,document,request,concurrence){" + serverScript + "\n})(self,self.global,self.require,self.document,self.request,self.concurrence)}}", context, {
+				filename: scriptPath
+			});
+			this.sandbox = context.app;
+			delete context.app;
+		}
 		this.dom = new JSDOM(fs.readFileSync(htmlPath).toString());
 		this.document = (this.dom.window as Window).document as Document;
 		patchJSDOM(this.document);
@@ -281,7 +312,7 @@ class ConcurrenceSession {
 	pendingChannelCount: number = 0;
 	incomingMessageId: number = 0;
 	reorderedMessages: ConcurrenceMessage[] = [];
-	context: any;
+	context: ConcurrenceSandboxContext;
 	queuedLocalEvents: ConcurrenceEvent[] | undefined;
 	queuedLocalEventsResolve: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
 	localResolveTimeout: NodeJS.Timer | undefined;
@@ -291,7 +322,7 @@ class ConcurrenceSession {
 		this.sessionID = sessionID;
 		this.pageRenderer = new ConcurrencePageRenderer(this);
 		// Server-side version of the API
-		const context = Object.create(global);
+		const context = Object.create(global) as ConcurrenceSandboxContext;
 		context.self = context;
 		context.global = global;
 		context.require = require;
@@ -313,7 +344,7 @@ class ConcurrenceSession {
 		this.context = context;
 	}
 	run() {
-		host.script.runInNewContext(this.context);
+		host.sandbox(this.context);
 	}
 	processMessage(message: ConcurrenceMessage) {
 		// Process messages in order
