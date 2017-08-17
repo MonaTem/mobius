@@ -368,8 +368,8 @@ class ConcurrenceSession {
 		};
 		this.context = context;
 	}
-	run() {
-		host.sandbox(this.context);
+	run() : Promise<void> {
+		return new Promise(resolve => resolve(host.sandbox(this.context)));
 	}
 
 	dispatchEvent(event: ConcurrenceEvent) {
@@ -502,26 +502,32 @@ class ConcurrenceSession {
 		const channelId = ++this.localChannelCounter;
 		logOrdering("server", "open", channelId, this);
 		return Promise.resolve(value).then(value => {
-			// Forward the value to the client
 			defer().then(escaping(() => this.exitLocalChannel(includedInPrerender)));
-			logOrdering("server", "message", channelId, this);
-			this.sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]);
-			logOrdering("server", "close", channelId, this);
-			return roundTrip(value);
+			return resolvedPromise.then(escaping(() => {
+				// Forward the value to the client
+				return this.sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]);
+			})).then(() => {
+				logOrdering("server", "message", channelId, this);
+				logOrdering("server", "close", channelId, this);
+				return roundTrip(value);
+			});
 		}, error => {
-			// Serialize the reject error type or string
-			defer().then(escaping(() => this.exitLocalChannel(includedInPrerender)));
-			let type: number | string = 1;
-			let serializedError = error;
-			if (error instanceof Error) {
-				// Convert Error types to a representation that can be reconstituted on the client
-				type = error.constructor.name;
-				serializedError = Object.assign({ message: error.message, stack: error.stack }, error);
-			}
-			logOrdering("server", "message", channelId, this);
-			this.sendEvent([channelId, serializedError, type]);
-			logOrdering("server", "close", channelId, this);
-			return error;
+			return resolvedPromise.then(escaping(() => {
+				// Serialize the reject error type or string
+				defer().then(escaping(() => this.exitLocalChannel(includedInPrerender)));
+				let type: number | string = 1;
+				let serializedError = error;
+				if (error instanceof Error) {
+					// Convert Error types to a representation that can be reconstituted on the client
+					type = error.constructor.name;
+					serializedError = Object.assign({ message: error.message, stack: error.stack }, error);
+				}
+				return this.sendEvent([channelId, serializedError, type]);
+			})).then(() => {
+				logOrdering("server", "message", channelId, this);
+				logOrdering("server", "close", channelId, this);
+				return Promise.reject(error) as any as T;
+			});
 		});
 	}
 	observeLocalEventCallback<T extends Function>(callback: T, includedInPrerender: boolean = true): ConcurrenceLocalChannel<T> {
@@ -538,10 +544,10 @@ class ConcurrenceSession {
 			send: function() {
 				if (channelId >= 0) {
 					let args = roundTrip([...arguments]);
-					resolvedPromise.then(escaping(() => {
+					resolvedPromise.then(() => {
 						logOrdering("server", "message", channelId, session);
 						(callback as any as Function).apply(null, args);
-					}));
+					});
 					if (!session.dead) {
 						resolvedPromise.then(escaping(() => session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent)));
 					}
@@ -630,7 +636,7 @@ class ConcurrenceSession {
 		const channel = this.registerRemoteChannel(function(event) {
 			if (event) {
 				event.shift();
-				callback.apply(null, event);
+				resolvedPromise.then(() => callback.apply(null, event));
 			} else {
 				channel.close();
 			}

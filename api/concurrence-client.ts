@@ -90,7 +90,7 @@ namespace concurrence {
 
 	// Remote channels
 	let remoteChannelCounter = 0;
-	const pendingChannels : { [channelId: number]: (event: ConcurrenceEvent | undefined) => void; } = {};
+	const pendingChannels : { [channelId: number]: (event?: ConcurrenceEvent) => void; } = {};
 	let pendingChannelCount = 0;
 
 	// Local channels
@@ -150,7 +150,7 @@ namespace concurrence {
 			}
 			// Abandon pending channels
 			for (let channelId in pendingChannels) {
-				pendingChannels[channelId](undefined);
+				pendingChannels[channelId]();
 			}
 			// Send a "destroy" message so that the server can clean up the session
 			const message = serializeMessage(outgoingMessageId++) + "&destroy=1";
@@ -169,7 +169,7 @@ namespace concurrence {
 
 	function dispatchEvent(event: ConcurrenceEvent) : PromiseLike<void> | undefined {
 		let channelId = event[0];
-		let channel: ((event: ConcurrenceEvent | undefined) => void) | undefined;
+		let channel: ((event?: ConcurrenceEvent) => void) | undefined;
 		if (channelId < 0) {
 			// Fenced client-side event
 			channelId = -channelId;
@@ -351,10 +351,9 @@ namespace concurrence {
 		pendingChannelCount++;
 		const channelId = ++remoteChannelCounter;
 		logOrdering("server", "open", channelId);
-		pendingChannels[channelId] = function() {
+		pendingChannels[channelId] = function(event?: ConcurrenceEvent) {
 			logOrdering("server", "message", channelId);
-			const args = slice.call(arguments);
-			callback.apply(null, args);
+			callback(event);
 		}
 		if (!willSynchronizeChannels) {
 			willSynchronizeChannels = true;
@@ -485,7 +484,11 @@ namespace concurrence {
 					}
 				}
 				return sendEvent([channelId, serializedError, type]);
-			})).then(Promise.reject.bind(Promise, error) as () => PromiseLike<T>);
+			})).then(() => {
+				logOrdering("client", "message", channelId);
+				logOrdering("client", "close", channelId);
+				return Promise.reject(error) as any as T;
+			});
 		});
 	};
 
