@@ -44,7 +44,7 @@ class TextField extends preact.Component<{ value: string, onChange: (value: stri
 		this.props.onChange(event.value as string);
 	}
 	render() {
-		return <input value={this.props.value} onChange={this.onChange} onKeyUp={this.onChange}/>
+		return <input value={this.props.value} onChange={this.onChange} onInput={this.onChange}/>
 	}
 }
 
