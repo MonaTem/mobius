@@ -21,19 +21,19 @@ cleaner: clean
 	pushd preact && npm run-script clean
 
 
+node_modules/typescript/bin/tsc: package.json
+	npm install && touch node_modules/typescript/bin/tsc
+
+
 preact/package.json: .gitmodules
 	git submodule update --init --recursive preact && touch preact/package.json
 
 preact/dist/preact.js: preact/package.json
 	pushd preact && npm install
 
-node_modules/preact: preact/dist/preact.js
+node_modules/preact: node_modules/typescript/bin/tsc preact/dist/preact.js
 	mkdir -p node_modules
 	pushd node_modules && ln -sf ../preact/ preact
-
-
-node_modules/typescript/bin/tsc: package.json
-	npm install && touch node_modules/typescript/bin/tsc
 
 
 public/client.js: $(CLIENT_FILES) tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact

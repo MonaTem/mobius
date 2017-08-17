@@ -23,7 +23,7 @@
 		"baseUrl": "./",
 		"outFile": "public/client.js",
 		"allowJs": true,
-		"jsx": "React",
+		"jsx": "react",
 		"jsxFactory": "preact.h",
 		"strict": true,
 		"strictNullChecks": true,
