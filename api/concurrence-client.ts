@@ -1,6 +1,12 @@
 ///<reference types="preact"/>
 namespace concurrence {
 	const defer = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { setTimeout(callback, 0) };
+	const reduce = function<T, U>(array: ArrayLike<T>, callback: (previousValue: U, currentValue: T, currentIndex: number, array: ArrayLike<T>) => U, initialValue: U) : U {
+		for (var i = 0; i < array.length; i++) {
+			initialValue = callback(initialValue, array[i], i, array);
+		}
+		return initialValue;
+	};
 
 	type ConcurrenceEvent = [number] | [number, any] | [number, any, any];
 
@@ -30,7 +36,7 @@ namespace concurrence {
 	// Message ordering
 	let outgoingMessageId = 0;
 	let incomingMessageId = 0;
-	const reorderedMessages : [ConcurrenceEvent[], number][] = [];
+	const reorderedMessages : { [messageId: number]: ConcurrenceEvent[] } = {};
 
 	// Session state
 	let sessionID: string | undefined;
@@ -58,13 +64,16 @@ namespace concurrence {
 
 	// Remote channels
 	let remoteChannelCounter = 0;
-	const pendingChannels : { [key: number]: (event: ConcurrenceEvent | undefined) => void; } = {};
+	const pendingChannels : { [channelId: number]: (event: ConcurrenceEvent | undefined) => void; } = {};
 	let pendingChannelCount = 0;
 
 	// Local channels
 	let localChannelCounter = 0;
 	let queuedLocalEvents: ConcurrenceEvent[] = [];
-	const fencedLocalEvents: { [key: number]: ((event: ConcurrenceEvent) => void)[]; } = {};
+	const fencedLocalEvents: { [channelId: number]: ((event: ConcurrenceEvent) => void)[]; } = {};
+	let totalBatched = 0;
+	let isBatched: { [channelId: number]: true } = {};
+	let pendingBatchedActions: (() => void)[] = [];
 
 	// Heartbeat
 	const sessionHeartbeatInterval = 4 * 60 * 1000;
@@ -132,62 +141,67 @@ namespace concurrence {
 	}
 	window.addEventListener("unload", destroySession, false);
 
-	function processMessage(events: ConcurrenceEvent[], messageId: number) {
+	function dispatchEvent(event: ConcurrenceEvent) : Promise<void> | undefined {
+		let channelId = event[0];
+		let channel: ((event: ConcurrenceEvent | undefined) => void) | undefined;
+		if (channelId < 0) {
+			// Fenced client-side event
+			channelId = -channelId;
+			let fencedQueue = fencedLocalEvents[channelId];
+			channel = fencedQueue.shift();
+			if (fencedQueue.length == 0) {
+				delete fencedLocalEvents[channelId];
+			}
+			// Apply batching
+			if (totalBatched && isBatched[channelId] && ((--totalBatched) == 0)) {
+				const batchedActions = pendingBatchedActions;
+				pendingBatchedActions = [];
+				isBatched = {};
+				const promise: Promise<any> = reduce(batchedActions, (promise, action) => promise.then(action), Promise.resolve());
+				return promise.then(() => callChannelWithEvent(channel, event));
+			}
+		} else {
+			// Server-side event
+			channel = pendingChannels[channelId];
+		}
+		callChannelWithEvent(channel, event);
+	}
+
+	function callChannelWithEvent(channel: ((event: ConcurrenceEvent) => void) | undefined, event: ConcurrenceEvent) {
+		if (channel) {
+			if (totalBatched) {
+				pendingBatchedActions.push(channel.bind(null, event));
+			} else {
+				channel(event);
+			}
+		} else {
+			throw new Error("Guru meditation error!");
+		}
+	}
+
+	function processMessage(events: ConcurrenceEvent[], messageId: number) : Promise<void> {
 		// Process messages in order
 		if (messageId > incomingMessageId) {
-			return false;
+			// Message was received out of order, queue it for later
+			reorderedMessages[messageId] = events;
+			return Promise.resolve();
 		}
 		if (messageId < incomingMessageId) {
-			return true;
+			return Promise.resolve();
 		}
 		incomingMessageId++;
 		// Read each event and dispatch the appropriate event in order
-		function processEvents() {
-			const event = events.shift();
-			if (event) {
-				const channelId = event[0];
-				let channel: ((event: ConcurrenceEvent | undefined) => void) | undefined;
-				if (channelId < 0) {
-					// Fenced client-side event
-					let fencedQueue = fencedLocalEvents[-channelId];
-					channel = fencedQueue.shift();
-					if (fencedQueue.length == 0) {
-						delete fencedLocalEvents[-channelId];
-					}
-				} else {
-					// Server-side event
-					channel = pendingChannels[channelId];
-				}
-				if (channel) {
-					channel(event);
-				} else {
-					throw new Error("Guru meditation error!");
-				}
-				if (event.length) {
-					defer(processEvents);
-				}
+		return reduce(events, (promise: Promise<any>, event: ConcurrenceEvent) => promise.then(() => dispatchEvent(event)), Promise.resolve()).then(() => {
+			const reorderedMessage = reorderedMessages[incomingMessageId];
+			if (reorderedMessage) {
+				delete reorderedMessages[incomingMessageId];
+				return processMessage(reorderedMessage, incomingMessageId);
 			}
-		}
-		processEvents();
-		synchronizeChannels();
-		return true;
+		}).then(synchronizeChannels);
 	}
 
-	function receiveMessage(messageText: string, messageId: number) {
-		const message: ConcurrenceEvent[] = messageText.length ? JSON.parse("[" + messageText + "]") : [];
-		if (processMessage(message, messageId)) {
-			// Process any messages we received out of order
-			for (let i = 0; i < reorderedMessages.length; i++) {
-				const entry = reorderedMessages[i];
-				if (processMessage(entry[0], entry[1])) {
-					i = 0;
-					reorderedMessages.splice(i, 1);
-				}
-			}
-		} else {
-			// Message was received out of order, queue it for later
-			reorderedMessages.push([message, messageId]);
-		}
+	function deserializeMessage(messageText: string) {
+		return (messageText.length ? JSON.parse("[" + messageText + "]") : []) as ConcurrenceEvent[];
 	}
 
 	function sendFormMessage(body: string, messageId: number) {
@@ -199,7 +213,7 @@ namespace concurrence {
 			if (request.readyState == 4) {
 				activeConnectionCount--;
 				if (request.status == 200) {
-					receiveMessage(request.responseText, messageId);
+					processMessage(deserializeMessage(request.responseText), messageId);
 				} else {
 					destroySession();
 				}
@@ -265,7 +279,7 @@ namespace concurrence {
 					activeConnectionCount--;
 					const pendingId = pendingSocketMessageIds.shift();
 					if (typeof pendingId != "undefined") {
-						receiveMessage(event.data, pendingId);
+						processMessage(deserializeMessage(event.data), pendingId);
 					}
 				}, false);
 				pendingSocketMessageIds = [messageId];
@@ -334,7 +348,7 @@ namespace concurrence {
 		};
 	}
 
-	function sendEvent(event: ConcurrenceEvent) : Promise<ConcurrenceEvent | undefined> {
+	function sendEvent(event: ConcurrenceEvent, batched?: boolean) : Promise<ConcurrenceEvent | undefined> {
 		if (dead) {
 			return Promise.reject(new Error("Session has died!"));
 		}
@@ -342,6 +356,10 @@ namespace concurrence {
 			if (pendingChannelCount) {
 				// Let server decide on the ordering of events since server-side channels are active
 				const channelId = event[0];
+				if (batched) {
+					isBatched[channelId] = true;
+					++totalBatched;
+				}
 				const fencedQueue = fencedLocalEvents[channelId] || (fencedLocalEvents[channelId] = []);
 				fencedQueue.push(resolve);
 				event[0] = -channelId;
@@ -442,7 +460,7 @@ namespace concurrence {
 		});
 	};
 
-	export function observeClientEventCallback<T extends Function>(callback: T) : ConcurrenceLocalChannel<T> {
+	export function observeClientEventCallback<T extends Function>(callback: T, batched?: boolean) : ConcurrenceLocalChannel<T> {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
@@ -455,7 +473,7 @@ namespace concurrence {
 					const message = Array.prototype.slice.call(arguments);
 					const args = message.slice();
 					message.unshift(this.channelId);
-					sendEvent(roundTrip(message)).then(() => {
+					sendEvent(roundTrip(message), batched).then(() => {
 						// Finally send event if a destroy call hasn't won the race
 						if (this.channelId >= 0) {
 							logOrdering("client", "message", this.channelId);
