@@ -327,11 +327,9 @@ namespace concurrence {
 		const channelId = ++remoteChannelCounter;
 		logOrdering("server", "open", channelId);
 		pendingChannels[channelId] = function() {
+			logOrdering("server", "message", channelId);
 			const args = [].slice.call(arguments);
-			defer(() => {
-				logOrdering("server", "message", channelId);
-				callback.apply(null, args);
-			});
+			callback.apply(null, args);
 		}
 		synchronizeChannels();
 		return {
