@@ -1,6 +1,7 @@
 ///<reference types="preact"/>
 namespace concurrence {
-	const defer = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { setTimeout(callback, 0) };
+	const setImmediate = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { setTimeout(callback, 0) };
+	const defer = () => new Promise<void>(setImmediate);
 	const reduce = function<T, U>(array: ArrayLike<T>, callback: (previousValue: U, currentValue: T, currentIndex: number, array: ArrayLike<T>) => U, initialValue: U) : U {
 		for (var i = 0; i < array.length; i++) {
 			initialValue = callback(initialValue, array[i], i, array);
@@ -38,6 +39,7 @@ namespace concurrence {
 	let outgoingMessageId = 0;
 	let incomingMessageId = 0;
 	const reorderedMessages : { [messageId: number]: ConcurrenceEvent[] } = {};
+	let willSynchronizeChannels : boolean = false;
 
 	// Session state
 	let sessionID: string | undefined;
@@ -158,7 +160,7 @@ namespace concurrence {
 				const batchedActions = pendingBatchedActions;
 				pendingBatchedActions = [];
 				isBatched = {};
-				const promise: Promise<any> = reduce(batchedActions, (promise, action) => promise.then(action), Promise.resolve());
+				const promise: Promise<any> = reduce(batchedActions, (promise, action) => promise.then(action).then(defer), Promise.resolve());
 				return promise.then(() => callChannelWithEvent(channel, event));
 			}
 		} else {
@@ -191,14 +193,15 @@ namespace concurrence {
 			return Promise.resolve();
 		}
 		incomingMessageId++;
+		willSynchronizeChannels = true;
 		// Read each event and dispatch the appropriate event in order
-		return reduce(events, (promise: Promise<any>, event: ConcurrenceEvent) => promise.then(() => dispatchEvent(event)), Promise.resolve()).then(() => {
+		return reduce(events, (promise: Promise<any>, event: ConcurrenceEvent) => promise.then(() => dispatchEvent(event)).then(defer), Promise.resolve()).then(() => {
 			const reorderedMessage = reorderedMessages[incomingMessageId];
 			if (reorderedMessage) {
 				delete reorderedMessages[incomingMessageId];
 				return processMessage(reorderedMessage, incomingMessageId);
 			}
-		}).then(synchronizeChannels);
+		}).then(defer).then(synchronizeChannels);
 	}
 
 	function deserializeMessage(messageText: string) {
@@ -295,28 +298,27 @@ namespace concurrence {
 	}
 
 	function synchronizeChannels() {
+		willSynchronizeChannels = false;
 		// Deferred sending of events so that we many from a single event loop can be batched
-		defer(() => {
-			if (idleDuringPrerender) {
-				setTimeout(() => {
-					idleDuringPrerender = false;
-					synchronizeChannels();
-				}, 1);
-				return;
-			}
-			if (!dead) {
-				if ((pendingChannelCount != 0 && activeConnectionCount == 0) || queuedLocalEvents.length) {
-					sendMessages(true);
-					restartHeartbeat();
-				} else if (websocket && pendingSocketMessageIds.length == 0) {
-					// Disconnect WebSocket when server can't possibly send us messages
-					if (websocket.readyState < 2) {
-						websocket.close();
-					}
-					websocket = undefined;
+		if (idleDuringPrerender) {
+			defer().then(() => {
+				idleDuringPrerender = false;
+				synchronizeChannels();
+			});
+			return;
+		}
+		if (!dead) {
+			if ((pendingChannelCount != 0 && activeConnectionCount == 0) || queuedLocalEvents.length) {
+				sendMessages(true);
+				restartHeartbeat();
+			} else if (websocket && pendingSocketMessageIds.length == 0) {
+				// Disconnect WebSocket when server can't possibly send us messages
+				if (websocket.readyState < 2) {
+					websocket.close();
 				}
+				websocket = undefined;
 			}
-		});
+		}
 	}
 
 	function registerRemoteChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
@@ -332,7 +334,10 @@ namespace concurrence {
 			const args = slice.call(arguments);
 			callback.apply(null, args);
 		}
-		synchronizeChannels();
+		if (!willSynchronizeChannels) {
+			willSynchronizeChannels = true;
+			defer().then(synchronizeChannels);
+		}
 		return {
 			channelId,
 			close() {
@@ -369,8 +374,9 @@ namespace concurrence {
 		});
 		// Queue an event to be sent to the server in the next flush
 		queuedLocalEvents.push(event);
-		if (queuedLocalEvents.length == 1) {
-			synchronizeChannels();
+		if (!willSynchronizeChannels) {
+			willSynchronizeChannels = true;
+			defer().then(synchronizeChannels);
 		}
 		return result;
 	}
