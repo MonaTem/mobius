@@ -37,7 +37,7 @@ namespace concurrence {
 					tuple[1] = listener;
 				} else {
 					const channel = concurrence.receiveClientEventStream(function() {
-						return tuple[1].apply(null, [].slice.call(arguments));
+						return tuple[1].apply(null, arguments);
 					});
 					node.setAttribute("name", "channelID" + channel.channelId);
 					tuple = c[name] = [channel, listener];

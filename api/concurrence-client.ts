@@ -7,6 +7,7 @@ namespace concurrence {
 		}
 		return initialValue;
 	};
+	const slice = Array.prototype.slice;
 
 	type ConcurrenceEvent = [number] | [number, any] | [number, any, any];
 
@@ -328,7 +329,7 @@ namespace concurrence {
 		logOrdering("server", "open", channelId);
 		pendingChannels[channelId] = function() {
 			logOrdering("server", "message", channelId);
-			const args = [].slice.call(arguments);
+			const args = slice.call(arguments);
 			callback.apply(null, args);
 		}
 		synchronizeChannels();
@@ -468,7 +469,7 @@ namespace concurrence {
 			channelId,
 			send: function(this: ConcurrenceChannel) {
 				if (this.channelId >= 0) {
-					const message = Array.prototype.slice.call(arguments);
+					const message = slice.call(arguments);
 					const args = message.slice();
 					message.unshift(this.channelId);
 					sendEvent(roundTrip(message), batched).then(() => {
