@@ -1,11 +1,34 @@
 ///<reference types="preact"/>
 namespace concurrence {
 	const setImmediate = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { setTimeout(callback, 0) };
-	function defer() : Promise<void>;
-	function defer<T>() : Promise<T>;
-	function defer(value?: any) : Promise<any> {
+	const resolvedPromise: PromiseLike<void> = Promise.resolve();
+
+	function defer() : PromiseLike<void>;
+	function defer<T>() : PromiseLike<T>;
+	function defer(value?: any) : PromiseLike<any> {
 		return new Promise<any>(resolve => setImmediate(resolve.bind(null, value)));
 	}
+
+	function escaping(handler: () => any | PromiseLike<any>) : () => PromiseLike<void>;
+	function escaping<T>(handler: (value: T) => any | PromiseLike<any>) : (value: T) => PromiseLike<void>;
+	function escaping(handler: (value?: any) => any | PromiseLike<any>) : (value?: any) => PromiseLike<void> {
+		return (value?: any) => {
+			try {
+				const handled = handler(value);
+				return Promise.resolve(handled).then(value => undefined, e => {
+					setImmediate(() => {
+						throw e;
+					});
+				});
+			} catch(e) {
+				setImmediate(() => {
+					throw e;
+				});
+				return resolvedPromise;
+			}
+		};
+	}
+
 	const reduce = function<T, U>(array: ArrayLike<T>, callback: (previousValue: U, currentValue: T, currentIndex: number, array: ArrayLike<T>) => U, initialValue: U) : U {
 		for (var i = 0; i < array.length; i++) {
 			initialValue = callback(initialValue, array[i], i, array);
@@ -57,7 +80,7 @@ namespace concurrence {
 			concurrenceForm.onsubmit = function() { return false; };
 		}
 		willSynchronizeChannels = true;
-		defer().then(processMessage.bind(null, bootstrapData.events, 0)).then(defer).then(synchronizeChannels);
+		defer().then(escaping(processMessage.bind(null, bootstrapData.events, 0))).then(defer).then(escaping(synchronizeChannels));
 	} else {
 		sessionID = uuid();
 	}
@@ -144,7 +167,7 @@ namespace concurrence {
 	}
 	window.addEventListener("unload", destroySession, false);
 
-	function dispatchEvent(event: ConcurrenceEvent) : Promise<void> | undefined {
+	function dispatchEvent(event: ConcurrenceEvent) : PromiseLike<void> | undefined {
 		let channelId = event[0];
 		let channel: ((event: ConcurrenceEvent | undefined) => void) | undefined;
 		if (channelId < 0) {
@@ -160,8 +183,9 @@ namespace concurrence {
 				const batchedActions = pendingBatchedActions;
 				pendingBatchedActions = [];
 				isBatched = {};
-				const promise: Promise<any> = reduce(batchedActions, (promise, action) => promise.then(action).then(defer), Promise.resolve());
-				return promise.then(() => callChannelWithEvent(channel, event));
+				return reduce(batchedActions, (promise, action) => {
+					return promise.then(escaping(action)).then(defer);
+				}, resolvedPromise).then(escaping(callChannelWithEvent.bind(null, channel, event)));
 			}
 		} else {
 			// Server-side event
@@ -182,19 +206,21 @@ namespace concurrence {
 		}
 	}
 
-	function processMessage(events: ConcurrenceEvent[], messageId: number) : Promise<void> {
+	function processMessage(events: ConcurrenceEvent[], messageId: number) : PromiseLike<void> {
 		// Process messages in order
 		if (messageId > incomingMessageId) {
 			// Message was received out of order, queue it for later
 			reorderedMessages[messageId] = events;
-			return Promise.resolve();
+			return resolvedPromise;
 		}
 		if (messageId < incomingMessageId) {
-			return Promise.resolve();
+			return resolvedPromise;
 		}
 		incomingMessageId++;
 		// Read each event and dispatch the appropriate event in order
-		const promise = reduce(events, (promise: Promise<any>, event: ConcurrenceEvent) => promise.then(() => dispatchEvent(event)).then(defer), Promise.resolve()).then(() => {
+		const promise = reduce(events, (promise: PromiseLike<any>, event: ConcurrenceEvent) => {
+			return promise.then(escaping(dispatchEvent.bind(null, event))).then(defer);
+		}, resolvedPromise).then(() => {
 			const reorderedMessage = reorderedMessages[incomingMessageId];
 			if (reorderedMessage) {
 				delete reorderedMessages[incomingMessageId];
@@ -205,7 +231,7 @@ namespace concurrence {
 			return promise;
 		}
 		willSynchronizeChannels = true;
-		return promise.then(defer).then(synchronizeChannels);
+		return promise.then(escaping(synchronizeChannels));
 	}
 
 	function deserializeMessage(messageText: string) {
@@ -332,7 +358,7 @@ namespace concurrence {
 		}
 		if (!willSynchronizeChannels) {
 			willSynchronizeChannels = true;
-			defer().then(synchronizeChannels);
+			defer().then(escaping(synchronizeChannels));
 		}
 		return {
 			channelId,
@@ -348,7 +374,7 @@ namespace concurrence {
 		};
 	}
 
-	function sendEvent(event: ConcurrenceEvent, batched?: boolean) : Promise<ConcurrenceEvent | undefined> {
+	function sendEvent(event: ConcurrenceEvent, batched?: boolean) : PromiseLike<ConcurrenceEvent | undefined> {
 		if (dead) {
 			return Promise.reject(new Error("Session has died!"));
 		}
@@ -372,7 +398,7 @@ namespace concurrence {
 		queuedLocalEvents.push(event);
 		if (!willSynchronizeChannels) {
 			willSynchronizeChannels = true;
-			defer().then(synchronizeChannels);
+			defer().then(escaping(synchronizeChannels));
 		}
 		return result;
 	}
@@ -380,7 +406,7 @@ namespace concurrence {
 	export const disconnect = destroySession;
 
 	// APIs for client/, not to be used inside src/
-	export function receiveServerPromise<T extends ConcurrenceJsonValue>(...args: any[]) : Promise<T> { // Must be cast to the proper signature
+	export function receiveServerPromise<T extends ConcurrenceJsonValue>(...args: any[]) : PromiseLike<T> { // Must be cast to the proper signature
 		return new Promise<T>((resolve, reject) => {
 			const channel = registerRemoteChannel(event => {
 				channel.close();
@@ -426,38 +452,40 @@ namespace concurrence {
 		return channel;
 	}
 
-	export function observeClientPromise<T extends ConcurrenceJsonValue | void>(value: Promise<T> | T) : Promise<T> {
+	export function observeClientPromise<T extends ConcurrenceJsonValue | void>(value: PromiseLike<T> | T) : PromiseLike<T> {
 		let channelId = ++localChannelCounter;
 		logOrdering("client", "open", channelId);
-		return Promise.resolve(value).then(roundTripped => sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]).then(() => {
-			logOrdering("client", "message", channelId);
-			logOrdering("client", "close", channelId);
-			return roundTrip(value);
-		}), error => {
-			// Convert Error types to a representation that can be reconstituted on the server
-			let type : any = 1;
-			let serializedError: any = error;
-			if (error instanceof Error) {
-				let errorClass : any = error.constructor;
-				if ("name" in errorClass) {
-					type = errorClass.name;
-				} else {
-					// ES5 support
-					type = errorClass.toString().match(/.*? (\w+)/)[0];
-				}
-				serializedError = { message: error.message, stack: error.stack };
-				let anyError : any = error;
-				for (let i in anyError) {
-					if (anyError.hasOwnProperty(i)) {
-						serializedError[i] = anyError[i];
-					}
-				}
-			}
-			return sendEvent([channelId, serializedError, type]).then(() => {
+		return Promise.resolve(value).then(value => {
+			return resolvedPromise.then(escaping(() => {
+				return sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]);
+			})).then(() => {
 				logOrdering("client", "message", channelId);
 				logOrdering("client", "close", channelId);
-				return Promise.reject(error)
+				return roundTrip(value);
 			});
+		}, error => {
+			return resolvedPromise.then(escaping(() => {
+				// Convert Error types to a representation that can be reconstituted on the server
+				let type : any = 1;
+				let serializedError: any = error;
+				if (error instanceof Error) {
+					let errorClass : any = error.constructor;
+					if ("name" in errorClass) {
+						type = errorClass.name;
+					} else {
+						// ES5 support
+						type = errorClass.toString().match(/.*? (\w+)/)[0];
+					}
+					serializedError = { message: error.message, stack: error.stack };
+					let anyError : any = error;
+					for (let i in anyError) {
+						if (anyError.hasOwnProperty(i)) {
+							serializedError[i] = anyError[i];
+						}
+					}
+				}
+				return sendEvent([channelId, serializedError, type]);
+			})).then(Promise.reject.bind(Promise, error) as () => PromiseLike<T>);
 		});
 	};
 
@@ -474,7 +502,9 @@ namespace concurrence {
 					const message = slice.call(arguments);
 					const args = message.slice();
 					message.unshift(this.channelId);
-					sendEvent(roundTrip(message), batched).then(() => {
+					resolvedPromise.then(escaping(() => {
+						return sendEvent(roundTrip(message), batched);
+					})).then(() => {
 						// Finally send event if a destroy call hasn't won the race
 						if (this.channelId >= 0) {
 							logOrdering("client", "message", this.channelId);

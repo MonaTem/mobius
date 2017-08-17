@@ -41,10 +41,32 @@ function applyDeterminismWarning<T>(parent: T, key: keyof T, example: string, re
 	return original;
 }
 
-function defer() : Promise<void>;
-function defer<T>() : Promise<T>;
-function defer(value?: any) : Promise<any> {
+const resolvedPromise: PromiseLike<void> = Promise.resolve()
+
+function defer() : PromiseLike<void>;
+function defer<T>() : PromiseLike<T>;
+function defer(value?: any) : PromiseLike<any> {
 	return new Promise<any>(resolve => setImmediate(resolve.bind(null, value)));
+}
+
+function escaping(handler: () => any | PromiseLike<any>) : () => PromiseLike<void>;
+function escaping<T>(handler: (value: T) => any | PromiseLike<any>) : (value: T) => PromiseLike<void>;
+function escaping(handler: (value?: any) => any | PromiseLike<any>) : (value?: any) => PromiseLike<void> {
+	return (value?: any) => {
+		try {
+			const handled = handler(value);
+			return Promise.resolve(handled).then(value => undefined, e => {
+				setImmediate(() => {
+					throw e;
+				});
+			});
+		} catch(e) {
+			setImmediate(() => {
+				throw e;
+			});
+			return resolvedPromise;
+		}
+	};
 }
 
 function compatibleStringify(value: any): string {
@@ -206,7 +228,7 @@ class ConcurrencePageRenderer {
 	formNode: Element | undefined;
 	messageIdInput: HTMLInputElement | undefined;
 	channelCount: number = 0;
-	pageIsReady: Promise<string> | undefined;
+	pageIsReady: PromiseLike<string> | undefined;
 	resolvePageIsReady: ((html: string) => void) | undefined;
 	constructor(session: ConcurrenceSession) {
 		this.session = session;
@@ -366,7 +388,7 @@ class ConcurrenceSession {
 		}
 	}
 
-	processMessage(events: ConcurrenceEvent[], messageId: number) : Promise<void> {
+	processMessage(events: ConcurrenceEvent[], messageId: number) : PromiseLike<void> {
 		// Process messages in order
 		if (messageId > this.incomingMessageId) {
 			// Message was received out of order, queue it for later
@@ -379,13 +401,13 @@ class ConcurrenceSession {
 		this.incomingMessageId++;
 		this.willSynchronizeChannels = true;
 		// Read each event and dispatch the appropriate event in order
-		return events.reduce((promise: Promise<any>, event: ConcurrenceEvent) => promise.then(() => this.dispatchEvent(event)).then(defer), Promise.resolve()).then(() => {
+		return events.reduce((promise: PromiseLike<any>, event: ConcurrenceEvent) => promise.then(escaping(this.dispatchEvent.bind(this, event))).then(defer), resolvedPromise).then(() => {
 			const reorderedMessage = this.reorderedMessages[this.incomingMessageId];
 			if (reorderedMessage) {
 				delete this.reorderedMessages[this.incomingMessageId];
 				return this.processMessage(reorderedMessage, this.incomingMessageId);
 			}
-		}).then(defer).then(this.synchronizeChannels.bind(this));
+		}).then(escaping(this.synchronizeChannels.bind(this)));
 	}
 
 	receiveMessage(message: ConcurrenceMessage) {
@@ -394,7 +416,7 @@ class ConcurrenceSession {
 		const events = jsonEvents ? JSON.parse("[" + jsonEvents + "]") : [];
 		return this.processMessage(events, (message.messageID as number) | 0);
 	}
-	dequeueEvents() : Promise<ConcurrenceEvent[] | undefined> {
+	dequeueEvents() : PromiseLike<ConcurrenceEvent[] | undefined> {
 		return new Promise<ConcurrenceEvent[] | undefined>((resolve, reject) => {
 			// Wait until events are ready, a new event handler comes in, or no more local channels exist
 			const queuedLocalEvents = this.queuedLocalEvents;
@@ -436,7 +458,7 @@ class ConcurrenceSession {
 		}
 		if (!this.willSynchronizeChannels) {
 			this.willSynchronizeChannels = true;
-			defer().then(this.synchronizeChannels.bind(this));
+			defer().then(escaping(this.synchronizeChannels.bind(this)));
 		}
 	}
 	synchronizeChannels() {
@@ -472,23 +494,23 @@ class ConcurrenceSession {
 	}
 	waitForEvents() {
 		this.enterLocalChannel();
-		return defer().then(() => this.exitLocalChannel());
+		return defer().then(escaping(() => this.exitLocalChannel()));
 	}
-	observeLocalPromise<T extends ConcurrenceJsonValue>(value: Promise<T> | T, includedInPrerender: boolean = true): Promise<T> {
+	observeLocalPromise<T extends ConcurrenceJsonValue>(value: PromiseLike<T> | T, includedInPrerender: boolean = true): PromiseLike<T> {
 		// Record and ship values/errors of server-side promises
 		this.enterLocalChannel(includedInPrerender);
 		const channelId = ++this.localChannelCounter;
 		logOrdering("server", "open", channelId, this);
 		return Promise.resolve(value).then(value => {
 			// Forward the value to the client
-			defer().then(() => this.exitLocalChannel(includedInPrerender));
+			defer().then(escaping(() => this.exitLocalChannel(includedInPrerender)));
 			logOrdering("server", "message", channelId, this);
 			this.sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]);
 			logOrdering("server", "close", channelId, this);
 			return roundTrip(value);
 		}, error => {
 			// Serialize the reject error type or string
-			defer().then(() => this.exitLocalChannel(includedInPrerender));
+			defer().then(escaping(() => this.exitLocalChannel(includedInPrerender)));
 			let type: number | string = 1;
 			let serializedError = error;
 			if (error instanceof Error) {
@@ -515,13 +537,13 @@ class ConcurrenceSession {
 			channelId,
 			send: function() {
 				if (channelId >= 0) {
-					let args = [...arguments];
-					Promise.resolve(roundTrip(args)).then(args => {
+					let args = roundTrip([...arguments]);
+					resolvedPromise.then(escaping(() => {
 						logOrdering("server", "message", channelId, session);
 						(callback as any as Function).apply(null, args);
-					});
+					}));
 					if (!session.dead) {
-						session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent);
+						resolvedPromise.then(escaping(() => session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent)));
 					}
 				}
 			} as any as T,
@@ -534,7 +556,7 @@ class ConcurrenceSession {
 						// If this was the last server channel, reevaluate queued events so the session can be potentially collected
 						if (!session.willSynchronizeChannels) {
 							session.willSynchronizeChannels = true;
-							defer().then(session.synchronizeChannels.bind(session));
+							defer().then(escaping(session.synchronizeChannels.bind(session)));
 						}
 					}
 				}
@@ -552,11 +574,11 @@ class ConcurrenceSession {
 		logOrdering("client", "open", channelId, this);
 		// this.pendingChannels[channelId] = callback;
 		session.pendingChannels[channelId] = function() {
-			const args = Array.prototype.slice.call(arguments);
-			defer().then(() => {
+			let args = [...arguments];
+			resolvedPromise.then(escaping(() => {
 				logOrdering("client", "message", channelId, session);
 				callback.apply(null, args);
-			});
+			}));
 		};
 		return {
 			channelId,
@@ -569,7 +591,7 @@ class ConcurrenceSession {
 						// If this was the last client channel, reevaluate queued events so the session can be potentially collected
 						if (!session.willSynchronizeChannels) {
 							session.willSynchronizeChannels = true;
-							defer().then(session.synchronizeChannels.bind(session));
+							defer().then(escaping(session.synchronizeChannels.bind(session)));
 						}
 					}
 				}
@@ -649,11 +671,10 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 
 if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
 	server.get("/", (req, res) => {
-		new Promise<ConcurrenceSession>(resolve => {
-			resolve(host.newSession(req));
-		}).then(session => {
+		resolvedPromise.then(() => {
+			const session = host.newSession(req);
 			session.run();
-			return defer().then(() => session.waitForEvents()).then(() => {
+			return session.waitForEvents().then(() => {
 				session.incomingMessageId++;
 				return session.pageRenderer.render();
 			});
@@ -661,7 +682,7 @@ if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
 			noCache(res);
 			res.set("Content-Type", "text/html");
 			res.send(html);
-		}).catch(e => {
+		}, e => {
 			res.status(500);
 			res.set("Content-Type", "text/plain");
 			res.send(util.inspect(e));
@@ -705,27 +726,18 @@ server.post("/", function(req, res) {
 					}
 				}
 				body.events = JSON.stringify(inputEvents.concat(buttonEvents)).slice(1, -1);
-				session.receiveMessage(body).then(() => {
-					return session.waitForEvents()
-				}).then(() => {
+				session.receiveMessage(body).then(session.waitForEvents.bind(session)).then(() => {
 					return session.pageRenderer.render();
 				}).then(html => {
 					res.set("Content-Type", "text/html");
 					res.send(html);
 				});
 			} else {
-				if (session.receiveMessage(body)) {
+				session.receiveMessage(body).then(() => session.dequeueEvents()).then(events => {
 					// Wait to send the response until we have events ready or until there are no more server-side channels open
-					resolve(session.dequeueEvents().then(events => {
-						res.set("Content-Type", "text/plain");
-						res.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
-					}));
-				} else {
-					// Out of order messages don't get any events
 					res.set("Content-Type", "text/plain");
-					res.send("");
-					resolve();
-				}
+					res.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
+				});
 			}
 		}
 	}).catch(e => {
