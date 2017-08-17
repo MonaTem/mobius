@@ -159,7 +159,9 @@ class ItemWidget extends preact.Component<{ item: Item }, { pendingText: string 
 			</div>
 		);
 	}
-	setPendingText = (pendingText: string) => this.setState({ pendingText })
+	setPendingText = (pendingText: string) => {
+		this.setState({ pendingText : pendingText != this.props.item.text ? pendingText : undefined })
+	}
 	save = () => {
 		if (typeof this.state.pendingText != "undefined") {
 			const message: DbRecordChange<Item> = {
