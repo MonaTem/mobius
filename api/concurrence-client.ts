@@ -1,7 +1,11 @@
 ///<reference types="preact"/>
 namespace concurrence {
 	const setImmediate = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { setTimeout(callback, 0) };
-	const defer = () => new Promise<void>(setImmediate);
+	function defer() : Promise<void>;
+	function defer<T>() : Promise<T>;
+	function defer(value?: any) : Promise<any> {
+		return new Promise<any>(resolve => setImmediate(resolve.bind(null, value)));
+	}
 	const reduce = function<T, U>(array: ArrayLike<T>, callback: (previousValue: U, currentValue: T, currentIndex: number, array: ArrayLike<T>) => U, initialValue: U) : U {
 		for (var i = 0; i < array.length; i++) {
 			initialValue = callback(initialValue, array[i], i, array);
@@ -32,7 +36,6 @@ namespace concurrence {
 	interface BootstrapData {
 		sessionID: string;
 		events: ConcurrenceEvent[];
-		idle: boolean;
 	}
 
 	// Message ordering
@@ -44,20 +47,17 @@ namespace concurrence {
 	// Session state
 	let sessionID: string | undefined;
 	const bootstrapElement = document.querySelector("script[type=\"application/x-concurrence-bootstrap\"]");
-	let idleDuringPrerender: boolean = false;
 	if (bootstrapElement) {
 		bootstrapElement.parentNode!.removeChild(bootstrapElement);
 		const bootstrapData = JSON.parse(bootstrapElement.textContent || bootstrapElement.innerHTML) as BootstrapData;
 		sessionID = bootstrapData.sessionID;
-		idleDuringPrerender = bootstrapData.idle;
 		++outgoingMessageId;
-		setTimeout(() => {
-			processMessage(bootstrapData.events, 0);
-		}, 0);
 		const concurrenceForm = document.getElementById("concurrence-form") as HTMLFormElement;
 		if (concurrenceForm) {
 			concurrenceForm.onsubmit = function() { return false; };
 		}
+		willSynchronizeChannels = true;
+		defer().then(processMessage.bind(null, bootstrapData.events, 0)).then(defer).then(synchronizeChannels);
 	} else {
 		sessionID = uuid();
 	}
@@ -193,15 +193,19 @@ namespace concurrence {
 			return Promise.resolve();
 		}
 		incomingMessageId++;
-		willSynchronizeChannels = true;
 		// Read each event and dispatch the appropriate event in order
-		return reduce(events, (promise: Promise<any>, event: ConcurrenceEvent) => promise.then(() => dispatchEvent(event)).then(defer), Promise.resolve()).then(() => {
+		const promise = reduce(events, (promise: Promise<any>, event: ConcurrenceEvent) => promise.then(() => dispatchEvent(event)).then(defer), Promise.resolve()).then(() => {
 			const reorderedMessage = reorderedMessages[incomingMessageId];
 			if (reorderedMessage) {
 				delete reorderedMessages[incomingMessageId];
 				return processMessage(reorderedMessage, incomingMessageId);
 			}
-		}).then(defer).then(synchronizeChannels);
+		});
+		if (willSynchronizeChannels) {
+			return promise;
+		}
+		willSynchronizeChannels = true;
+		return promise.then(defer).then(synchronizeChannels);
 	}
 
 	function deserializeMessage(messageText: string) {
@@ -299,14 +303,6 @@ namespace concurrence {
 
 	function synchronizeChannels() {
 		willSynchronizeChannels = false;
-		// Deferred sending of events so that we many from a single event loop can be batched
-		if (idleDuringPrerender) {
-			defer().then(() => {
-				idleDuringPrerender = false;
-				synchronizeChannels();
-			});
-			return;
-		}
 		if (!dead) {
 			if ((pendingChannelCount != 0 && activeConnectionCount == 0) || queuedLocalEvents.length) {
 				sendMessages(true);

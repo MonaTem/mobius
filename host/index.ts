@@ -41,7 +41,11 @@ function applyDeterminismWarning<T>(parent: T, key: keyof T, example: string, re
 	return original;
 }
 
-const defer = () => new Promise<void>(setImmediate);
+function defer() : Promise<void>;
+function defer<T>() : Promise<T>;
+function defer(value?: any) : Promise<any> {
+	return new Promise<any>(resolve => setImmediate(resolve.bind(null, value)));
+}
 
 function compatibleStringify(value: any): string {
 	return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\/script/g, "<\\/script");
@@ -268,7 +272,7 @@ class ConcurrencePageRenderer {
 		if (bootstrapScript) {
 			const queuedLocalEvents = session.queuedLocalEvents;
 			session.queuedLocalEvents = undefined;
-			bootstrapScript.appendChild(session.host.document.createTextNode(compatibleStringify({ sessionID: this.session.sessionID, events: queuedLocalEvents, idle: session.localChannelCount == 0 })))
+			bootstrapScript.appendChild(session.host.document.createTextNode(compatibleStringify({ sessionID: this.session.sessionID, events: queuedLocalEvents })))
 		}
 		const messageIdInput = this.messageIdInput;
 		if (messageIdInput) {
