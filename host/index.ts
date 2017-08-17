@@ -261,10 +261,10 @@ class ConcurrencePageRenderer {
 			formNode.appendChild(messageIdInput);
 		}
 	}
-	enterLocalChannel() {
+	enterChannel() {
 		++this.channelCount;
 	}
-	exitLocalChannel() {
+	exitChannel() {
 		if (--this.channelCount == 0) {
 			defer().then(() => {
 				if (this.channelCount == 0) {
@@ -482,19 +482,19 @@ class ConcurrenceSession {
 	}
 	enterLocalChannel(delayPageLoading: boolean = true) : number {
 		if (delayPageLoading) {
-			this.pageRenderer.enterLocalChannel();
+			this.pageRenderer.enterChannel();
 		}
 		return ++this.localChannelCount;
 	}
 	exitLocalChannel(resumePageLoading: boolean = true) : number {
 		if (resumePageLoading) {
-			this.pageRenderer.exitLocalChannel();
+			this.pageRenderer.exitChannel();
 		}
 		return --this.localChannelCount;
 	}
 	waitForEvents() {
 		this.enterLocalChannel();
-		return defer().then(escaping(() => this.exitLocalChannel()));
+		return defer().then(escaping(this.exitLocalChannel.bind(this)));
 	}
 	observeLocalPromise<T extends ConcurrenceJsonValue>(value: PromiseLike<T> | T, includedInPrerender: boolean = true): PromiseLike<T> {
 		// Record and ship values/errors of server-side promises
@@ -502,19 +502,18 @@ class ConcurrenceSession {
 		const channelId = ++this.localChannelCounter;
 		logOrdering("server", "open", channelId, this);
 		return Promise.resolve(value).then(value => {
-			defer().then(escaping(() => this.exitLocalChannel(includedInPrerender)));
 			return resolvedPromise.then(escaping(() => {
 				// Forward the value to the client
 				return this.sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]);
 			})).then(() => {
 				logOrdering("server", "message", channelId, this);
 				logOrdering("server", "close", channelId, this);
+				resolvedPromise.then(escaping(() => this.exitLocalChannel(includedInPrerender)));
 				return roundTrip(value);
 			});
 		}, error => {
 			return resolvedPromise.then(escaping(() => {
 				// Serialize the reject error type or string
-				defer().then(escaping(() => this.exitLocalChannel(includedInPrerender)));
 				let type: number | string = 1;
 				let serializedError = error;
 				if (error instanceof Error) {
@@ -526,6 +525,7 @@ class ConcurrenceSession {
 			})).then(() => {
 				logOrdering("server", "message", channelId, this);
 				logOrdering("server", "close", channelId, this);
+				resolvedPromise.then(escaping(() => this.exitLocalChannel(includedInPrerender)));
 				return Promise.reject(error) as any as T;
 			});
 		});
@@ -558,13 +558,15 @@ class ConcurrenceSession {
 					logOrdering("server", "close", this.channelId, session);
 					this.channelId = -1;
 					channelId = -1;
-					if (session.exitLocalChannel(includedInPrerender) == 0) {
-						// If this was the last server channel, reevaluate queued events so the session can be potentially collected
-						if (!session.willSynchronizeChannels) {
-							session.willSynchronizeChannels = true;
-							defer().then(escaping(session.synchronizeChannels.bind(session)));
+					resolvedPromise.then(escaping(() => {
+						if (session.exitLocalChannel(includedInPrerender) == 0) {
+							// If this was the last server channel, reevaluate queued events so the session can be potentially collected
+							if (!session.willSynchronizeChannels) {
+								session.willSynchronizeChannels = true;
+								defer().then(escaping(session.synchronizeChannels.bind(session)));
+							}
 						}
-					}
+					}));
 				}
 			}
 		};
