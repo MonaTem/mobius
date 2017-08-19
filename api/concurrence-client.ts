@@ -58,7 +58,7 @@ namespace concurrence {
 
 	interface BootstrapData {
 		sessionID: string;
-		events: ConcurrenceEvent[];
+		events?: ConcurrenceEvent[];
 	}
 
 	// Message ordering
@@ -80,7 +80,7 @@ namespace concurrence {
 			concurrenceForm.onsubmit = function() { return false; };
 		}
 		willSynchronizeChannels = true;
-		defer().then(escaping(processMessage.bind(null, bootstrapData.events, 0))).then(defer).then(escaping(synchronizeChannels));
+		defer().then(escaping(processMessage.bind(null, bootstrapData.events || [], 0))).then(defer).then(escaping(synchronizeChannels));
 	} else {
 		sessionID = uuid();
 	}
