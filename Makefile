@@ -42,5 +42,5 @@ public/client.js: $(CLIENT_FILES) tsconfig-client.json node_modules/typescript/b
 build/server.js: $(SERVER_FILES) tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact
 	node_modules/typescript/bin/tsc -p tsconfig-server.json
 
-build/index.js: $(HOST_FILES) api/concurrence.d.ts tsconfig-host.json node_modules/typescript/bin/tsc node_modules/preact
+build/index.js: $(HOST_FILES) api/concurrence.d.ts tsconfig-host.json node_modules/typescript/bin/tsc
 	node_modules/typescript/bin/tsc -p tsconfig-host.json
