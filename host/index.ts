@@ -784,6 +784,9 @@ expressWs(server);
 				events: msg,
 			});
 		});
+		ws.on("error", function() {
+			ws.close();
+		});
 		ws.on("close", function() {
 			closed = true;
 		});
