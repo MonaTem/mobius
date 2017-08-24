@@ -1,6 +1,7 @@
 namespace concurrence {
 	// Override the Date object with one that shows determinism errors
 	// see: https://stackoverflow.com/a/22402079/4007
+	const now = concurrence.coordinateValue.bind(null, Date.now.bind(Date));
 	self.Date = function(__Date) {
 		// Copy that property!
 		for (let i of Object.getOwnPropertyNames(__Date)) {
@@ -10,29 +11,29 @@ namespace concurrence {
 		}
 		//
 		const proto = Object.create(__Date.prototype);
-		concurrence.applyDeterminismWarning(proto, "toString", "date.toString()", "date.toUTCString()");
+		// Format as ISO strings by default (node's default for now, but might not be later)
+		proto.toString = proto.toISOString;
 		Date.prototype = proto;
 		return Date as typeof __Date;
 		function Date(this: any) {
 			let args = [...arguments];
 			args.unshift(self);
 			if (this instanceof __Date) {
+				if (args.length == 2) {
+					concurrence.showDeterminismWarning("new Date(string)", "Date.parse(string)");
+				}
 				if (args.length == 1) {
-					concurrence.showDeterminismWarning("new Date()", "concurrence.now()");
+					args.push(now());
 				}
 				let result = new (Function.prototype.bind.apply(__Date, args));
 				(Object as any).setPrototypeOf(result, proto);
 				return result;
 			} else {
-				concurrence.showDeterminismWarning("Date()", "concurrence.now()");
 				return __Date.apply(self, args);
 			}
 		}
 	}(Date);
-	const realNow = concurrence.applyDeterminismWarning(Date, "now", "Date.now", "concurrence.now()");
-	export function now(): Promise<number> {
-		return concurrence.observeServerPromise(realNow.call(Date));
-	}
+	Date.now = now;
 	const realSetInterval = concurrence.applyDeterminismWarning(self, "setInterval", "setInterval(callback, millis)", "concurrence.interval(callback, millis)");
 	export function interval(callback: () => void, millis: number): ConcurrenceChannel {
 		const channel = concurrence.observeServerEventCallback<typeof callback>(callback, false);

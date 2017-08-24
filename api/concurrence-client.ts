@@ -66,6 +66,8 @@ namespace concurrence {
 	let incomingMessageId = 0;
 	const reorderedMessages : { [messageId: number]: ConcurrenceEvent[] } = {};
 	let willSynchronizeChannels : boolean = false;
+	let currentEvents: ConcurrenceEvent[] | undefined;
+	let dispatchingEvent = 1;
 
 	// Session state
 	let sessionID: string | undefined;
@@ -79,10 +81,13 @@ namespace concurrence {
 		if (concurrenceForm) {
 			concurrenceForm.onsubmit = function() { return false; };
 		}
+		const events = bootstrapData.events || [];
+		currentEvents = events;
 		willSynchronizeChannels = true;
-		defer().then(escaping(processMessage.bind(null, bootstrapData.events || [], 0))).then(defer).then(escaping(synchronizeChannels));
+		defer().then(escaping(processMessage.bind(null, events, 0))).then(defer).then(() => dispatchingEvent--).then(escaping(synchronizeChannels));
 	} else {
 		sessionID = uuid();
+		defer().then(() => dispatchingEvent--);
 	}
 	const serverURL = location.href;
 	let activeConnectionCount = 0;
@@ -218,9 +223,11 @@ namespace concurrence {
 		}
 		incomingMessageId++;
 		// Read each event and dispatch the appropriate event in order
+		currentEvents = events;
 		const promise = reduce(events, (promise: PromiseLike<any>, event: ConcurrenceEvent) => {
 			return promise.then(escaping(dispatchEvent.bind(null, event))).then(defer);
 		}, resolvedPromise).then(() => {
+			currentEvents = undefined;
 			const reorderedMessage = reorderedMessages[incomingMessageId];
 			if (reorderedMessage) {
 				delete reorderedMessages[incomingMessageId];
@@ -373,12 +380,12 @@ namespace concurrence {
 		};
 	}
 
-	function sendEvent(event: ConcurrenceEvent, batched?: boolean) : PromiseLike<ConcurrenceEvent | undefined> {
+	function sendEvent(event: ConcurrenceEvent, batched?: boolean, skipsFencing?: boolean) : PromiseLike<ConcurrenceEvent | undefined> {
 		if (dead) {
 			return Promise.reject(new Error("Session has died!"));
 		}
 		const result = new Promise<ConcurrenceEvent | undefined>((resolve, reject) => {
-			if (pendingChannelCount) {
+			if (pendingChannelCount && !skipsFencing) {
 				// Let server decide on the ordering of events since server-side channels are active
 				const channelId = event[0];
 				if (batched) {
@@ -404,11 +411,17 @@ namespace concurrence {
 
 	export const disconnect = destroySession;
 
+	function enteringCallback() {
+		dispatchingEvent++;
+		resolvedPromise.then(defer).then(() => dispatchingEvent--);
+	}
+
 	// APIs for client/, not to be used inside src/
 	export function receiveServerPromise<T extends ConcurrenceJsonValue>(...args: any[]) : PromiseLike<T> { // Must be cast to the proper signature
 		return new Promise<T>((resolve, reject) => {
 			const channel = registerRemoteChannel(event => {
 				channel.close();
+				enteringCallback();
 				if (!event) {
 					reject(new Error("Disconnected from server!"));
 				} else {
@@ -443,6 +456,7 @@ namespace concurrence {
 		}
 		const channel = registerRemoteChannel(event => {
 			if (event) {
+				enteringCallback();
 				callback.apply(null, event.slice(1));
 			} else {
 				channel.close();
@@ -460,7 +474,9 @@ namespace concurrence {
 			})).then(() => {
 				logOrdering("client", "message", channelId);
 				logOrdering("client", "close", channelId);
-				return roundTrip(value);
+				let roundtripped = roundTrip(value);
+				enteringCallback();
+				return roundtripped;
 			});
 		}, error => {
 			return resolvedPromise.then(escaping(() => {
@@ -487,6 +503,7 @@ namespace concurrence {
 			})).then(() => {
 				logOrdering("client", "message", channelId);
 				logOrdering("client", "close", channelId);
+				enteringCallback();
 				return Promise.reject(error) as any as T;
 			});
 		});
@@ -511,6 +528,7 @@ namespace concurrence {
 						// Finally send event if a destroy call hasn't won the race
 						if (this.channelId >= 0) {
 							logOrdering("client", "message", this.channelId);
+							enteringCallback();
 							(callback as any as Function).apply(null, roundTrip(args));
 						}
 					});
@@ -523,6 +541,42 @@ namespace concurrence {
 				}
 			}
 		};
+	}
+
+	export function coordinateValue<T extends ConcurrenceJsonValue | void>(generator: () => T) : T {
+		if (!dispatchingEvent) {
+			return generator();
+		}
+		let value: T;
+		let events = currentEvents;
+		if (events) {
+			let channelId = ++remoteChannelCounter;
+			pendingChannels[channelId] = function() {
+			};
+			logOrdering("server", "open", channelId);
+			for (var i = 0; i < events.length; i++) {
+				var event = events[i];
+				if (event[0] == channelId) {
+					let value = event[1] as T;
+					logOrdering("server", "message", channelId);
+					logOrdering("server", "close", channelId);
+					return value;
+				}
+			}
+			console.log("Expected a value from the server, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
+			let value = generator();
+			logOrdering("server", "message", channelId);
+			logOrdering("server", "close", channelId);
+			return value;
+		} else {
+			let channelId = ++localChannelCounter;
+			logOrdering("client", "open", channelId);
+			value = generator();
+			sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)], true, true);
+			logOrdering("client", "message", channelId);
+			logOrdering("client", "close", channelId);
+		}
+		return roundTrip(value);
 	}
 
 }

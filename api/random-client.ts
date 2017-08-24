@@ -1,3 +1,1 @@
-namespace concurrence {
-	export const random = concurrence.receiveServerPromise as () => Promise<number>;
-}
+Math.random = concurrence.coordinateValue.bind(null, Math.random.bind(Math));

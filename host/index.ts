@@ -167,7 +167,6 @@ class ConcurrenceHost {
 			}
 			session = new ConcurrenceSession(this, sessionID, newSessionFromRequest);
 			this.sessions[sessionID] = session;
-			session.run();
 		}
 		return session;
 	}
@@ -330,11 +329,11 @@ class ConcurrenceSession {
 	lastMessageTime: number = Date.now();
 	localChannelCounter: number = 0;
 	localChannelCount: number = 0;
-	localPrerenderChannelCount: number = 0;
 	remoteChannelCounter: number = 0;
 	pendingChannels: { [channelId: number]: (event: ConcurrenceEvent) => void; } = {};
 	pendingChannelCount: number = 0;
 	incomingMessageId: number = 0;
+	dispatchingEvent: number = 0;
 	reorderedMessages: { [messageId: number]: ConcurrenceEvent[] } = {};
 	context: ConcurrenceSandboxContext;
 	queuedLocalEvents: ConcurrenceEvent[] | undefined;
@@ -342,6 +341,8 @@ class ConcurrenceSession {
 	localResolveTimeout: NodeJS.Timer | undefined;
 	pageRenderer: ConcurrencePageRenderer;
 	willSynchronizeChannels: boolean = false;
+	currentEvents: ConcurrenceEvent[] | undefined;
+	hasRun: boolean = false;
 	constructor(host: ConcurrenceHost, sessionID: string, request: Express.Request) {
 		this.host = host;
 		this.sessionID = sessionID;
@@ -363,12 +364,19 @@ class ConcurrenceSession {
 			observeServerPromise: this.observeLocalPromise.bind(this),
 			receiveClientEventStream: this.receiveRemoteEventStream.bind(this),
 			observeServerEventCallback: this.observeLocalEventCallback.bind(this),
+			coordinateValue: this.coordinateValue.bind(this),
 			showDeterminismWarning: showDeterminismWarning,
 			applyDeterminismWarning: applyDeterminismWarning
 		};
 		this.context = context;
 	}
-	run() : Promise<void> {
+
+	run() : PromiseLike<void> {
+		if (this.hasRun) {
+			return resolvedPromise;
+		}
+		this.hasRun = true;
+		this.enteringCallback();
 		return new Promise(resolve => resolve(host.sandbox(this.context)));
 	}
 
@@ -401,7 +409,9 @@ class ConcurrenceSession {
 		this.incomingMessageId++;
 		this.willSynchronizeChannels = true;
 		// Read each event and dispatch the appropriate event in order
-		return events.reduce((promise: PromiseLike<any>, event: ConcurrenceEvent) => promise.then(escaping(this.dispatchEvent.bind(this, event))).then(defer), resolvedPromise).then(() => {
+		this.currentEvents = events;
+		return events.reduce((promise: PromiseLike<any>, event: ConcurrenceEvent) => promise.then(escaping(this.dispatchEvent.bind(this, event))).then(defer), this.run()).then(() => {
+			this.currentEvents = undefined;
 			const reorderedMessage = this.reorderedMessages[this.incomingMessageId];
 			if (reorderedMessage) {
 				delete this.reorderedMessages[this.incomingMessageId];
@@ -494,7 +504,11 @@ class ConcurrenceSession {
 	}
 	waitForEvents() {
 		this.enterLocalChannel();
-		return defer().then(escaping(this.exitLocalChannel.bind(this)));
+		return this.run().then(defer).then(escaping(this.exitLocalChannel.bind(this)));
+	}
+	enteringCallback() {
+		this.dispatchingEvent++;
+		defer().then(() => this.dispatchingEvent--);
 	}
 	observeLocalPromise<T extends ConcurrenceJsonValue>(value: PromiseLike<T> | T, includedInPrerender: boolean = true): PromiseLike<T> {
 		// Record and ship values/errors of server-side promises
@@ -509,7 +523,9 @@ class ConcurrenceSession {
 				logOrdering("server", "message", channelId, this);
 				logOrdering("server", "close", channelId, this);
 				resolvedPromise.then(escaping(() => this.exitLocalChannel(includedInPrerender)));
-				return roundTrip(value);
+				let roundtripped = roundTrip(value);
+				this.enteringCallback();
+				return roundtripped;
 			});
 		}, error => {
 			return resolvedPromise.then(escaping(() => {
@@ -526,6 +542,7 @@ class ConcurrenceSession {
 				logOrdering("server", "message", channelId, this);
 				logOrdering("server", "close", channelId, this);
 				resolvedPromise.then(escaping(() => this.exitLocalChannel(includedInPrerender)));
+				this.enteringCallback();
 				return Promise.reject(error) as any as T;
 			});
 		});
@@ -544,13 +561,11 @@ class ConcurrenceSession {
 			send: function() {
 				if (channelId >= 0) {
 					let args = roundTrip([...arguments]);
-					resolvedPromise.then(() => {
+					resolvedPromise.then(escaping(() => session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent))).then(() => {
 						logOrdering("server", "message", channelId, session);
-						(callback as any as Function).apply(null, args);
+						session.enteringCallback();
+						(callback as any as Function).apply(null, args)
 					});
-					if (!session.dead) {
-						resolvedPromise.then(escaping(() => session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent)));
-					}
 				}
 			} as any as T,
 			close() {
@@ -583,10 +598,10 @@ class ConcurrenceSession {
 		// this.pendingChannels[channelId] = callback;
 		session.pendingChannels[channelId] = function() {
 			let args = [...arguments];
-			resolvedPromise.then(escaping(() => {
+			resolvedPromise.then(() => {
 				logOrdering("client", "message", channelId, session);
 				callback.apply(null, args);
-			}));
+			});
 		};
 		return {
 			channelId,
@@ -610,6 +625,7 @@ class ConcurrenceSession {
 		return new Promise<T>((resolve, reject) => {
 			const channel = this.registerRemoteChannel(event => {
 				channel.close();
+				this.enteringCallback();
 				if (!event) {
 					reject(new Error("Disconnected from client!"));
 				} else {
@@ -635,15 +651,50 @@ class ConcurrenceSession {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
-		const channel = this.registerRemoteChannel(function(event) {
+		const channel = this.registerRemoteChannel(event => {
 			if (event) {
 				event.shift();
+				this.enteringCallback();
 				resolvedPromise.then(() => callback.apply(null, event));
 			} else {
 				channel.close();
 			}
 		});
 		return channel;
+	}
+
+	coordinateValue<T extends ConcurrenceJsonValue | void>(generator: () => T) : T {
+		if (!this.dispatchingEvent) {
+			return generator();
+		}
+		let value: T;
+		let events = this.currentEvents;
+		if (events) {
+			let channelId = ++this.remoteChannelCounter;
+			logOrdering("client", "open", channelId, this);
+			// Peek at incoming events to find the value generated on the client
+			for (let event of events) {
+				if (event[0] == channelId) {
+					let value = event[1] as T;
+					logOrdering("client", "message", channelId, this);
+					logOrdering("client", "close", channelId, this);
+					return value;
+				}
+			}
+			console.log("Expected a value from the client, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
+			let value = generator();
+			logOrdering("client", "message", channelId, this);
+			logOrdering("client", "close", channelId, this);
+			return value;
+		} else {
+			let channelId = ++this.localChannelCounter;
+			logOrdering("server", "open", channelId, this);
+			value = generator();
+			this.sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]);
+			logOrdering("server", "message", channelId, this);
+			logOrdering("server", "close", channelId, this);
+		}
+		return roundTrip(value);
 	}
 
 	destroy() {
@@ -681,7 +732,6 @@ if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
 	server.get("/", (req, res) => {
 		resolvedPromise.then(() => {
 			const session = host.newSession(req);
-			session.run();
 			return session.waitForEvents().then(() => {
 				session.incomingMessageId++;
 				return session.pageRenderer.render();
