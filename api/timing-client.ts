@@ -57,6 +57,57 @@ namespace concurrence {
 		}
 	}(Date);
 	Date.now = now;
-	export const interval = concurrence.receiveServerEventStream as (callback: () => void, millis: number) => ConcurrenceChannel;
-	export const timeout = concurrence.receiveServerPromise as (millis: number) => Promise<void>;
+
+	const timers: { [ id: number] : ConcurrenceChannel } = {};
+	let currentTimerId = 0;
+
+	const realSetInterval = setInterval;
+	const realClearInterval = clearInterval;
+
+	self.setInterval = function(func: Function, delay: number) {
+		const callback = (arguments.length > 2 ? func.bind.apply(null, [].slice.call(arguments, 2)) : func) as () => void;
+		if (!insideCallback) {
+			return realSetInterval(callback, delay);
+		}
+		const result = --currentTimerId;
+		timers[result] = concurrence.receiveServerEventStream(callback);
+		return result;
+	};
+
+	self.clearInterval = function(intervalId: number) {
+		if (typeof intervalId == "number" && intervalId < 0) {
+			const channel = timers[intervalId];
+			if (channel) {
+				delete timers[intervalId];
+				channel.close();
+			}
+		} else {
+			realClearInterval(intervalId);
+		}
+	};
+
+	const realSetTimeout = setTimeout;
+	const realClearTimeout = clearTimeout;
+
+	self.setTimeout = function(func: Function, delay: number) {
+		const callback = (arguments.length > 2 ? func.bind.apply(null, [].slice.call(arguments, 2)) : func) as () => void;
+		if (!insideCallback) {
+			return realSetTimeout(callback, delay);
+		}
+		const result = --currentTimerId;
+		timers[result] = concurrence.receiveServerEventStream(callback);
+		return result;
+	};
+
+	self.clearTimeout = function(timeoutId: number) {
+		if (typeof timeoutId == "number" && timeoutId < 0) {
+			const channel = timers[timeoutId];
+			if (channel) {
+				delete timers[timeoutId];
+				channel.close();
+			}
+		} else {
+			realClearTimeout(timeoutId);
+		}
+	};
 }

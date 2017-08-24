@@ -23,18 +23,17 @@ class RandomWidget extends preact.Component<{}, { value: string }> {
 		this.updateRandom();
 	}
 	updateRandom = () => {
-		concurrence.random().then(value => {
-			console.log(value);
-			this.setState({ value: value.toString() });
-		});
+		let value = Math.random();
+		console.log(value);
+		this.setState({ value: value.toString() });
 	}
-	randomChannel: ConcurrenceChannel = concurrence.interval(this.updateRandom, 1000);
+	interval = setInterval(this.updateRandom, 1000);
 	render() {
 		return <span>So random: {this.state.value}</span>;
 	}
 	componentWillUnmount() {
 		console.log("Destroying random stream");
-		this.randomChannel.close();
+		clearInterval(this.interval);
 	}
 }
 
@@ -229,4 +228,6 @@ concurrence.host((
 ));
 
 // Log current time
-concurrence.now().then(value => console.log(value));
+console.log("Date.now()", Date.now());
+console.log("new Date()", new Date().toString());
+console.log("Math.random", Math.random());

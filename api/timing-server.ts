@@ -34,21 +34,75 @@ namespace concurrence {
 		}
 	}(Date);
 	Date.now = now;
-	const realSetInterval = concurrence.applyDeterminismWarning(self, "setInterval", "setInterval(callback, millis)", "concurrence.interval(callback, millis)");
-	export function interval(callback: () => void, millis: number): ConcurrenceChannel {
-		const channel = concurrence.observeServerEventCallback<typeof callback>(callback, false);
-		const interval = realSetInterval(_ => {
-			if (concurrence.dead) {
+
+	const timers: { [ id: number] : ConcurrenceChannel } = {};
+	let currentTimerId = 0;
+
+	const realSetInterval = setInterval;
+	const realClearInterval = clearInterval;
+
+	self.setInterval = function(func: Function, delay: number) {
+		const callback = (arguments.length > 2 ? func.bind.apply(null, [].slice.call(arguments, 2)) : func) as () => void;
+		if (!insideCallback) {
+			return realSetInterval(callback, delay);
+		}
+		const channel = concurrence.observeServerEventCallback(callback, false);
+		const realIntervalId = realSetInterval(channel.send.bind(channel), delay);
+		const result = --currentTimerId;
+		const close = channel.close;
+		channel.close = function(this: ConcurrenceChannel) {
+			realClearInterval(realIntervalId);
+			close.call(this);
+		};
+		timers[result] = channel;
+		return result as any as NodeJS.Timer;
+	};
+
+	self.clearInterval = function(intervalId: NodeJS.Timer) {
+		if (typeof intervalId == "number" && intervalId < 0) {
+			const channel = timers[intervalId];
+			if (channel) {
+				delete timers[intervalId];
 				channel.close();
-				clearInterval(interval);
-			} else {
-				channel.send();
 			}
-		}, millis);
-		return channel;
-	}
-	const realSetTimeout = concurrence.applyDeterminismWarning(self, "setTimeout", "setTimeout(callback, millis)", "concurrence.timeout(millis).then(callback)");
-	export function timeout(millis: number): Promise<void> {
-		return concurrence.observeServerPromise<void>(new Promise<void>(resolve => { realSetTimeout(() => resolve(), millis) }), false);
-	}
+		} else {
+			realClearInterval(intervalId);
+		}
+	};
+
+	const realSetTimeout = setTimeout;
+	const realClearTimeout = clearTimeout;
+
+	self.setTimeout = function(func: Function, delay: number) {
+		const callback = (arguments.length > 2 ? func.bind.apply(null, [].slice.call(arguments, 2)) : func) as () => void;
+		if (!insideCallback) {
+			return realSetTimeout(callback, delay);
+		}
+		const channel = concurrence.observeServerEventCallback(callback, false);
+		const realTimeoutId = realSetTimeout(() => {
+			channel.send();
+			channel.close();
+		}, delay);
+		const result = --currentTimerId;
+		const close = channel.close;
+		channel.close = function(this: ConcurrenceChannel) {
+			realClearTimeout(realTimeoutId);
+			close.call(this);
+		};
+		timers[result] = channel;
+		return result as any as NodeJS.Timer;
+	};
+
+	self.clearInterval = function(timeoutId: NodeJS.Timer) {
+		if (typeof timeoutId == "number" && timeoutId < 0) {
+			const channel = timers[timeoutId];
+			if (channel) {
+				delete timers[timeoutId];
+				channel.close();
+			}
+		} else {
+			realClearTimeout(timeoutId);
+		}
+	};
+
 }

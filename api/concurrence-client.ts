@@ -1,6 +1,7 @@
 ///<reference types="preact"/>
 namespace concurrence {
-	const setImmediate = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { setTimeout(callback, 0) };
+	const realSetTimeout = setTimeout;
+	const setImmediate = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { realSetTimeout(callback, 0) };
 	const resolvedPromise: PromiseLike<void> = Promise.resolve();
 
 	function defer() : PromiseLike<void>;
@@ -67,7 +68,12 @@ namespace concurrence {
 	const reorderedMessages : { [messageId: number]: ConcurrenceEvent[] } = {};
 	let willSynchronizeChannels : boolean = false;
 	let currentEvents: ConcurrenceEvent[] | undefined;
+
 	let dispatchingEvent = 1;
+	export let insideCallback: boolean = true;
+	function exitCallback() {
+		insideCallback = (dispatchingEvent--) != 0;
+	}
 
 	// Session state
 	let sessionID: string | undefined;
@@ -84,10 +90,10 @@ namespace concurrence {
 		const events = bootstrapData.events || [];
 		currentEvents = events;
 		willSynchronizeChannels = true;
-		defer().then(escaping(processMessage.bind(null, events, 0))).then(defer).then(() => dispatchingEvent--).then(escaping(synchronizeChannels));
+		defer().then(escaping(processMessage.bind(null, events, 0))).then(defer).then(exitCallback).then(escaping(synchronizeChannels));
 	} else {
 		sessionID = uuid();
-		defer().then(() => dispatchingEvent--);
+		defer().then(exitCallback);
 	}
 	const serverURL = location.href;
 	let activeConnectionCount = 0;
@@ -137,7 +143,7 @@ namespace concurrence {
 
 	function restartHeartbeat() {
 		cancelHeartbeat();
-		heartbeatTimeout = setTimeout(() => sendMessages(false), sessionHeartbeatInterval);
+		heartbeatTimeout = realSetTimeout(() => sendMessages(false), sessionHeartbeatInterval);
 	}
 
 	function destroySession() {
@@ -413,7 +419,7 @@ namespace concurrence {
 
 	function enteringCallback() {
 		dispatchingEvent++;
-		resolvedPromise.then(defer).then(() => dispatchingEvent--);
+		defer().then(exitCallback);
 	}
 
 	// APIs for client/, not to be used inside src/

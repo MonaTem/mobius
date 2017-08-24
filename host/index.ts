@@ -508,7 +508,10 @@ class ConcurrenceSession {
 	}
 	enteringCallback() {
 		this.dispatchingEvent++;
-		defer().then(() => this.dispatchingEvent--);
+		this.context.concurrence.insideCallback = true;
+		defer().then(() => {
+			this.context.concurrence.insideCallback = (this.dispatchingEvent--) != 0;
+		});
 	}
 	observeLocalPromise<T extends ConcurrenceJsonValue>(value: PromiseLike<T> | T, includedInPrerender: boolean = true): PromiseLike<T> {
 		// Record and ship values/errors of server-side promises
