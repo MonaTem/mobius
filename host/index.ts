@@ -684,10 +684,9 @@ class ConcurrenceSession {
 				}
 			}
 			console.log("Expected a value from the client, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
-			let value = generator();
+			value = generator();
 			logOrdering("client", "message", channelId, this);
 			logOrdering("client", "close", channelId, this);
-			return value;
 		} else {
 			let channelId = ++this.localChannelCounter;
 			logOrdering("server", "open", channelId, this);

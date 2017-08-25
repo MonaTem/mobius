@@ -563,12 +563,13 @@ namespace concurrence {
 		let events = currentEvents;
 		if (events && hadOpenServerChannel) {
 			let channelId = ++remoteChannelCounter;
-			pendingChannels[channelId] = function() {
-			};
 			logOrdering("server", "open", channelId);
+			// Peek at incoming events to find the value generated on the server
 			for (var i = 0; i < events.length; i++) {
 				var event = events[i];
 				if (event[0] == channelId) {
+					pendingChannels[channelId] = function() {
+					};
 					let value = event[1] as T;
 					logOrdering("server", "message", channelId);
 					logOrdering("server", "close", channelId);
@@ -576,10 +577,9 @@ namespace concurrence {
 				}
 			}
 			console.log("Expected a value from the server, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
-			let value = generator();
+			value = generator();
 			logOrdering("server", "message", channelId);
 			logOrdering("server", "close", channelId);
-			return value;
 		} else {
 			let channelId = ++localChannelCounter;
 			logOrdering("client", "open", channelId);
