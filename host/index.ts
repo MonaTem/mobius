@@ -49,21 +49,20 @@ function defer(value?: any) : PromiseLike<any> {
 	return new Promise<any>(resolve => setImmediate(resolve.bind(null, value)));
 }
 
+function escape(e: any) {
+	setImmediate(() => {
+		throw e;
+	});
+}
+
 function escaping(handler: () => any | PromiseLike<any>) : () => PromiseLike<void>;
 function escaping<T>(handler: (value: T) => any | PromiseLike<any>) : (value: T) => PromiseLike<void>;
 function escaping(handler: (value?: any) => any | PromiseLike<any>) : (value?: any) => PromiseLike<void> {
 	return (value?: any) => {
 		try {
-			const handled = handler(value);
-			return Promise.resolve(handled).then(value => undefined, e => {
-				setImmediate(() => {
-					throw e;
-				});
-			});
+			return Promise.resolve(handler(value)).then(value => undefined, escape);
 		} catch(e) {
-			setImmediate(() => {
-				throw e;
-			});
+			escape(e);
 			return resolvedPromise;
 		}
 	};
@@ -82,6 +81,41 @@ function roundTrip<T>(obj: T) : T {
 	} else {
 		return obj;
 	}
+}
+
+function eventForValue(channelId: number, value: ConcurrenceJsonValue | void) : ConcurrenceEvent {
+	return typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)];
+}
+
+function eventForException(channelId: number, error: any) : ConcurrenceEvent {
+	// Serialize the reject error type or string
+	let type: number | string = 1;
+	let serializedError = error;
+	if (error instanceof Error) {
+		// Convert Error types to a representation that can be reconstituted on the client
+		type = error.constructor.name;
+		serializedError = Object.assign({ message: error.message, stack: error.stack }, error);
+	}
+	return [channelId, serializedError, type];
+}
+
+function parseValueEvent<T>(event: ConcurrenceEvent | undefined, resolve: (value: ConcurrenceJsonValue) => T, reject: (error: Error | ConcurrenceJsonValue) => T) : T {
+	if (!event) {
+		return reject(new Error("Disconnected from client!"));
+	}
+	let value = event[1];
+	if (event.length != 3) {
+		return resolve(value);
+	}
+	const type = event[2];
+	// Convert serialized representation into the appropriate Error type
+	if (type != 1 && /Error$/.test(type)) {
+		const ErrorType : typeof Error = (self as any)[type] || Error;
+		const error : Error = new ErrorType(value.message);
+		delete value.message;
+		return reject(Object.assign(error, value));
+	}
+	return reject(value);
 }
 
 let patchedJSDOM = false;
@@ -518,10 +552,7 @@ class ConcurrenceSession {
 		const channelId = ++this.localChannelCounter;
 		logOrdering("server", "open", channelId, this);
 		return Promise.resolve(value).then(value => {
-			return resolvedPromise.then(escaping(() => {
-				// Forward the value to the client
-				return this.sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]);
-			})).then(() => {
+			return resolvedPromise.then(escaping(() => this.sendEvent(eventForValue(channelId, value)))).then(() => {
 				logOrdering("server", "message", channelId, this);
 				logOrdering("server", "close", channelId, this);
 				resolvedPromise.then(escaping(() => this.exitLocalChannel(includedInPrerender)));
@@ -530,17 +561,7 @@ class ConcurrenceSession {
 				return roundtripped;
 			});
 		}, error => {
-			return resolvedPromise.then(escaping(() => {
-				// Serialize the reject error type or string
-				let type: number | string = 1;
-				let serializedError = error;
-				if (error instanceof Error) {
-					// Convert Error types to a representation that can be reconstituted on the client
-					type = error.constructor.name;
-					serializedError = Object.assign({ message: error.message, stack: error.stack }, error);
-				}
-				return this.sendEvent([channelId, serializedError, type]);
-			})).then(() => {
+			return resolvedPromise.then(escaping(() => this.sendEvent(eventForException(channelId, error)))).then(() => {
 				logOrdering("server", "message", channelId, this);
 				logOrdering("server", "close", channelId, this);
 				resolvedPromise.then(escaping(() => this.exitLocalChannel(includedInPrerender)));
@@ -628,24 +649,7 @@ class ConcurrenceSession {
 			const channel = this.registerRemoteChannel(event => {
 				channel.close();
 				this.enteringCallback();
-				if (!event) {
-					reject(new Error("Disconnected from client!"));
-				} else {
-					let value : any = event[1];
-					const type = event[2];
-					if (type) {
-						// Convert serialized representation into the appropriate Error type
-						if (type != 1 && /Error$/.test(type)) {
-							const ErrorType : typeof Error = (self as any)[type] || Error;
-							const newValue = new ErrorType(value.message);
-							delete value.message;
-							value = Object.assign(newValue, value);
-						}
-						reject(value);
-					} else {
-						resolve(value);
-					}
-				}
+				parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
 			});
 		});
 	}
@@ -665,7 +669,7 @@ class ConcurrenceSession {
 		return channel;
 	}
 
-	coordinateValue<T extends ConcurrenceJsonValue | void>(generator: () => T) : T {
+	coordinateValue<T extends ConcurrenceJsonValue>(generator: () => T) : T {
 		if (!this.dispatchingEvent) {
 			return generator();
 		}
@@ -677,10 +681,15 @@ class ConcurrenceSession {
 			// Peek at incoming events to find the value generated on the client
 			for (let event of events) {
 				if (event[0] == channelId) {
-					let value = event[1] as T;
-					logOrdering("client", "message", channelId, this);
-					logOrdering("client", "close", channelId, this);
-					return value;
+					return parseValueEvent(event, value => {
+						logOrdering("client", "message", channelId, this);
+						logOrdering("client", "close", channelId, this);
+						return value;
+					}, error => {
+						logOrdering("client", "message", channelId, this);
+						logOrdering("client", "close", channelId, this);
+						throw error;
+					}) as T;
 				}
 			}
 			console.log("Expected a value from the client, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
@@ -690,10 +699,25 @@ class ConcurrenceSession {
 		} else {
 			let channelId = ++this.localChannelCounter;
 			logOrdering("server", "open", channelId, this);
-			value = generator();
-			this.sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]);
-			logOrdering("server", "message", channelId, this);
-			logOrdering("server", "close", channelId, this);
+			try {
+				value = generator();
+				try {
+					this.sendEvent(eventForValue(channelId, value));
+				} catch(e) {
+					escape(e);
+				}
+				logOrdering("server", "message", channelId, this);
+				logOrdering("server", "close", channelId, this);
+			} catch(e) {
+				try {
+					this.sendEvent(eventForException(channelId, e));
+				} catch(e) {
+					escape(e);
+				}
+				logOrdering("server", "message", channelId, this);
+				logOrdering("server", "close", channelId, this);
+				throw e;
+			}
 		}
 		return roundTrip(value);
 	}

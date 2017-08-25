@@ -12,7 +12,7 @@ declare namespace concurrence {
 	export function observeServerEventCallback<T extends Function>(callback: T, includedInPrerender?: boolean): ConcurrenceLocalChannel<T>;
 	export function showDeterminismWarning(deprecated: string, instead: string): void;
 	export function applyDeterminismWarning<T, K extends keyof T>(parent: T, key: K, example: string, replacement: string): T[K];
-	export function coordinateValue<T extends ConcurrenceJsonValue | void>(generator: () => T, inCallbackGenerator?: () => T, remoteInvocation?: (value: T) => void) : T;
+	export function coordinateValue<T extends ConcurrenceJsonValue>(generator: () => T) : T;
 
 	export let secrets: { [key: string]: any };
 

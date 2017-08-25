@@ -10,21 +10,20 @@ namespace concurrence {
 		return new Promise<any>(resolve => setImmediate(resolve.bind(null, value)));
 	}
 
+	function escape(e: any) {
+		setImmediate(() => {
+			throw e;
+		});
+	}
+
 	function escaping(handler: () => any | PromiseLike<any>) : () => PromiseLike<void>;
 	function escaping<T>(handler: (value: T) => any | PromiseLike<any>) : (value: T) => PromiseLike<void>;
 	function escaping(handler: (value?: any) => any | PromiseLike<any>) : (value?: any) => PromiseLike<void> {
 		return (value?: any) => {
 			try {
-				const handled = handler(value);
-				return Promise.resolve(handled).then(value => undefined, e => {
-					setImmediate(() => {
-						throw e;
-					});
-				});
+				return Promise.resolve(handler(value)).then(value => undefined, escape);
 			} catch(e) {
-				setImmediate(() => {
-					throw e;
-				});
+				escape(e);
 				return resolvedPromise;
 			}
 		};
@@ -432,30 +431,7 @@ namespace concurrence {
 			const channel = registerRemoteChannel(event => {
 				channel.close();
 				enteringCallback();
-				if (!event) {
-					reject(new Error("Disconnected from server!"));
-				} else {
-					const value = event[1];
-					const type = event[2];
-					if (type) {
-						// Convert serialized representation into the appropriate Error type
-						if (type != 1 && /Error$/.test(type)) {
-							const ErrorType : typeof Error = (window as any)[type] || Error;
-							const error: any = new ErrorType(value.message);
-							delete value.message;
-							for (let i in value) {
-								if (value.hasOwnProperty(i)) {
-									error[i] = value[i];
-								}
-							}
-							reject(error);
-						} else {
-							reject(value);
-						}
-					} else {
-						resolve(value);
-					}
-				}
+				parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
 			});
 		});
 	};
@@ -477,13 +453,62 @@ namespace concurrence {
 		return channel;
 	}
 
+	function eventForValue(channelId: number, value: ConcurrenceJsonValue | void) : ConcurrenceEvent {
+		return typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)];
+	}
+
+	function eventForException(channelId: number, error: any) : ConcurrenceEvent {
+		// Convert Error types to a representation that can be reconstituted on the server
+		let type : any = 1;
+		let serializedError: any = error;
+		if (error instanceof Error) {
+			let errorClass : any = error.constructor;
+			if ("name" in errorClass) {
+				type = errorClass.name;
+			} else {
+				// ES5 support
+				type = errorClass.toString().match(/.*? (\w+)/)[0];
+			}
+			serializedError = { message: error.message, stack: error.stack };
+			let anyError : any = error;
+			for (let i in anyError) {
+				if (anyError.hasOwnProperty(i)) {
+					serializedError[i] = anyError[i];
+				}
+			}
+		}
+		return [channelId, serializedError, type];
+	}
+
+	function parseValueEvent<T>(event: ConcurrenceEvent | undefined, resolve: (value: ConcurrenceJsonValue) => T, reject: (error: Error | ConcurrenceJsonValue) => T) : T {
+		if (!event) {
+			return reject(new Error("Disconnected from server!"));
+		}
+		let value = event[1];
+		if (event.length != 3) {
+			return resolve(value);
+		}
+		const type = event[2];
+		// Convert serialized representation into the appropriate Error type
+		if (type != 1 && /Error$/.test(type)) {
+			const ErrorType : typeof Error = (window as any)[type] || Error;
+			const error: Error = new ErrorType(value.message);
+			delete value.message;
+			for (let i in value) {
+				if (Object.hasOwnProperty.call(value, i)) {
+					(error as any)[i] = value[i];
+				}
+			}
+			return reject(error);
+		}
+		return reject(value);
+	}
+
 	export function observeClientPromise<T extends ConcurrenceJsonValue | void>(value: PromiseLike<T> | T) : PromiseLike<T> {
 		let channelId = ++localChannelCounter;
 		logOrdering("client", "open", channelId);
 		return Promise.resolve(value).then(value => {
-			return resolvedPromise.then(escaping(() => {
-				return sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)]);
-			})).then(() => {
+			return resolvedPromise.then(escaping(() => sendEvent(eventForValue(channelId, value)))).then(() => {
 				logOrdering("client", "message", channelId);
 				logOrdering("client", "close", channelId);
 				let roundtripped = roundTrip(value);
@@ -491,28 +516,7 @@ namespace concurrence {
 				return roundtripped;
 			});
 		}, error => {
-			return resolvedPromise.then(escaping(() => {
-				// Convert Error types to a representation that can be reconstituted on the server
-				let type : any = 1;
-				let serializedError: any = error;
-				if (error instanceof Error) {
-					let errorClass : any = error.constructor;
-					if ("name" in errorClass) {
-						type = errorClass.name;
-					} else {
-						// ES5 support
-						type = errorClass.toString().match(/.*? (\w+)/)[0];
-					}
-					serializedError = { message: error.message, stack: error.stack };
-					let anyError : any = error;
-					for (let i in anyError) {
-						if (anyError.hasOwnProperty(i)) {
-							serializedError[i] = anyError[i];
-						}
-					}
-				}
-				return sendEvent([channelId, serializedError, type]);
-			})).then(() => {
+			return resolvedPromise.then(escaping(() => sendEvent(eventForException(channelId, error)))).then(() => {
 				logOrdering("client", "message", channelId);
 				logOrdering("client", "close", channelId);
 				enteringCallback();
@@ -531,12 +535,10 @@ namespace concurrence {
 			channelId,
 			send: function(this: ConcurrenceChannel) {
 				if (this.channelId >= 0) {
-					const message = slice.call(arguments);
+					const message = roundTrip(slice.call(arguments));
 					const args = message.slice();
 					message.unshift(this.channelId);
-					resolvedPromise.then(escaping(() => {
-						return sendEvent(roundTrip(message), batched);
-					})).then(() => {
+					resolvedPromise.then(escaping(() => sendEvent(message, batched))).then(() => {
 						// Finally send event if a destroy call hasn't won the race
 						if (this.channelId >= 0) {
 							logOrdering("client", "message", this.channelId);
@@ -555,7 +557,7 @@ namespace concurrence {
 		};
 	}
 
-	export function coordinateValue<T extends ConcurrenceJsonValue | void>(generator: () => T) : T {
+	export function coordinateValue<T extends ConcurrenceJsonValue>(generator: () => T) : T {
 		if (!dispatchingEvent) {
 			return generator();
 		}
@@ -570,10 +572,15 @@ namespace concurrence {
 				if (event[0] == channelId) {
 					pendingChannels[channelId] = function() {
 					};
-					let value = event[1] as T;
-					logOrdering("server", "message", channelId);
-					logOrdering("server", "close", channelId);
-					return value;
+					return parseValueEvent(event, value => {
+						logOrdering("server", "message", channelId);
+						logOrdering("server", "close", channelId);
+						return value;
+					}, error => {
+						logOrdering("server", "message", channelId);
+						logOrdering("server", "close", channelId);
+						throw error
+					}) as T;
 				}
 			}
 			console.log("Expected a value from the server, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
@@ -583,10 +590,25 @@ namespace concurrence {
 		} else {
 			let channelId = ++localChannelCounter;
 			logOrdering("client", "open", channelId);
-			value = generator();
-			sendEvent(typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)], true, true);
-			logOrdering("client", "message", channelId);
-			logOrdering("client", "close", channelId);
+			try {
+				value = generator();
+				try {
+					sendEvent(eventForValue(channelId, value), true, true);
+				} catch(e) {
+					escape(e);
+				}
+				logOrdering("client", "message", channelId);
+				logOrdering("client", "close", channelId);
+			} catch(e) {
+				try {
+					sendEvent(eventForException(channelId, e), true, true);
+				} catch(e) {
+					escape(e);
+				}
+				logOrdering("client", "message", channelId);
+				logOrdering("client", "close", channelId);
+				throw e;
+			}
 		}
 		return roundTrip(value);
 	}
