@@ -821,10 +821,16 @@ server.post("/", function(req, res) {
 expressWs(server);
 (server as any).ws("/", function(ws: any, req: express.Request) {
 	try {
+		let closed = false;
+		ws.on("error", function() {
+			ws.close();
+		});
+		ws.on("close", function() {
+			closed = true;
+		});
 		const body = qs.parse(req.query);
 		let messageId = body.messageID | 0;
 		const session = host.sessionById(body.sessionID, (messageId == 0) ? req : undefined);
-		let closed = false;
 		function processBody(body: ConcurrenceMessage) {
 			Promise.resolve(body).then(body => {
 				return session.receiveMessage(body);
@@ -846,12 +852,6 @@ expressWs(server);
 				messageID: ++messageId,
 				events: msg,
 			});
-		});
-		ws.on("error", function() {
-			ws.close();
-		});
-		ws.on("close", function() {
-			closed = true;
 		});
 	} catch (e) {
 		console.log(e);
