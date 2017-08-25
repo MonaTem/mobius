@@ -371,10 +371,7 @@ namespace concurrence {
 			logOrdering("server", "message", channelId);
 			callback(event);
 		}
-		if (!willSynchronizeChannels) {
-			willSynchronizeChannels = true;
-			defer().then(escaping(synchronizeChannels));
-		}
+		flush();
 		return {
 			channelId,
 			close() {
@@ -411,11 +408,17 @@ namespace concurrence {
 		});
 		// Queue an event to be sent to the server in the next flush
 		queuedLocalEvents.push(event);
+		if (!batched || websocket || queuedLocalEvents.length > 9) {
+			flush();
+		}
+		return result;
+	}
+
+	export function flush() {
 		if (!willSynchronizeChannels) {
 			willSynchronizeChannels = true;
 			defer().then(escaping(synchronizeChannels));
 		}
-		return result;
 	}
 
 	export const disconnect = destroySession;
@@ -508,7 +511,7 @@ namespace concurrence {
 		let channelId = ++localChannelCounter;
 		logOrdering("client", "open", channelId);
 		return Promise.resolve(value).then(value => {
-			return resolvedPromise.then(escaping(() => sendEvent(eventForValue(channelId, value)))).then(() => {
+			return resolvedPromise.then(escaping(() => sendEvent(eventForValue(channelId, value), true))).then(() => {
 				logOrdering("client", "message", channelId);
 				logOrdering("client", "close", channelId);
 				let roundtripped = roundTrip(value);
@@ -516,7 +519,7 @@ namespace concurrence {
 				return roundtripped;
 			});
 		}, error => {
-			return resolvedPromise.then(escaping(() => sendEvent(eventForException(channelId, error)))).then(() => {
+			return resolvedPromise.then(escaping(() => sendEvent(eventForException(channelId, error), true))).then(() => {
 				logOrdering("client", "message", channelId);
 				logOrdering("client", "close", channelId);
 				enteringCallback();
