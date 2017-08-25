@@ -32,15 +32,6 @@ function logOrdering(from: "client" | "server", type: "open" | "close" | "messag
 	// console.log(from + " " + type + " " + channelId + " on " + session.sessionID, stack);
 }
 
-function applyDeterminismWarning<T>(parent: T, key: keyof T, example: string, replacement: string): T[keyof T] {
-	const original = parent[key];
-	parent[key] = function(this: any) {
-		showDeterminismWarning(example, replacement);
-		return (original as any as Function).apply(this, arguments);
-	} as any as T[keyof T];
-	return original;
-}
-
 const resolvedPromise: PromiseLike<void> = Promise.resolve()
 
 function defer() : PromiseLike<void>;
@@ -402,8 +393,7 @@ class ConcurrenceSession {
 			observeServerEventCallback: this.observeLocalEventCallback.bind(this),
 			coordinateValue: this.coordinateValue.bind(this),
 			synchronize: observeServerPromise as () => PromiseLike<void>,
-			showDeterminismWarning: showDeterminismWarning,
-			applyDeterminismWarning: applyDeterminismWarning
+			showDeterminismWarning: showDeterminismWarning
 		};
 		this.context = context;
 	}

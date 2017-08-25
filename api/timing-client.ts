@@ -15,6 +15,9 @@ namespace concurrence {
 				}
 			}
 		}
+		// Non-enumerable properties
+		(Date as typeof __Date).UTC = __Date.UTC;
+		(Date as typeof __Date).parse = __Date.parse;
 		//
 		let proto: any;
 		if (Object.create) {
@@ -52,7 +55,7 @@ namespace concurrence {
 				setPrototypeOf(result, proto);
 				return result;
 			} else {
-				return __Date.apply(self, args);
+				return new __Date().toUTCString();
 			}
 		}
 	}(Date);

@@ -9,7 +9,12 @@ namespace concurrence {
 				(Date as any)[i] = (__Date as any)[i];
 			}
 		}
-		//
+		(Date as typeof __Date).parse = function() {
+			if (insideCallback) {
+				showDeterminismWarning("Date.parse(string)", "a date parsing library");
+			}
+			return __Date.parse.apply(this, arguments);
+		}
 		const proto = Object.create(__Date.prototype);
 		// Format as ISO strings by default (node's default for now, but might not be later)
 		proto.toString = proto.toISOString;
@@ -19,17 +24,28 @@ namespace concurrence {
 			let args = [...arguments];
 			args.unshift(self);
 			if (this instanceof __Date) {
-				if (args.length == 2) {
-					concurrence.showDeterminismWarning("new Date(string)", "Date.parse(string)");
-				}
-				if (args.length == 1) {
-					args.push(now());
+				switch (args.length) {
+					case 0:
+						break;
+					case 1:
+						args.push(now());
+						break;
+					case 2:
+						if (typeof args[1] != "number" && insideCallback) {
+							concurrence.showDeterminismWarning("new Date(string)", "a date parsing library");
+						}
+						break;
+					default:
+						if (insideCallback) {
+							concurrence.showDeterminismWarning("new Date(...)", "new Date(Date.UTC(...))");
+						}
+						break;
 				}
 				let result = new (Function.prototype.bind.apply(__Date, args));
 				(Object as any).setPrototypeOf(result, proto);
 				return result;
 			} else {
-				return __Date.apply(self, args);
+				return new __Date().toUTCString();
 			}
 		}
 	}(Date);
