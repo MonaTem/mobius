@@ -78,23 +78,6 @@ namespace concurrence {
 	// Session state
 	let sessionID: string | undefined;
 	const bootstrapElement = document.querySelector("script[type=\"application/x-concurrence-bootstrap\"]");
-	if (bootstrapElement) {
-		bootstrapElement.parentNode!.removeChild(bootstrapElement);
-		const bootstrapData = JSON.parse(bootstrapElement.textContent || bootstrapElement.innerHTML) as BootstrapData;
-		sessionID = bootstrapData.sessionID;
-		++outgoingMessageId;
-		const concurrenceForm = document.getElementById("concurrence-form") as HTMLFormElement;
-		if (concurrenceForm) {
-			concurrenceForm.onsubmit = function() { return false; };
-		}
-		const events = bootstrapData.events || [];
-		currentEvents = events;
-		willSynchronizeChannels = true;
-		defer().then(escaping(processMessage.bind(null, events, 0))).then(defer).then(exitCallback).then(escaping(synchronizeChannels));
-	} else {
-		sessionID = uuid();
-		defer().then(exitCallback);
-	}
 	const serverURL = location.href;
 	let activeConnectionCount = 0;
 	export let dead = false;
@@ -103,6 +86,7 @@ namespace concurrence {
 	let remoteChannelCounter = 0;
 	const pendingChannels : { [channelId: number]: (event?: ConcurrenceEvent) => void; } = {};
 	let pendingChannelCount = 0;
+	let hadOpenServerChannel = false;
 
 	// Local channels
 	let localChannelCounter = 0;
@@ -121,6 +105,25 @@ namespace concurrence {
 	let WebSocketClass = (window as any).WebSocket as typeof WebSocket | undefined;
 	let websocket: WebSocket | undefined;
 	let pendingSocketMessageIds: number[] = [];
+
+	if (bootstrapElement) {
+		bootstrapElement.parentNode!.removeChild(bootstrapElement);
+		const bootstrapData = JSON.parse(bootstrapElement.textContent || bootstrapElement.innerHTML) as BootstrapData;
+		sessionID = bootstrapData.sessionID;
+		++outgoingMessageId;
+		const concurrenceForm = document.getElementById("concurrence-form") as HTMLFormElement;
+		if (concurrenceForm) {
+			concurrenceForm.onsubmit = function() { return false; };
+		}
+		const events = bootstrapData.events || [];
+		currentEvents = events;
+		hadOpenServerChannel = true;
+		willSynchronizeChannels = true;
+		defer().then(escaping(processMessage.bind(null, events, 0))).then(defer).then(exitCallback).then(escaping(synchronizeChannels));
+	} else {
+		sessionID = uuid();
+		defer().then(exitCallback);
+	}
 
 	function serializeMessage(messageId: number | undefined) {
 		let message = "sessionID=" + sessionID;
@@ -230,6 +233,7 @@ namespace concurrence {
 		incomingMessageId++;
 		// Read each event and dispatch the appropriate event in order
 		currentEvents = events;
+		hadOpenServerChannel = pendingChannelCount != 0;
 		const promise = reduce(events, (promise: PromiseLike<any>, event: ConcurrenceEvent) => {
 			return promise.then(escaping(dispatchEvent.bind(null, event))).then(defer);
 		}, resolvedPromise).then(() => {
@@ -456,6 +460,8 @@ namespace concurrence {
 		});
 	};
 
+	export const synchronize = receiveServerPromise as () => PromiseLike<void>;
+
 	export function receiveServerEventStream<T extends Function>(callback: T): ConcurrenceChannel {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
@@ -555,7 +561,7 @@ namespace concurrence {
 		}
 		let value: T;
 		let events = currentEvents;
-		if (events) {
+		if (events && hadOpenServerChannel) {
 			let channelId = ++remoteChannelCounter;
 			pendingChannels[channelId] = function() {
 			};

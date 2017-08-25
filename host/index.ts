@@ -342,6 +342,7 @@ class ConcurrenceSession {
 	pageRenderer: ConcurrencePageRenderer;
 	willSynchronizeChannels: boolean = false;
 	currentEvents: ConcurrenceEvent[] | undefined;
+	hadOpenServerChannel: boolean = false;
 	hasRun: boolean = false;
 	constructor(host: ConcurrenceHost, sessionID: string, request: Express.Request) {
 		this.host = host;
@@ -356,15 +357,17 @@ class ConcurrenceSession {
 			body: { value: this.pageRenderer.body }
 		});
 		context.request = request;
+		const observeServerPromise = this.observeLocalPromise.bind(this);
 		context.concurrence = {
 			disconnect : this.destroy.bind(this),
 			secrets: secrets,
 			dead: false,
 			receiveClientPromise: this.receiveRemotePromise.bind(this),
-			observeServerPromise: this.observeLocalPromise.bind(this),
+			observeServerPromise,
 			receiveClientEventStream: this.receiveRemoteEventStream.bind(this),
 			observeServerEventCallback: this.observeLocalEventCallback.bind(this),
 			coordinateValue: this.coordinateValue.bind(this),
+			synchronize: observeServerPromise as () => PromiseLike<void>,
 			showDeterminismWarning: showDeterminismWarning,
 			applyDeterminismWarning: applyDeterminismWarning
 		};
@@ -509,8 +512,14 @@ class ConcurrenceSession {
 	enteringCallback() {
 		this.dispatchingEvent++;
 		this.context.concurrence.insideCallback = true;
+		if (this.localChannelCount != 0) {
+			this.hadOpenServerChannel = true;
+		}
 		defer().then(() => {
 			this.context.concurrence.insideCallback = (this.dispatchingEvent--) != 0;
+			if (this.localChannelCount != 0) {
+				this.hadOpenServerChannel = false;
+			}
 		});
 	}
 	observeLocalPromise<T extends ConcurrenceJsonValue>(value: PromiseLike<T> | T, includedInPrerender: boolean = true): PromiseLike<T> {
@@ -672,7 +681,7 @@ class ConcurrenceSession {
 		}
 		let value: T;
 		let events = this.currentEvents;
-		if (events) {
+		if (events && !this.hadOpenServerChannel) {
 			let channelId = ++this.remoteChannelCounter;
 			logOrdering("client", "open", channelId, this);
 			// Peek at incoming events to find the value generated on the client
@@ -735,6 +744,7 @@ if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
 	server.get("/", (req, res) => {
 		resolvedPromise.then(() => {
 			const session = host.newSession(req);
+			session.hadOpenServerChannel = true;
 			return session.waitForEvents().then(() => {
 				session.incomingMessageId++;
 				return session.pageRenderer.render();

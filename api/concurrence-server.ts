@@ -15,4 +15,6 @@ declare namespace concurrence {
 	export function coordinateValue<T extends ConcurrenceJsonValue | void>(generator: () => T, inCallbackGenerator?: () => T, remoteInvocation?: (value: T) => void) : T;
 
 	export let secrets: { [key: string]: any };
+
+	export function synchronize() : PromiseLike<void>;
 }
