@@ -413,6 +413,7 @@ class ConcurrenceSession {
 		this.willSynchronizeChannels = true;
 		// Read each event and dispatch the appropriate event in order
 		this.currentEvents = events;
+		this.hadOpenServerChannel = this.localChannelCount != 0;
 		return events.reduce((promise: PromiseLike<any>, event: ConcurrenceEvent) => promise.then(escaping(this.dispatchEvent.bind(this, event))).then(defer), this.run()).then(() => {
 			this.currentEvents = undefined;
 			const reorderedMessage = this.reorderedMessages[this.incomingMessageId];
@@ -459,9 +460,6 @@ class ConcurrenceSession {
 		});
 	}
 	sendEvent(event: ConcurrenceEvent) {
-		if (this.dead) {
-			throw new Error("Session has died!");
-		}
 		// Queue an event
 		const queuedLocalEvents = this.queuedLocalEvents;
 		if (queuedLocalEvents) {
@@ -512,15 +510,7 @@ class ConcurrenceSession {
 	enteringCallback() {
 		this.dispatchingEvent++;
 		this.context.concurrence.insideCallback = true;
-		if (this.localChannelCount != 0) {
-			this.hadOpenServerChannel = true;
-		}
-		defer().then(() => {
-			this.context.concurrence.insideCallback = (this.dispatchingEvent--) != 0;
-			if (this.localChannelCount != 0) {
-				this.hadOpenServerChannel = false;
-			}
-		});
+		defer().then(() => this.context.concurrence.insideCallback = (this.dispatchingEvent--) != 0);
 	}
 	observeLocalPromise<T extends ConcurrenceJsonValue>(value: PromiseLike<T> | T, includedInPrerender: boolean = true): PromiseLike<T> {
 		// Record and ship values/errors of server-side promises
