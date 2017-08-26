@@ -163,7 +163,9 @@ namespace concurrence {
 			}
 			// Abandon pending channels
 			for (let channelId in pendingChannels) {
-				pendingChannels[channelId]();
+				if (Object.hasOwnProperty.call(pendingChannels, channelId) {
+					pendingChannels[channelId]();
+				}
 			}
 			// Send a "destroy" message so that the server can clean up the session
 			const message = serializeMessage(outgoingMessageId++) + "&destroy=1";
