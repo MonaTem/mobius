@@ -55,7 +55,7 @@ namespace concurrence {
 				setPrototypeOf(result, proto);
 				return result;
 			} else {
-				return new __Date().toUTCString();
+				return new __Date(now()).toUTCString();
 			}
 		}
 	}(Date);
