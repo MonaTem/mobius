@@ -163,7 +163,7 @@ namespace concurrence {
 			}
 			// Abandon pending channels
 			for (let channelId in pendingChannels) {
-				if (Object.hasOwnProperty.call(pendingChannels, channelId) {
+				if (Object.hasOwnProperty.call(pendingChannels, channelId)) {
 					pendingChannels[channelId]();
 				}
 			}
@@ -477,7 +477,7 @@ namespace concurrence {
 			serializedError = { message: error.message, stack: error.stack };
 			let anyError : any = error;
 			for (let i in anyError) {
-				if (anyError.hasOwnProperty(i)) {
+				if (Object.hasOwnProperty.call(anyError, i)) {
 					serializedError[i] = anyError[i];
 				}
 			}

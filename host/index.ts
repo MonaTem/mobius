@@ -173,7 +173,7 @@ class ConcurrenceHost {
 		this.staleSessionTimeout = setInterval(() => {
 			const now = Date.now();
 			for (let i in this.sessions) {
-				if (this.sessions.hasOwnProperty(i)) {
+				if (Object.hasOwnProperty.call(this.sessions, i)) {
 					if (now - this.sessions[i].lastMessageTime > 5 * 60 * 1000) {
 						this.sessions[i].destroy();
 					}
@@ -221,7 +221,7 @@ class ConcurrenceHost {
 	}
 	destroy() {
 		for (let i in this.sessions) {
-			if (this.sessions.hasOwnProperty(i)) {
+			if (Object.hasOwnProperty.call(this.sessions, i)) {
 				this.sessions[i].destroy();
 			}
 		}
@@ -781,6 +781,9 @@ server.post("/", function(req, res) {
 				const inputEvents: ConcurrenceEvent[] = [];
 				const buttonEvents: ConcurrenceEvent[] = [];
 				for (let key in body) {
+					if (!Object.hasOwnProperty.call(body, key)) {
+						continue;
+					}
 					const match = key.match(/^channelID(\d+)$/);
 					if (match && Object.hasOwnProperty.call(body, key)) {
 						const element = session.pageRenderer.body.querySelector("[name=\"" + key + "\"]");
