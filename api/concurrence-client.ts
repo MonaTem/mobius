@@ -76,7 +76,13 @@ namespace concurrence {
 
 	// Session state
 	let sessionID: string | undefined;
-	const bootstrapElement = document.querySelector("script[type=\"application/x-concurrence-bootstrap\"]");
+	const bootstrapElement = (elements => {
+		for (let i = 0; i < elements.length; i++) {
+			if (elements[i].getAttribute("type") == "application/x-concurrence-bootstrap") {
+				return elements[i];
+			}
+		}
+	})(document.getElementsByTagName("script"));
 	const serverURL = location.href;
 	let activeConnectionCount = 0;
 	export let dead = false;
