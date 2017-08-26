@@ -68,7 +68,7 @@ namespace concurrence {
 	const realClearInterval = clearInterval;
 
 	self.setInterval = function(func: Function, delay: number) {
-		const callback = func.bind.apply(this, Array.prototype.slice.call(arguments, 2)) as () => void;
+		const callback = func.bind(this, Array.prototype.slice.call(arguments, 2)) as () => void;
 		if (!insideCallback) {
 			return realSetInterval(callback, delay);
 		}
@@ -93,7 +93,7 @@ namespace concurrence {
 	const realClearTimeout = clearTimeout;
 
 	self.setTimeout = function(func: Function, delay: number) {
-		const callback = func.bind.apply(this, Array.prototype.slice.call(arguments, 2)) as () => void;
+		const callback = func.bind(this, Array.prototype.slice.call(arguments, 2)) as () => void;
 		if (!insideCallback) {
 			return realSetTimeout(callback, delay);
 		}

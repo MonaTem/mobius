@@ -32,7 +32,7 @@ function logOrdering(from: "client" | "server", type: "open" | "close" | "messag
 	// console.log(from + " " + type + " " + channelId + " on " + session.sessionID, stack);
 }
 
-const resolvedPromise: PromiseLike<void> = Promise.resolve()
+const resolvedPromise: PromiseLike<void> = Promise.resolve();
 
 function defer() : PromiseLike<void>;
 function defer<T>() : PromiseLike<T>;
@@ -47,11 +47,11 @@ function escape(e: any) {
 }
 
 function escaping(handler: () => any | PromiseLike<any>) : () => PromiseLike<void>;
-function escaping<T>(handler: (value: T) => any | PromiseLike<any>) : (value: T) => PromiseLike<void>;
-function escaping(handler: (value?: any) => any | PromiseLike<any>) : (value?: any) => PromiseLike<void> {
+function escaping<T>(handler: (value: T) => any | PromiseLike<any>) : (value: T) => PromiseLike<T | void>;
+function escaping(handler: (value?: any) => any | PromiseLike<any>) : (value?: any) => PromiseLike<any> {
 	return (value?: any) => {
 		try {
-			return Promise.resolve(handler(value)).then(value => undefined, escape);
+			return Promise.resolve(handler(value)).catch(escape);
 		} catch(e) {
 			escape(e);
 			return resolvedPromise;
