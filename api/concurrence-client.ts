@@ -156,6 +156,7 @@ namespace concurrence {
 		sessionID: string;
 		clientID?: number;
 		events?: ConcurrenceEvent[];
+		multiple?: true;
 	}
 
 	// Message ordering
@@ -181,7 +182,7 @@ namespace concurrence {
 			}
 		}
 	})(document.getElementsByTagName("script"));
-	const serverURL = location.href;
+	const serverURL = location.href.match(/^[^?]*/)![0];
 	let activeConnectionCount = 0;
 	export let dead = false;
 
@@ -190,11 +191,13 @@ namespace concurrence {
 	const pendingChannels : { [channelId: number]: (event?: ConcurrenceEvent) => void; } = {};
 	let pendingChannelCount = 0;
 	let hadOpenServerChannel = false;
+	let allowMultiple = false;
 
 	// Local channels
 	let localChannelCounter = 0;
 	let queuedLocalEvents: ConcurrenceEvent[] = [];
 	const fencedLocalEvents: [number, (event: ConcurrenceEvent) => void][] = [];
+	const pendingLocalChannels: { [channelId: number]: (event?: ConcurrenceEvent) => void; } = {};
 	let totalBatched = 0;
 	let isBatched: { [channelId: number]: true } = {};
 	let pendingBatchedActions: (() => void)[] = [];
@@ -213,6 +216,9 @@ namespace concurrence {
 		const bootstrapData = JSON.parse(bootstrapElement.textContent || bootstrapElement.innerHTML) as BootstrapData;
 		sessionID = bootstrapData.sessionID;
 		clientID = (bootstrapData.clientID as number) | 0;
+		if (bootstrapData.multiple) {
+			allowMultiple = true;
+		}
 		++outgoingMessageId;
 		const concurrenceForm = document.getElementById("concurrence-form") as HTMLFormElement;
 		if (concurrenceForm) {
@@ -305,11 +311,15 @@ namespace concurrence {
 		if (channelId < 0) {
 			// Fenced client-side event
 			channelId = -channelId;
-			for (let i = 0; i < fencedLocalEvents.length; i++) {
-				if (fencedLocalEvents[i][0] == channelId) {
-					channel = fencedLocalEvents[i][1];
-					fencedLocalEvents.splice(i, 1);
-					break;
+			if (allowMultiple) {
+				channel = pendingLocalChannels[channelId];
+			} else {
+				for (let i = 0; i < fencedLocalEvents.length; i++) {
+					if (fencedLocalEvents[i][0] == channelId) {
+						channel = fencedLocalEvents[i][1];
+						fencedLocalEvents.splice(i, 1);
+						break;
+					}
 				}
 			}
 			// Apply batching
@@ -353,7 +363,9 @@ namespace concurrence {
 		}
 		incomingMessageId++;
 		// Read each event and dispatch the appropriate event in order
-		hadOpenServerChannel = pendingChannelCount != 0;
+		if (!allowMultiple) {
+			hadOpenServerChannel = pendingChannelCount != 0;
+		}
 		const promise = reduce(currentEvents = message.events, (promise: PromiseLike<any>, event: ConcurrenceEvent) => {
 			return promise.then(escaping(dispatchEvent.bind(null, event))).then(defer);
 		}, resolvedPromise).then(() => {
@@ -517,8 +529,9 @@ namespace concurrence {
 	function synchronizeChannels() {
 		willSynchronizeChannels = false;
 		if (!dead) {
-			if ((pendingChannelCount != 0 && activeConnectionCount == 0) || queuedLocalEvents.length) {
-				sendMessages(pendingChannelCount != 0);
+			const useWebSockets = pendingChannelCount != 0 || allowMultiple;
+			if ((useWebSockets && activeConnectionCount == 0) || queuedLocalEvents.length) {
+				sendMessages(useWebSockets);
 				restartHeartbeat();
 			} else if (websocket) {
 				// Disconnect WebSocket when server can't possibly send us messages
@@ -559,7 +572,7 @@ namespace concurrence {
 			return resolvedPromise;
 		}
 		const result = new Promise<ConcurrenceEvent | void>((resolve, reject) => {
-			if (pendingChannelCount && !skipsFencing) {
+			if ((pendingChannelCount || allowMultiple) && !skipsFencing) {
 				// Let server decide on the ordering of events since server-side channels are active
 				const channelId = event[0];
 				if (batched) {
@@ -702,6 +715,18 @@ namespace concurrence {
 		}
 		const channelId: number = ++localChannelCounter;
 		logOrdering("client", "open", channelId);
+		if (allowMultiple) {
+			pendingLocalChannels[channelId] = function(event?: ConcurrenceEvent) {
+				logOrdering("server", "message", channelId);
+				if (event) {
+					enteringCallback();
+					callback.apply(null, event.slice(1));
+				}
+				if (shouldFlushMicroTasks) {
+					flushMicroTasks();
+				}
+			};
+		}
 		return {
 			channelId,
 			send: function(this: ConcurrenceChannel) {
@@ -709,21 +734,25 @@ namespace concurrence {
 					const message = roundTrip(slice.call(arguments));
 					const args = message.slice();
 					message.unshift(this.channelId);
-					resolvedPromise.then(escaping(() => sendEvent(message, batched))).then(() => {
-						// Finally send event if a destroy call hasn't won the race
-						if (this.channelId >= 0) {
-							logOrdering("client", "message", this.channelId);
-							enteringCallback();
-							(callback as any as Function).apply(null, roundTrip(args));
+					const promise = resolvedPromise.then(escaping(() => sendEvent(message, batched)));
+					if (!allowMultiple) {
+						promise.then(() => {
+							// Finally send event if a destroy call hasn't won the race
+							if (this.channelId >= 0) {
+								logOrdering("client", "message", this.channelId);
+								enteringCallback();
+								(callback as any as Function).apply(null, roundTrip(args));
+							}
+						});
+						if (shouldFlushMicroTasks) {
+							flushMicroTasks();
 						}
-					});
-					if (shouldFlushMicroTasks) {
-						flushMicroTasks();
 					}
 				}
 			} as any as T,
 			close() {
 				if (this.channelId >= 0) {
+					delete pendingLocalChannels[channelId];
 					logOrdering("client", "close", this.channelId);
 					this.channelId = -1;
 				}
@@ -737,7 +766,7 @@ namespace concurrence {
 		}
 		let value: T;
 		let events = currentEvents;
-		if (events && hadOpenServerChannel) {
+		if (events && (hadOpenServerChannel || allowMultiple)) {
 			let channelId = ++remoteChannelCounter;
 			logOrdering("server", "open", channelId);
 			// Peek at incoming events to find the value generated on the server

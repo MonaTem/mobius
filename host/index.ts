@@ -6,7 +6,6 @@ import * as vm from "vm";
 
 import * as express from "express";
 import * as bodyParser from "body-parser";
-import * as qs from "qs";
 const expressWs = require("express-ws");
 
 import * as uuid from "uuid";
@@ -181,20 +180,31 @@ class ConcurrenceHost {
 			}
 		}, 60 * 1000);
 	}
-	clientFromMessage(message: ConcurrenceClientMessage, request: Express.Request) {
-		const sessionID = message.sessionID || "";
+	sessionFromId(sessionID: string, request?: Express.Request) {
 		let session = this.sessions[sessionID];
 		if (!session) {
 			if (!sessionID) {
 				throw new Error("No session ID specified!");
 			}
-			if (message.messageID != 0) {
+			if (!request) {
 				throw new Error("Session ID is not valid: " + sessionID);
 			}
 			session = new ConcurrenceSession(this, sessionID, request);
 			this.sessions[sessionID] = session;
 		}
-		return session.client;
+		return session;
+	}
+	clientFromMessage(message: ConcurrenceClientMessage, request: Express.Request) {
+		const allowCreation = message.messageID == 0;
+		const session = this.sessionFromId(message.sessionID || "", allowCreation ? request : undefined);
+		let client = session.clients[message.clientID as number | 0];
+		if (!client) {
+			if (!allowCreation) {
+				throw new Error("Message ID is not valid: " + message.messageID);
+			}
+			client = session.newClient();
+		}
+		return client;
 	}
 	serializeBody(body: Element) {
 		const realBody = this.document.body;
@@ -211,14 +221,17 @@ class ConcurrenceHost {
 			const sessionID = uuid();
 			if (!this.sessions[sessionID]) {
 				const session = this.sessions[sessionID] = new ConcurrenceSession(this, sessionID, request);
-				return session.client;
+				return session.newClient();
 			}
 		}
 	}
-	destroySessionById(sessionID: string) {
+	destroyClientById(sessionID: string, clientID: number) {
 		const session = this.sessions[sessionID];
 		if (session) {
-			session.destroy();
+			const client = session.clients[clientID];
+			if (client) {
+				client.destroy();
+			}
 		}
 	}
 	destroy() {
@@ -252,11 +265,20 @@ const enum ConcurrenceRenderingMode {
 	ForcedEmulation = 3,
 };
 
+interface BootstrapData {
+	sessionID: string;
+	clientID?: number;
+	events?: ConcurrenceEvent[];
+	multiple?: true;
+}
+
 const renderingMode : ConcurrenceRenderingMode = ConcurrenceRenderingMode.Prerendering;
+const allowMultipleClientsPerSession = true;
 
 class ConcurrencePageRenderer {
 	session: ConcurrenceSession;
 	body: Element;
+	clientScript: Element;
 	bootstrapScript: Element | undefined;
 	formNode: Element | undefined;
 	messageIdInput: HTMLInputElement | undefined;
@@ -271,12 +293,12 @@ class ConcurrencePageRenderer {
 		if (!clientScript) {
 			throw new Error("HTML does not contain a client.js reference: " + this.body.outerHTML);
 		}
+		this.clientScript = clientScript;
 		if (renderingMode >= ConcurrenceRenderingMode.ForcedEmulation) {
 			clientScript.parentElement!.removeChild(clientScript);
 		} else if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
 			const bootstrapScript = this.bootstrapScript = document.createElement("script");
 			bootstrapScript.type = "application/x-concurrence-bootstrap";
-			clientScript.parentNode!.insertBefore(bootstrapScript, clientScript);
 		}
 		if (renderingMode >= ConcurrenceRenderingMode.FullEmulation) {
 			const formNode = this.formNode = document.createElement("form");
@@ -323,10 +345,23 @@ class ConcurrencePageRenderer {
 	generateHTML(client: ConcurrenceClient) {
 		const session = this.session;
 		const bootstrapScript = this.bootstrapScript;
+		let textNode: Node | undefined;
 		if (bootstrapScript) {
+			const bootstrapData: BootstrapData = { sessionID: this.session.sessionID };
 			const queuedLocalEvents = client.queuedLocalEvents;
-			client.queuedLocalEvents = undefined;
-			bootstrapScript.appendChild(session.host.document.createTextNode(compatibleStringify({ sessionID: this.session.sessionID, events: queuedLocalEvents, clientID: client.clientID })))
+			if (queuedLocalEvents) {
+				client.queuedLocalEvents = undefined;
+				bootstrapData.events = queuedLocalEvents;
+			}
+			if (client.clientID) {
+				bootstrapData.clientID = client.clientID;
+			}
+			if (allowMultipleClientsPerSession) {
+				bootstrapData.multiple = true;
+			}
+			textNode = session.host.document.createTextNode(compatibleStringify(bootstrapData));
+			bootstrapScript.appendChild(textNode);
+			this.clientScript.parentNode!.insertBefore(bootstrapScript, this.clientScript);
 		}
 		const messageIdInput = this.messageIdInput;
 		if (messageIdInput) {
@@ -349,7 +384,9 @@ class ConcurrencePageRenderer {
 				if (parentElement) {
 					parentElement.removeChild(bootstrapScript);
 				}
-				this.bootstrapScript = undefined;
+				if (textNode) {
+					bootstrapScript.removeChild(textNode);
+				}
 			}
 		}
 	}
@@ -366,13 +403,22 @@ class ConcurrenceClient {
 	localResolveTimeout: NodeJS.Timer | undefined;
 	willSynchronizeChannels = false;
 
-	constructor(session: ConcurrenceSession, clientID: number) {
+	constructor(session: ConcurrenceSession, clientID: number, startingEvents?: ConcurrenceEvent[]) {
 		this.session = session;
 		this.clientID = clientID;
+		this.queuedLocalEvents = startingEvents;
 	}
 
-	destroy() {
+	destroy = () => {
 		this.synchronizeChannels();
+		delete this.session.clients[this.clientID];
+		// Destroy the session if we were the last client
+		for (const client of this.session.clients) {
+			if (client) {
+				return;
+			}
+		}
+		this.session.destroy();
 	}
 
 	processMessage(message: ConcurrenceClientMessage) : PromiseLike<void> {
@@ -396,7 +442,7 @@ class ConcurrenceClient {
 			}
 		}).then(escaping(this.synchronizeChannels));
 		// Destroy if asked to by client
-		return message.destroy ? result.then(escaping(this.destroy.bind(this))) : result;
+		return message.destroy ? result.then(escaping(this.destroy)) : result;
 	}
 
 	receiveMessage(message: ConcurrenceClientMessage) {
@@ -425,7 +471,7 @@ class ConcurrenceClient {
 					resolve(true);
 					return;
 				}
-			} else if (this.session.localChannelCount) {
+			} else if (this.session.localChannelCount || this.session.allEvents) {
 				this.queuedLocalEventsResolve = resolve;
 				if (oldResolve) {
 					oldResolve(undefined);
@@ -441,7 +487,7 @@ class ConcurrenceClient {
 		});
 	}
 
-	sendEvent(event: ConcurrenceEvent) {
+	sendClientEvent(event: ConcurrenceEvent) {
 		// Queue an event
 		const queuedLocalEvents = this.queuedLocalEvents;
 		if (queuedLocalEvents) {
@@ -463,11 +509,7 @@ class ConcurrenceClient {
 				this.localResolveTimeout = undefined;
 			}
 		}
-		// If no channels remain, the session is in a state where no more events
-		// can be sent from either the client or server. Session can be destroyed
-		if (this.session.pendingChannelCount + this.session.localChannelCount == 0) {
-			this.session.destroy();
-		}
+		this.session.destroyIfExhausted();
 	}
 
 	scheduleSynchronize() {
@@ -495,7 +537,8 @@ class ConcurrenceSession {
 	currentEvents: ConcurrenceEvent[] | undefined;
 	hadOpenServerChannel: boolean = false;
 	hasRun: boolean = false;
-	client: ConcurrenceClient;
+	clients: (ConcurrenceClient | undefined)[] = [];
+	allEvents: ConcurrenceEvent[] | undefined;
 	constructor(host: ConcurrenceHost, sessionID: string, request: Express.Request) {
 		this.host = host;
 		this.sessionID = sessionID;
@@ -511,7 +554,7 @@ class ConcurrenceSession {
 		context.request = request;
 		const observeServerPromise = this.observeLocalPromise.bind(this);
 		context.concurrence = {
-			disconnect: this.destroy.bind(this),
+			disconnect: this.destroy,
 			whenDisconnected: new Promise(resolve => this.sendWhenDisconnected = resolve),
 			secrets: secrets,
 			dead: false,
@@ -524,7 +567,20 @@ class ConcurrenceSession {
 			showDeterminismWarning: showDeterminismWarning
 		};
 		this.context = context;
-		this.client = new ConcurrenceClient(this, 0);
+		if (allowMultipleClientsPerSession) {
+			this.allEvents = [];
+		}
+	}
+
+	newClient() {
+		const events = this.allEvents;
+		const newClientId = this.clients.length;
+		if (events || (newClientId == 0)) {
+			const result = new ConcurrenceClient(this, newClientId, events);
+			this.clients[newClientId] = result;
+			return result;
+		}
+		throw new Error("Multiple clients attached to the same session are not supported!");
 	}
 
 	run() : PromiseLike<void> {
@@ -537,14 +593,22 @@ class ConcurrenceSession {
 	}
 
 	sendEvent(event: ConcurrenceEvent) {
-		return this.client.sendEvent(event);
+		const allEvents = this.allEvents;
+		if (allEvents) {
+			allEvents.push(event);
+		}
+		for (const client of this.clients) {
+			if (client) {
+				client.sendClientEvent(event);
+			}
+		}
 	}
 
 	dispatchEvent(event: ConcurrenceEvent) {
 		let channelId = event[0];
 		if (channelId < 0) {
 			// Server decided the ordering on "fenced" events
-			this.sendEvent([channelId]);
+			this.sendEvent(this.allEvents ? event.slice() as ConcurrenceEvent : [channelId]);
 			channelId = -channelId;
 		}
 		const channel = this.pendingChannels[channelId];
@@ -566,7 +630,11 @@ class ConcurrenceSession {
 	}
 
 	scheduleSynchronize() {
-		return this.client.scheduleSynchronize();
+		for (const client of this.clients) {
+			if (client) {
+				client.scheduleSynchronize();
+			}
+		}
 	}
 
 	enterLocalChannel(delayPageLoading: boolean = true) : number {
@@ -713,7 +781,7 @@ class ConcurrenceSession {
 		}
 		let value: T;
 		let events = this.currentEvents;
-		if (events && !this.hadOpenServerChannel) {
+		if (events && !this.hadOpenServerChannel && !this.allEvents) {
 			let channelId = ++this.remoteChannelCounter;
 			logOrdering("client", "open", channelId, this);
 			// Peek at incoming events to find the value generated on the client
@@ -760,7 +828,7 @@ class ConcurrenceSession {
 		return roundTrip(value);
 	}
 
-	destroy() {
+	destroy = () => {
 		if (!this.dead) {
 			this.dead = true;
 			this.context.concurrence.dead = true;
@@ -770,12 +838,24 @@ class ConcurrenceSession {
 					delete this.pendingChannels[i];
 				}
 			}
-			this.client.destroy();
+			for (const client of this.clients) {
+				if (client) {
+					client.destroy();
+				}
+			}
 			this.pageRenderer.destroy();
 			delete this.host.sessions[this.sessionID];
 			if (this.sendWhenDisconnected) {
 				this.sendWhenDisconnected();
 			}
+		}
+	}
+
+	destroyIfExhausted() {
+		// If no channels remain, the session is in a state where no more events
+		// can be sent from either the client or server. Session can be destroyed
+		if (this.pendingChannelCount + this.localChannelCount == 0) {
+			this.destroy();
 		}
 	}
 };
@@ -833,25 +913,30 @@ function serializeMessage(message: Partial<ConcurrenceServerMessage>) : string {
 	return JSON.stringify(message);
 }
 
-if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
-	server.get("/", (req, res) => {
+if (renderingMode >= ConcurrenceRenderingMode.Prerendering || allowMultipleClientsPerSession) {
+	server.get("/", (request, response) => {
 		resolvedPromise.then(() => {
-			const client = host.newClient(req);
+			const sessionID = request.query.sessionID;
+			const client = sessionID ? host.sessionFromId(sessionID, allowMultipleClientsPerSession ? request : undefined).newClient() : host.newClient(request);
 			const session = client.session;
 			session.hadOpenServerChannel = true;
-			return session.waitForEvents().then(() => {
-				client.incomingMessageId++;
-				client.outgoingMessageId++;
-				return session.pageRenderer.render().then(() => session.pageRenderer.generateHTML(client));
-			});
+			if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
+				return session.waitForEvents().then(() => {
+					client.incomingMessageId++;
+					client.outgoingMessageId++;
+					return session.pageRenderer.render().then(() => session.pageRenderer.generateHTML(client));
+				});
+			} else {
+				return session.pageRenderer.generateHTML(client);
+			}
 		}).then(html => {
-			noCache(res);
-			res.set("Content-Type", "text/html");
-			res.send(html);
+			noCache(response);
+			response.set("Content-Type", "text/html");
+			response.send(html);
 		}, e => {
-			res.status(500);
-			res.set("Content-Type", "text/plain");
-			res.send(util.inspect(e));
+			response.status(500);
+			response.set("Content-Type", "text/plain");
+			response.send(util.inspect(e));
 		});
 	});
 }
@@ -898,7 +983,7 @@ server.post("/", function(req, res) {
 			});
 		} else {
 			if (message.destroy) {
-				host.destroySessionById(message.sessionID || "");
+				host.destroyClientById(message.sessionID || "", message.clientID as number | 0);
 			} else {
 				const client = host.clientFromMessage(message, req);
 				client.receiveMessage(message).then(() => client.dequeueEvents()).then(() => {
@@ -925,7 +1010,7 @@ expressWs(server);
 		ws.on("close", function() {
 			closed = true;
 		});
-		const startMessage = messageFromBody(qs.parse(req.query));
+		const startMessage = messageFromBody(req.query);
 		const client = host.clientFromMessage(startMessage, req);
 		let lastIncomingMessageId = startMessage.messageID;
 		let lastOutgoingMessageId = -1;
@@ -953,7 +1038,7 @@ expressWs(server);
 						delete message.messageID;
 					}
 					lastOutgoingMessageId = client.outgoingMessageId;
-					if (client.session.localChannelCount == 0 || !keepGoing) {
+					if ((client.session.localChannelCount == 0 || !keepGoing) && !client.session.allEvents) {
 						message.close = true;
 						closed = true;
 					} else {
