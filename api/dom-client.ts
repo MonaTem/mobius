@@ -32,7 +32,7 @@ namespace concurrence {
 				} else {
 					tuple = c[name] = [concurrence.observeClientEventCallback(function() {
 						return tuple[1].apply(null, Array.prototype.slice.call(arguments));
-					}, true), listener];
+					}, name == "input"), listener];
 				}
 				listeners[name] = event => {
 					if ("value" in event.target) {

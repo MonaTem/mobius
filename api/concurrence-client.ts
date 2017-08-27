@@ -143,7 +143,7 @@ namespace concurrence {
 	// Message ordering
 	let outgoingMessageId = 0;
 	let incomingMessageId = 0;
-	const reorderedMessages : { [messageId: number]: ConcurrenceEvent[] } = {};
+	const reorderedMessages : { [messageId: number]: ConcurrenceMessage } = {};
 	let willSynchronizeChannels : boolean = false;
 	let currentEvents: ConcurrenceEvent[] | undefined;
 
@@ -188,7 +188,6 @@ namespace concurrence {
 	const socketURL = serverURL.replace(/^http/, "ws") + "?";
 	let WebSocketClass = (window as any).WebSocket as typeof WebSocket | undefined;
 	let websocket: WebSocket | undefined;
-	let pendingSocketMessageIds: number[] = [];
 
 	if (bootstrapElement) {
 		bootstrapElement.parentNode!.removeChild(bootstrapElement);
@@ -199,11 +198,10 @@ namespace concurrence {
 		if (concurrenceForm) {
 			concurrenceForm.onsubmit = function() { return false; };
 		}
-		const events = bootstrapData.events || [];
-		currentEvents = events;
+		currentEvents = bootstrapData.events || [];
 		hadOpenServerChannel = true;
 		willSynchronizeChannels = true;
-		defer().then(escaping(processMessage.bind(null, events, 0))).then(defer).then(exitCallback).then(escaping(synchronizeChannels));
+		defer().then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(exitCallback).then(escaping(synchronizeChannels));
 	} else {
 		sessionID = uuid();
 		defer().then(exitCallback);
@@ -240,7 +238,6 @@ namespace concurrence {
 			window.removeEventListener("unload", destroySession, false);
 			// Forcefully tear down WebSocket
 			if (websocket) {
-				pendingSocketMessageIds = [];
 				if (websocket.readyState < 2) {
 					websocket.close();
 				}
@@ -306,11 +303,12 @@ namespace concurrence {
 		}
 	}
 
-	function processMessage(events: ConcurrenceEvent[], messageId: number) : PromiseLike<void> {
+	function processMessage(message: ConcurrenceMessage) : PromiseLike<void> {
 		// Process messages in order
+		const messageId = message.messageID;
 		if (messageId > incomingMessageId) {
 			// Message was received out of order, queue it for later
-			reorderedMessages[messageId] = events;
+			reorderedMessages[messageId] = message;
 			return resolvedPromise;
 		}
 		if (messageId < incomingMessageId) {
@@ -318,16 +316,15 @@ namespace concurrence {
 		}
 		incomingMessageId++;
 		// Read each event and dispatch the appropriate event in order
-		currentEvents = events;
 		hadOpenServerChannel = pendingChannelCount != 0;
-		const promise = reduce(events, (promise: PromiseLike<any>, event: ConcurrenceEvent) => {
+		const promise = reduce(currentEvents = message.events, (promise: PromiseLike<any>, event: ConcurrenceEvent) => {
 			return promise.then(escaping(dispatchEvent.bind(null, event))).then(defer);
 		}, resolvedPromise).then(() => {
 			currentEvents = undefined;
 			const reorderedMessage = reorderedMessages[incomingMessageId];
 			if (reorderedMessage) {
 				delete reorderedMessages[incomingMessageId];
-				return processMessage(reorderedMessage, incomingMessageId);
+				return processMessage(reorderedMessage);
 			}
 		});
 		if (willSynchronizeChannels) {
@@ -338,11 +335,15 @@ namespace concurrence {
 	}
 
 	function deserializeMessage(messageText: string) {
-		return (messageText.length ? JSON.parse("[" + messageText + "]") : []) as ConcurrenceEvent[];
+		const result = (messageText.length ? JSON.parse(messageText) : {}) as ConcurrenceMessage;
+		result.messageID = result.messageID | 0;
+		result.events = result.events || [];
+		return result;
 	}
 
-	function sendFormMessage(body: string, messageId: number) {
+	function sendFormMessage(body: string) {
 		// Form post over XMLHttpRequest is used when WebSockets are unavailable or fail
+		activeConnectionCount++;
 		const request = new XMLHttpRequest();
 		request.open("POST", serverURL, true);
 		request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
@@ -350,7 +351,7 @@ namespace concurrence {
 			if (request.readyState == 4) {
 				activeConnectionCount--;
 				if (request.status == 200) {
-					processMessage(deserializeMessage(request.responseText), messageId);
+					processMessage(deserializeMessage(request.responseText));
 				} else {
 					destroySession();
 				}
@@ -363,29 +364,29 @@ namespace concurrence {
 		if (heartbeatTimeout) {
 			restartHeartbeat();
 		}
-		activeConnectionCount++;
-		const messageId = outgoingMessageId++;
 		const existingSocket = websocket;
 		if (existingSocket) {
-			pendingSocketMessageIds.push(messageId);
-			const message = JSON.stringify(queuedLocalEvents).slice(1, -1);
+			if (!queuedLocalEvents.length) {
+				return;
+			}
+			const message: ConcurrenceMessage = { events: queuedLocalEvents, messageID: outgoingMessageId++ };
+			queuedLocalEvents = [];
 			if (existingSocket.readyState == 1) {
 				// Send on open socket
-				queuedLocalEvents = [];
-				existingSocket.send(message);
+				existingSocket.send(JSON.stringify(message));
 			} else {
 				// Coordinate with existing WebSocket that's in the process of being opened,
 				// falling back to a form POST if necessary
-				const body = serializeMessage(messageId);
+				const body = serializeMessage(outgoingMessageId++);
 				const existingSocketOpened = () => {
 					existingSocket.removeEventListener("open", existingSocketOpened, false);
 					existingSocket.removeEventListener("error", existingSocketErrored, false);
-					existingSocket.send(message);
+					existingSocket.send(JSON.stringify(message));
 				}
 				const existingSocketErrored = () => {
 					existingSocket.removeEventListener("open", existingSocketOpened, false);
 					existingSocket.removeEventListener("error", existingSocketErrored, false);
-					sendFormMessage(body, messageId);
+					sendFormMessage(body);
 				}
 				existingSocket.addEventListener("open", existingSocketOpened, false);
 				existingSocket.addEventListener("error", existingSocketErrored, false);
@@ -393,7 +394,7 @@ namespace concurrence {
 			return;
 		}
 		// Message will be sent in query string of new connection
-		const body = serializeMessage(messageId);
+		const body = serializeMessage(outgoingMessageId++);
 		if (attemptWebSockets && WebSocketClass) {
 			try {
 				const newSocket = new WebSocketClass(socketURL + body);
@@ -407,19 +408,13 @@ namespace concurrence {
 					newSocketOpened();
 					WebSocketClass = undefined;
 					websocket = undefined;
-					pendingSocketMessageIds = [];
-					sendFormMessage(body, messageId);
+					sendFormMessage(body);
 				}
 				newSocket.addEventListener("open", newSocketOpened, false);
 				newSocket.addEventListener("error", newSocketErrored, false);
 				newSocket.addEventListener("message", (event: any) => {
-					activeConnectionCount--;
-					const pendingId = pendingSocketMessageIds.shift();
-					if (typeof pendingId != "undefined") {
-						processMessage(deserializeMessage(event.data), pendingId);
-					}
+					processMessage(deserializeMessage(event.data));
 				}, false);
-				pendingSocketMessageIds = [messageId];
 				websocket = newSocket;
 				return;
 			} catch (e) {
@@ -427,7 +422,7 @@ namespace concurrence {
 			}
 		}
 		// WebSockets failed fast or were unavailable
-		sendFormMessage(body, messageId);
+		sendFormMessage(body);
 	}
 
 	function synchronizeChannels() {
@@ -436,7 +431,7 @@ namespace concurrence {
 			if ((pendingChannelCount != 0 && activeConnectionCount == 0) || queuedLocalEvents.length) {
 				sendMessages(true);
 				restartHeartbeat();
-			} else if (websocket && pendingSocketMessageIds.length == 0) {
+			} else if (websocket) {
 				// Disconnect WebSocket when server can't possibly send us messages
 				if (websocket.readyState < 2) {
 					websocket.close();

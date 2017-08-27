@@ -232,8 +232,9 @@ class ConcurrenceHost {
 type ConcurrenceEvent = [number] | [number, any] | [number, any, any];
 
 interface ConcurrenceMessage {
-	events: string | undefined;
-	messageID: string | number | undefined;
+	events: ConcurrenceEvent[];
+	messageID: number;
+	sessionID?: string;
 }
 
 const enum ConcurrenceRenderingMode {
@@ -358,8 +359,9 @@ class ConcurrenceSession {
 	pendingChannels: { [channelId: number]: (event: ConcurrenceEvent) => void; } = {};
 	pendingChannelCount: number = 0;
 	incomingMessageId: number = 0;
+	outgoingMessageId: number = 0;
 	dispatchingEvent: number = 0;
-	reorderedMessages: { [messageId: number]: ConcurrenceEvent[] } = {};
+	reorderedMessages: { [messageId: number]: ConcurrenceMessage } = {};
 	context: ConcurrenceSandboxContext;
 	queuedLocalEvents: ConcurrenceEvent[] | undefined;
 	queuedLocalEventsResolve: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
@@ -423,11 +425,12 @@ class ConcurrenceSession {
 		}
 	}
 
-	processMessage(events: ConcurrenceEvent[], messageId: number) : PromiseLike<void> {
+	processMessage(message: ConcurrenceMessage) : PromiseLike<void> {
 		// Process messages in order
+		const messageId = message.messageID;
 		if (messageId > this.incomingMessageId) {
 			// Message was received out of order, queue it for later
-			this.reorderedMessages[messageId] = events;
+			this.reorderedMessages[messageId] = message;
 			return Promise.resolve();
 		}
 		if (messageId < this.incomingMessageId) {
@@ -436,23 +439,21 @@ class ConcurrenceSession {
 		this.incomingMessageId++;
 		this.willSynchronizeChannels = true;
 		// Read each event and dispatch the appropriate event in order
-		this.currentEvents = events;
+		
 		this.hadOpenServerChannel = this.localChannelCount != 0;
-		return events.reduce((promise: PromiseLike<any>, event: ConcurrenceEvent) => promise.then(escaping(this.dispatchEvent.bind(this, event))).then(defer), this.run()).then(() => {
+		return (this.currentEvents = (message.events || [])).reduce((promise: PromiseLike<any>, event: ConcurrenceEvent) => promise.then(escaping(this.dispatchEvent.bind(this, event))).then(defer), this.run()).then(() => {
 			this.currentEvents = undefined;
 			const reorderedMessage = this.reorderedMessages[this.incomingMessageId];
 			if (reorderedMessage) {
 				delete this.reorderedMessages[this.incomingMessageId];
-				return this.processMessage(reorderedMessage, this.incomingMessageId);
+				return this.processMessage(reorderedMessage);
 			}
 		}).then(escaping(this.synchronizeChannels.bind(this)));
 	}
 
 	receiveMessage(message: ConcurrenceMessage) {
 		this.lastMessageTime = Date.now();
-		const jsonEvents = message.events;
-		const events = jsonEvents ? JSON.parse("[" + jsonEvents + "]") : [];
-		return this.processMessage(events, (message.messageID as number) | 0);
+		return this.processMessage(message);
 	}
 	dequeueEvents() : PromiseLike<ConcurrenceEvent[] | undefined> {
 		return new Promise<ConcurrenceEvent[] | undefined>((resolve, reject) => {
@@ -750,6 +751,7 @@ if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
 			session.hadOpenServerChannel = true;
 			return session.waitForEvents().then(() => {
 				session.incomingMessageId++;
+				session.outgoingMessageId++;
 				return session.pageRenderer.render();
 			});
 		}).then(html => {
@@ -776,7 +778,8 @@ server.post("/", function(req, res) {
 			resolve();
 		} else {
 			// Process incoming events
-			const session = host.sessionById(body.sessionID, (body.messageID | 0) == 0 ? req : undefined);
+			let messageId = body.messageID = body.messageID | 0;
+			const session = host.sessionById(body.sessionID, messageId == 0 ? req : undefined);
 			if (renderingMode >= ConcurrenceRenderingMode.FullEmulation && req.query["js"] == "no") {
 				const inputEvents: ConcurrenceEvent[] = [];
 				const buttonEvents: ConcurrenceEvent[] = [];
@@ -802,7 +805,7 @@ server.post("/", function(req, res) {
 						}
 					}
 				}
-				body.events = JSON.stringify(inputEvents.concat(buttonEvents)).slice(1, -1);
+				body.events = inputEvents.concat(buttonEvents);
 				session.receiveMessage(body).then(session.waitForEvents.bind(session)).then(() => {
 					return session.pageRenderer.render();
 				}).then(html => {
@@ -810,10 +813,12 @@ server.post("/", function(req, res) {
 					res.send(html);
 				});
 			} else {
+				body.events = body.events ? JSON.parse("[" + body.events + "]") : [];
 				session.receiveMessage(body).then(() => session.dequeueEvents()).then(events => {
 					// Wait to send the response until we have events ready or until there are no more server-side channels open
 					res.set("Content-Type", "text/plain");
-					res.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
+					const message: ConcurrenceMessage = { events: events || [], messageID: session.outgoingMessageId++ };
+					res.send(JSON.stringify(message));
 				});
 			}
 		}
@@ -834,31 +839,42 @@ expressWs(server);
 		ws.on("close", function() {
 			closed = true;
 		});
-		const body = qs.parse(req.query);
-		let messageId = body.messageID | 0;
-		const session = host.sessionById(body.sessionID, (messageId == 0) ? req : undefined);
+		const body = qs.parse(req.query) as ConcurrenceMessage;
+		let messageId = body.messageID = (body.messageID as number) | 0;
+		body.events = body.events ? JSON.parse("[" + body.events + "]") : [];
+		const sessionId = body.sessionID;
+		if (!sessionId) {
+			ws.close();
+			return;
+		}
+		const session = host.sessionById(sessionId, (messageId == 0) ? req : undefined);
 		function processBody(body: ConcurrenceMessage) {
-			Promise.resolve(body).then(body => {
-				return session.receiveMessage(body);
-			}).then(() => {
-				return session.dequeueEvents();
-			}).then(events => {
-				if (!closed) {
-					ws.send(events && events.length ? JSON.stringify(events).slice(1, -1) : "");
-				} else {
-					session.destroy();
-				}
-			}).catch(e => {
+			resolvedPromise.then(() => session.receiveMessage(body)).then(processMoreEvents, e => {
 				ws.close();
 			});
 		}
-		processBody(body);
-		ws.on("message", function(msg: string) {
-			processBody({
-				messageID: ++messageId,
-				events: msg,
+		function processMoreEvents() {
+			session.dequeueEvents().then(events => {
+				if (!closed) {
+					if (events) {
+						ws.send(JSON.stringify({ events, messageID: session.outgoingMessageId++ }));
+						processMoreEvents();
+					}
+				} else if (events) {
+					// Re-queue events since WebSocket has died (not 100% correct to do this)
+					for (let i = 0; i < events.length; i++) {
+						session.sendEvent(events[i]);
+					}
+				}
 			});
+		}
+		ws.on("message", function(msg: string) {
+			let message = JSON.parse(msg) as ConcurrenceMessage;
+			message.messageID = ++messageId;
+			processBody(message);
 		});
+		processBody(body);
+		processMoreEvents();
 	} catch (e) {
 		console.log(e);
 		ws.close();
