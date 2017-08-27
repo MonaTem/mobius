@@ -1,17 +1,96 @@
 ///<reference types="preact"/>
 namespace concurrence {
-	const realSetTimeout = setTimeout;
-	const setImmediate = window.setImmediate || window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame || function(callback: () => void) { realSetTimeout(callback, 0) };
+	const setTimeout = window.setTimeout;
+
+	type Task = () => void;
+	function isPromiseLike<T>(value: T | PromiseLike<T> | undefined) : value is PromiseLike<T> {
+		return typeof value == "object" && "then" in (value as any);
+	}
+
+	export const microTaskQueue : Task[] = [];
+	export const taskQueue : Task[] = [];
+
+	const scheduleFlushTasks = (() => {
+		const setImmediate = window.setImmediate;
+		// Try native setImmediate support
+		if (setImmediate) {
+			return setImmediate.bind(window, flushTasks);
+		}
+		// Attempt postMessage, but only if it's asynchronous
+		if (window.postMessage) {
+			let isAsynchronous = true;
+			const synchronousTest = () => isAsynchronous = false;
+			window.addEventListener("message", synchronousTest, false);
+			window.postMessage("__concurrence_test", "*");
+			window.removeEventListener("message", synchronousTest, false);
+			if (isAsynchronous) {
+				window.addEventListener("message", flushTasks, false);
+				return () => {
+					window.postMessage("__concurrence_flush", "*")
+				};
+			}
+		}
+		// Try a <script> tag's onreadystatechange
+		let script: any = document.createElement("script");
+		if ("onreadystatechange" in script) {
+			return () => {
+				(script as any).onreadystatechange = () => {
+					document.head.removeChild(script);
+					script = document.createElement("script")
+					flushTasks();
+				}
+				document.head.appendChild(script);
+			};
+		}
+		// Try requestAnimationFrame
+		const requestAnimationFrame = window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame;
+		if (requestAnimationFrame) {
+			return requestAnimationFrame.bind(window, flushTasks);
+		}
+		// Fallback to setTimeout(..., 0)
+		return setTimeout.bind(window, flushTasks, 0);
+	})();
+
+	function flushTasks() {
+		let completed: boolean | undefined;
+		try {
+			let task: Task | undefined;
+			while (task = microTaskQueue.shift()) {
+				task();
+			}
+			if (task = taskQueue.shift()) {
+				task();
+			}
+			completed = !taskQueue.length;
+		} finally {
+			if (!completed) {
+				scheduleFlushTasks();
+			}
+		}
+	}
+
+	export function submitTask(queue: Task[], task: Task) {
+		queue.push(task);
+		if (microTaskQueue.length + taskQueue.length == 1) {
+			scheduleFlushTasks();
+		}
+	}
+
+	// Setup bundled Promise implementation if native implementation doesn't schedule as micro-tasks or is not present
+	if (!("Promise" in (window as any)) || !/^Google |^Apple /.test(navigator.vendor)) {
+		(window as any).Promise = bundledPromiseImplementation();
+	}
+
 	const resolvedPromise: PromiseLike<void> = Promise.resolve();
 
 	function defer() : PromiseLike<void>;
 	function defer<T>() : PromiseLike<T>;
 	function defer(value?: any) : PromiseLike<any> {
-		return new Promise<any>(resolve => setImmediate(resolve.bind(null, value)));
+		return new Promise<any>(resolve => submitTask(taskQueue, resolve.bind(null, value)));
 	}
 
 	function escape(e: any) {
-		setImmediate(() => {
+		submitTask(microTaskQueue, () => {
 			throw e;
 		});
 	}
@@ -103,7 +182,7 @@ namespace concurrence {
 
 	// Heartbeat
 	const sessionHeartbeatInterval = 4 * 60 * 1000;
-	let heartbeatTimeout: any;
+	let heartbeatTimeout: number = 0;
 
 	// Websocket support
 	const socketURL = serverURL.replace(/^http/, "ws") + "?";
@@ -143,15 +222,15 @@ namespace concurrence {
 	}
 
 	function cancelHeartbeat() {
-		if (heartbeatTimeout !== undefined) {
+		if (heartbeatTimeout) {
 			clearTimeout(heartbeatTimeout);
-			heartbeatTimeout = undefined;
+			heartbeatTimeout = 0;
 		}
 	}
 
 	function restartHeartbeat() {
 		cancelHeartbeat();
-		heartbeatTimeout = realSetTimeout(() => sendMessages(false), sessionHeartbeatInterval);
+		heartbeatTimeout = setTimeout(sendMessages, sessionHeartbeatInterval);
 	}
 
 	function destroySession() {
@@ -280,8 +359,8 @@ namespace concurrence {
 		request.send(body);
 	}
 
-	function sendMessages(attemptWebSockets: boolean) {
-		if (heartbeatTimeout != undefined) {
+	function sendMessages(attemptWebSockets?: boolean) {
+		if (heartbeatTimeout) {
 			restartHeartbeat();
 		}
 		activeConnectionCount++;
@@ -622,6 +701,145 @@ namespace concurrence {
 			}
 		}
 		return roundTrip(value);
+	}
+
+	function bundledPromiseImplementation() {
+		// Promise implementation that properly schedules as a micro-task
+		function isPromise<T>(value: T | PromiseLike<T> | undefined) : value is Promise<T> {
+			return typeof value == "object" && "then" in (value as any) && "catch" in (value as any);
+		}
+
+		const enum PromiseState {
+			Pending = 0,
+			Fulfilled = 1,
+			Rejected = 2,
+		};
+
+		function populatePromise<T>(this: Promise<T>, state: PromiseState, value: any) {
+			if (!this.__state) {
+				if (value instanceof Promise) {
+					if (value.__state) {
+						if (state != PromiseState.Rejected) {
+							state = value.__state;
+							value = value.__value;
+						}
+					} else {
+						(value.__observers || (value.__observers = [])).push(populatePromise.bind(this, state, value));
+						return;
+					}
+				} else if (isPromiseLike(value)) {
+					value.then(populatePromise.bind(this, state), populatePromise.bind(this, PromiseState.Rejected));
+					return;
+				}
+				this.__state = state;
+				this.__value = value;
+				const observers = this.__observers;
+				if (observers) {
+					this.__observers = undefined;
+					for (let i = 0; i < observers.length; i++) {
+						submitTask(microTaskQueue, observers[i]);
+					}
+				}
+			}
+		}
+
+		class Promise <T> {
+			__state: PromiseState;
+			__value: any;
+			__observers?: Task[];
+			constructor(executor?: (resolve: (value?: T | PromiseLike<T>) => void, reject: (reason?: any) => void) => void) {
+				if (executor) {
+					const reject = populatePromise.bind(this, PromiseState.Rejected);
+					try {
+						executor(populatePromise.bind(this, PromiseState.Fulfilled), reject);
+					} catch (e) {
+						reject(e);
+					}
+				}
+			}
+			then<TResult1 = T, TResult2 = never>(onFulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): PromiseLike<TResult1 | TResult2> {
+				return new Promise<TResult1 | TResult2>((resolve, reject) => {
+					const completed = () => {
+						try {
+							if (this.__state == PromiseState.Fulfilled) {
+								resolve(onFulfilled ? onFulfilled(this.__value) : this.__value);
+							} else {
+								reject(onRejected ? onRejected(this.__value) : this.__value);
+							}
+						} catch (e) {
+							reject(e);
+						}
+					}
+					if (this.__state) {
+						submitTask(microTaskQueue, completed);
+					} else {
+						(this.__observers || (this.__observers = [])).push(completed);
+					}
+				});
+			}
+			catch<TResult = never>(onRejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): PromiseLike<T | TResult> {
+				return this.then(undefined, onRejected);
+			}
+			static resolve<T>(value: PromiseLike<T> | T) : PromiseLike<T>;
+		    static resolve(): Promise<void>;
+			static resolve<T>(value?: PromiseLike<T> | T) : PromiseLike<T> {
+				if (isPromise(value)) {
+					return value;
+				}
+				if (isPromiseLike(value)) {
+					return new Promise<T>((resolve, reject) => value.then(resolve, reject));
+				}
+				const result = new Promise<T>();
+				result.__value = value;
+				result.__state = PromiseState.Fulfilled;
+				return result;
+			}
+			static reject<T = never>(reason: any) : PromiseLike<T> {
+				return new Promise<T>((resolve, reject) => reject(reason));
+			}
+			static race<T>(values: ReadonlyArray<PromiseLike<T> | T>) : PromiseLike<T> {
+				for (let i = 0; i < values.length; i++) {
+					const value = values[i];
+					if (!isPromiseLike(value)) {
+						const result = new Promise<T>();
+						result.__value = value;
+						result.__state = PromiseState.Fulfilled;
+						return result;
+					} else if (value instanceof Promise && value.__state) {
+						return value;
+					}
+				}
+				return new Promise<T>((resolve, reject) => {
+					for (let i = 0; i < values.length; i++) {
+						(values[i] as PromiseLike<T>).then(resolve, reject);
+					}
+				});
+			}
+			static all<T>(values: ReadonlyArray<PromiseLike<T> | T>) : PromiseLike<T[]> {
+				let remaining = values.length;
+				const result = new Array(remaining);
+				return new Promise<T[]>((resolve, reject) => {
+					for (let i = 0; i < values.length; i++) {
+						const value = values[i];
+						if (isPromiseLike(value)) {
+							value.then(value => {
+								result[i] = value;
+								if ((--remaining) == 0) {
+									resolve(result);
+								}
+							}, reject);
+						} else {
+							result[i] = value;
+							if ((--remaining) == 0) {
+								resolve(result);
+							}
+						}
+					}
+				});
+			}
+		};
+
+		return Promise;
 	}
 
 }
