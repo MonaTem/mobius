@@ -122,11 +122,16 @@ namespace concurrence {
 	const slice = Array.prototype.slice;
 
 	type ConcurrenceEvent = [number] | [number, any] | [number, any, any];
-	interface ConcurrenceMessage {
+
+	interface ConcurrenceServerMessage {
 		events: ConcurrenceEvent[];
 		messageID: number;
-		sessionID?: string;
 		close?: boolean;
+	}
+
+	interface ConcurrenceClientMessage extends ConcurrenceServerMessage {
+		sessionID?: string;
+		clientID?: number;
 		destroy?: true;
 	}
 
@@ -149,13 +154,14 @@ namespace concurrence {
 
 	interface BootstrapData {
 		sessionID: string;
+		clientID?: number;
 		events?: ConcurrenceEvent[];
 	}
 
 	// Message ordering
 	let outgoingMessageId = 0;
 	let incomingMessageId = 0;
-	const reorderedMessages : { [messageId: number]: ConcurrenceMessage } = {};
+	const reorderedMessages : { [messageId: number]: ConcurrenceServerMessage } = {};
 	let willSynchronizeChannels : boolean = false;
 	let currentEvents: ConcurrenceEvent[] | undefined;
 
@@ -167,6 +173,7 @@ namespace concurrence {
 
 	// Session state
 	let sessionID: string | undefined;
+	let clientID = 0;
 	const bootstrapElement = (elements => {
 		for (let i = 0; i < elements.length; i++) {
 			if (elements[i].getAttribute("type") == "application/x-concurrence-bootstrap") {
@@ -205,6 +212,7 @@ namespace concurrence {
 		bootstrapElement.parentNode!.removeChild(bootstrapElement);
 		const bootstrapData = JSON.parse(bootstrapElement.textContent || bootstrapElement.innerHTML) as BootstrapData;
 		sessionID = bootstrapData.sessionID;
+		clientID = (bootstrapData.clientID as number) | 0;
 		++outgoingMessageId;
 		const concurrenceForm = document.getElementById("concurrence-form") as HTMLFormElement;
 		if (concurrenceForm) {
@@ -219,11 +227,14 @@ namespace concurrence {
 		defer().then(exitCallback);
 	}
 
-	function produceMessage() : Partial<ConcurrenceMessage> {
-		const result: Partial<ConcurrenceMessage> = { messageID: outgoingMessageId++ };
+	function produceMessage() : Partial<ConcurrenceClientMessage> {
+		const result: Partial<ConcurrenceClientMessage> = { messageID: outgoingMessageId++ };
 		if (queuedLocalEvents.length) {
 			result.events = queuedLocalEvents;
 			queuedLocalEvents = [];
+		}
+		if (clientID) {
+			result.clientID = clientID;
 		}
 		return result;
 	}
@@ -329,7 +340,7 @@ namespace concurrence {
 		}
 	}
 
-	function processMessage(message: ConcurrenceMessage) : PromiseLike<void> {
+	function processMessage(message: ConcurrenceServerMessage) : PromiseLike<void> {
 		// Process messages in order
 		const messageId = message.messageID;
 		if (messageId > incomingMessageId) {
@@ -360,8 +371,8 @@ namespace concurrence {
 		return promise.then(escaping(synchronizeChannels));
 	}
 
-	function deserializeMessage(messageText: string, defaultMessageID: number) : ConcurrenceMessage {		
-		const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as ConcurrenceMessage;
+	function deserializeMessage(messageText: string, defaultMessageID: number) : ConcurrenceServerMessage {
+		const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as ConcurrenceServerMessage;
 		result.messageID = result.messageID | defaultMessageID;
 		if (!result.events) {
 			result.events = [];
@@ -369,16 +380,19 @@ namespace concurrence {
 		return result;
 	}
 
-	function messageAsSocketText(message: Partial<ConcurrenceMessage>) : string {
-		if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message)) {
+	function messageAsSocketText(message: Partial<ConcurrenceClientMessage>) : string {
+		if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message) && !("clientID" in message)) {
 			// Only send events, if that's all we have to send
 			return JSON.stringify(message.events).slice(1, -1);
 		}
 		return JSON.stringify(message);
 	}
 
-	function messageAsQueryString(message: Partial<ConcurrenceMessage>) : string {
+	function messageAsQueryString(message: Partial<ConcurrenceClientMessage>) : string {
 		let result = "sessionID=" + sessionID;
+		if (clientID) {
+			result += "&clientID=" + clientID;
+		}
 		if ("messageID" in message) {
 			result += "&messageID=" + message.messageID;
 		}
@@ -391,7 +405,7 @@ namespace concurrence {
 		return result;
 	}
 
-	function sendFormMessage(message: Partial<ConcurrenceMessage>) {
+	function sendFormMessage(message: Partial<ConcurrenceClientMessage>) {
 		// Form post over XMLHttpRequest is used when WebSockets are unavailable or fail
 		activeConnectionCount++;
 		const request = new XMLHttpRequest();
