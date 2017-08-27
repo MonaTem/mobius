@@ -17,7 +17,7 @@ namespace concurrence {
 			return setImmediate.bind(window, flushTasks);
 		}
 		// Attempt postMessage, but only if it's asynchronous
-		if (window.postMessage) {
+		if (window.postMessage && window.addEventListener) {
 			let isAsynchronous = true;
 			const synchronousTest = () => isAsynchronous = false;
 			window.addEventListener("message", synchronousTest, false);
