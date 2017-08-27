@@ -117,6 +117,13 @@ namespace concurrence {
 	const slice = Array.prototype.slice;
 
 	type ConcurrenceEvent = [number] | [number, any] | [number, any, any];
+	interface ConcurrenceMessage {
+		events: ConcurrenceEvent[];
+		messageID: number;
+		sessionID?: string;
+		close?: boolean;
+		destroy?: true;
+	}
 
 	function logOrdering(from: "client" | "server", type: "open" | "close" | "message", channelId: number) {
 		// const stack = (new Error().stack || "").toString().split(/\n\s*/).slice(2).map(s => s.replace(/^at\s*/, ""));
@@ -207,16 +214,13 @@ namespace concurrence {
 		defer().then(exitCallback);
 	}
 
-	function serializeMessage(messageId: number | undefined) {
-		let message = "sessionID=" + sessionID;
-		if (messageId) {
-			message += "&messageID=" + messageId;
-		}
+	function produceMessage() : Partial<ConcurrenceMessage> {
+		const result: Partial<ConcurrenceMessage> = { messageID: outgoingMessageId++ };
 		if (queuedLocalEvents.length) {
-			message += "&events=" + encodeURIComponent(JSON.stringify(queuedLocalEvents).slice(1, -1)).replace(/%5B/g, "[").replace(/%5D/g, "]").replace(/%2C/g, ",").replace(/%20/g, "+");
+			result.events = queuedLocalEvents;
 			queuedLocalEvents = [];
 		}
-		return message;
+		return result;
 	}
 
 	function cancelHeartbeat() {
@@ -230,6 +234,10 @@ namespace concurrence {
 		cancelHeartbeat();
 		heartbeatTimeout = setTimeout(sendMessages, sessionHeartbeatInterval);
 	}
+
+	let sendWhenDisconnected: (() => void) | undefined;
+	export const whenDisconnected: PromiseLike<void> = new Promise(resolve => sendWhenDisconnected = resolve);
+	export const disconnect = destroySession;
 
 	function destroySession() {
 		if (sessionID) {
@@ -250,15 +258,20 @@ namespace concurrence {
 				}
 			}
 			// Send a "destroy" message so that the server can clean up the session
-			const message = serializeMessage(outgoingMessageId++) + "&destroy=1";
+			const message = produceMessage();
+			message.destroy = true;
+			const body = messageAsQueryString(message);
 			sessionID = undefined;
 			if (navigator.sendBeacon) {
-				navigator.sendBeacon(serverURL, message);
+				navigator.sendBeacon(serverURL, body);
 			} else {
 				const request = new XMLHttpRequest();
 				request.open("POST", serverURL, false);
 				request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-				request.send(message);
+				request.send(body);
+			}
+			if (sendWhenDisconnected) {
+				sendWhenDisconnected();
 			}
 		}
 	}
@@ -334,14 +347,38 @@ namespace concurrence {
 		return promise.then(escaping(synchronizeChannels));
 	}
 
-	function deserializeMessage(messageText: string) {
-		const result = (messageText.length ? JSON.parse(messageText) : {}) as ConcurrenceMessage;
-		result.messageID = result.messageID | 0;
-		result.events = result.events || [];
+	function deserializeMessage(messageText: string, defaultMessageID: number) : ConcurrenceMessage {		
+		const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as ConcurrenceMessage;
+		result.messageID = result.messageID | defaultMessageID;
+		if (!result.events) {
+			result.events = [];
+		}
 		return result;
 	}
 
-	function sendFormMessage(body: string) {
+	function messageAsSocketText(message: Partial<ConcurrenceMessage>) : string {
+		if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message)) {
+			// Only send events, if that's all we have to send
+			return JSON.stringify(message.events).slice(1, -1);
+		}
+		return JSON.stringify(message);
+	}
+
+	function messageAsQueryString(message: Partial<ConcurrenceMessage>) : string {
+		let result = "sessionID=" + sessionID;
+		if ("messageID" in message) {
+			result += "&messageID=" + message.messageID;
+		}
+		if ("events" in message) {
+			result += "&events=" + encodeURIComponent(JSON.stringify(message.events).slice(1, -1)).replace(/%5B/g, "[").replace(/%5D/g, "]").replace(/%2C/g, ",").replace(/%20/g, "+");
+		}
+		if (message.destroy) {
+			result += "&destroy=1";
+		}
+		return result;
+	}
+
+	function sendFormMessage(message: Partial<ConcurrenceMessage>) {
 		// Form post over XMLHttpRequest is used when WebSockets are unavailable or fail
 		activeConnectionCount++;
 		const request = new XMLHttpRequest();
@@ -351,16 +388,21 @@ namespace concurrence {
 			if (request.readyState == 4) {
 				activeConnectionCount--;
 				if (request.status == 200) {
-					processMessage(deserializeMessage(request.responseText));
+					processMessage(deserializeMessage(request.responseText, 0));
 				} else {
 					destroySession();
 				}
 			}
 		}
-		request.send(body);
+		request.send(messageAsQueryString(message));
 	}
 
+	let lastWebSocketMessageId = 0;
+
 	function sendMessages(attemptWebSockets?: boolean) {
+		if (!sessionID) {
+			return;
+		}
 		if (heartbeatTimeout) {
 			restartHeartbeat();
 		}
@@ -369,24 +411,26 @@ namespace concurrence {
 			if (!queuedLocalEvents.length) {
 				return;
 			}
-			const message: ConcurrenceMessage = { events: queuedLocalEvents, messageID: outgoingMessageId++ };
-			queuedLocalEvents = [];
+			const message = produceMessage();
+			if (lastWebSocketMessageId == message.messageID) {
+				delete message.messageID;
+			}
+			lastWebSocketMessageId = outgoingMessageId;
 			if (existingSocket.readyState == 1) {
 				// Send on open socket
-				existingSocket.send(JSON.stringify(message));
+				existingSocket.send(messageAsSocketText(message));
 			} else {
 				// Coordinate with existing WebSocket that's in the process of being opened,
 				// falling back to a form POST if necessary
-				const body = serializeMessage(outgoingMessageId++);
 				const existingSocketOpened = () => {
 					existingSocket.removeEventListener("open", existingSocketOpened, false);
 					existingSocket.removeEventListener("error", existingSocketErrored, false);
-					existingSocket.send(JSON.stringify(message));
+					existingSocket.send(messageAsSocketText(message));
 				}
 				const existingSocketErrored = () => {
 					existingSocket.removeEventListener("open", existingSocketOpened, false);
 					existingSocket.removeEventListener("error", existingSocketErrored, false);
-					sendFormMessage(body);
+					sendFormMessage(message);
 				}
 				existingSocket.addEventListener("open", existingSocketOpened, false);
 				existingSocket.addEventListener("error", existingSocketErrored, false);
@@ -394,10 +438,11 @@ namespace concurrence {
 			return;
 		}
 		// Message will be sent in query string of new connection
-		const body = serializeMessage(outgoingMessageId++);
+		const message = produceMessage();
+		lastWebSocketMessageId = outgoingMessageId;
 		if (attemptWebSockets && WebSocketClass) {
 			try {
-				const newSocket = new WebSocketClass(socketURL + body);
+				const newSocket = new WebSocketClass(socketURL + messageAsQueryString(message));
 				// Attempt to open a WebSocket for channels, but not heartbeats
 				const newSocketOpened = () => {
 					newSocket.removeEventListener("open", newSocketOpened, false);
@@ -408,12 +453,29 @@ namespace concurrence {
 					newSocketOpened();
 					WebSocketClass = undefined;
 					websocket = undefined;
-					sendFormMessage(body);
+					sendFormMessage(message);
 				}
 				newSocket.addEventListener("open", newSocketOpened, false);
 				newSocket.addEventListener("error", newSocketErrored, false);
+				let lastWebSocketMessageId = -1;
 				newSocket.addEventListener("message", (event: any) => {
-					processMessage(deserializeMessage(event.data));
+					const message = deserializeMessage(event.data, lastWebSocketMessageId + 1);
+					lastWebSocketMessageId = message.messageID;
+					const promise = processMessage(message)
+					if (message.close) {
+						promise.then(escaping(() => {
+							if (pendingChannelCount) {
+								// Reopen the same web socket,
+								const message = produceMessage();
+								message.close = false;
+								newSocket.send(messageAsSocketText(message));
+							} else {
+								// Disconnect with orderly shutdown from server
+								newSocket.close();
+								websocket = undefined;
+							}
+						}));
+					}
 				}, false);
 				websocket = newSocket;
 				return;
@@ -422,14 +484,14 @@ namespace concurrence {
 			}
 		}
 		// WebSockets failed fast or were unavailable
-		sendFormMessage(body);
+		sendFormMessage(message);
 	}
 
 	function synchronizeChannels() {
 		willSynchronizeChannels = false;
 		if (!dead) {
 			if ((pendingChannelCount != 0 && activeConnectionCount == 0) || queuedLocalEvents.length) {
-				sendMessages(true);
+				sendMessages(pendingChannelCount != 0);
 				restartHeartbeat();
 			} else if (websocket) {
 				// Disconnect WebSocket when server can't possibly send us messages
@@ -443,7 +505,7 @@ namespace concurrence {
 
 	function registerRemoteChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
 		if (dead) {
-			throw new Error("Session has died!");
+			throw new Error("Session has been destroyed!");
 		}
 		// Expect that the server will run some code in parallel that provides data
 		pendingChannelCount++;
@@ -502,8 +564,6 @@ namespace concurrence {
 			defer().then(escaping(synchronizeChannels));
 		}
 	}
-
-	export const disconnect = destroySession;
 
 	function enteringCallback() {
 		dispatchingEvent++;

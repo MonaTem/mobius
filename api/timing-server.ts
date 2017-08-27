@@ -54,6 +54,20 @@ namespace concurrence {
 	const timers: { [ id: number] : ConcurrenceChannel } = {};
 	let currentTimerId = 0;
 
+	let registeredCleanup = false;
+	function registerCleanup() {
+		if (!registeredCleanup) {
+			registeredCleanup = true;
+			whenDisconnected.then(() => {
+				for (var i in timers) {
+					if (Object.hasOwnProperty.call(timers, i)) {
+						timers[i].close();
+					}
+				}
+			});
+		}
+	}
+
 	const realSetInterval = setInterval;
 	const realClearInterval = clearInterval;
 
@@ -62,6 +76,7 @@ namespace concurrence {
 		if (!insideCallback) {
 			return realSetInterval(callback, delay);
 		}
+		registerCleanup();
 		const channel = concurrence.observeServerEventCallback(callback, false);
 		const realIntervalId = realSetInterval(channel.send.bind(channel), delay);
 		const result = --currentTimerId;
@@ -94,6 +109,7 @@ namespace concurrence {
 		if (!insideCallback) {
 			return realSetTimeout(callback, delay);
 		}
+		registerCleanup();
 		const channel = concurrence.observeServerEventCallback(callback, false);
 		const realTimeoutId = realSetTimeout(() => {
 			channel.send();

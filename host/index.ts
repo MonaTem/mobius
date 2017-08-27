@@ -181,16 +181,17 @@ class ConcurrenceHost {
 			}
 		}, 60 * 1000);
 	}
-	sessionById(sessionID: string, newSessionFromRequest: Express.Request | undefined) {
+	sessionFromMessage(message: ConcurrenceMessage, request: Express.Request) {
+		const sessionID = message.sessionID || "";
 		let session = this.sessions[sessionID];
 		if (!session) {
 			if (!sessionID) {
 				throw new Error("No session ID specified!");
 			}
-			if (!newSessionFromRequest) {
+			if (message.messageID != 0) {
 				throw new Error("Session ID is not valid: " + sessionID);
 			}
-			session = new ConcurrenceSession(this, sessionID, newSessionFromRequest);
+			session = new ConcurrenceSession(this, sessionID, request);
 			this.sessions[sessionID] = session;
 		}
 		return session;
@@ -235,6 +236,8 @@ interface ConcurrenceMessage {
 	events: ConcurrenceEvent[];
 	messageID: number;
 	sessionID?: string;
+	close?: boolean;
+	destroy?: true;
 }
 
 const enum ConcurrenceRenderingMode {
@@ -352,6 +355,7 @@ class ConcurrenceSession {
 	host: ConcurrenceHost;
 	sessionID: string;
 	dead: boolean = false;
+	sendWhenDisconnected: () => void | undefined;
 	lastMessageTime: number = Date.now();
 	localChannelCounter: number = 0;
 	localChannelCount: number = 0;
@@ -364,7 +368,7 @@ class ConcurrenceSession {
 	reorderedMessages: { [messageId: number]: ConcurrenceMessage } = {};
 	context: ConcurrenceSandboxContext;
 	queuedLocalEvents: ConcurrenceEvent[] | undefined;
-	queuedLocalEventsResolve: ((events: ConcurrenceEvent[] | undefined) => void) | undefined;
+	queuedLocalEventsResolve: ((shouldContinue: true | void) => void) | undefined;
 	localResolveTimeout: NodeJS.Timer | undefined;
 	pageRenderer: ConcurrencePageRenderer;
 	willSynchronizeChannels: boolean = false;
@@ -387,6 +391,7 @@ class ConcurrenceSession {
 		const observeServerPromise = this.observeLocalPromise.bind(this);
 		context.concurrence = {
 			disconnect : this.destroy.bind(this),
+			whenDisconnected : new Promise(resolve => this.sendWhenDisconnected = resolve),
 			secrets: secrets,
 			dead: false,
 			receiveClientPromise: this.receiveRemotePromise.bind(this),
@@ -441,7 +446,7 @@ class ConcurrenceSession {
 		// Read each event and dispatch the appropriate event in order
 		
 		this.hadOpenServerChannel = this.localChannelCount != 0;
-		return (this.currentEvents = (message.events || [])).reduce((promise: PromiseLike<any>, event: ConcurrenceEvent) => promise.then(escaping(this.dispatchEvent.bind(this, event))).then(defer), this.run()).then(() => {
+		const result = (this.currentEvents = (message.events || [])).reduce((promise: PromiseLike<any>, event: ConcurrenceEvent) => promise.then(escaping(this.dispatchEvent.bind(this, event))).then(defer), this.run()).then(() => {
 			this.currentEvents = undefined;
 			const reorderedMessage = this.reorderedMessages[this.incomingMessageId];
 			if (reorderedMessage) {
@@ -449,24 +454,24 @@ class ConcurrenceSession {
 				return this.processMessage(reorderedMessage);
 			}
 		}).then(escaping(this.synchronizeChannels.bind(this)));
+		// Destroy if asked to by client
+		return message.destroy ? result.then(escaping(this.destroy.bind(this))) : result;
 	}
 
 	receiveMessage(message: ConcurrenceMessage) {
 		this.lastMessageTime = Date.now();
 		return this.processMessage(message);
 	}
-	dequeueEvents() : PromiseLike<ConcurrenceEvent[] | undefined> {
-		return new Promise<ConcurrenceEvent[] | undefined>((resolve, reject) => {
+	dequeueEvents() : PromiseLike<true | void> {
+		return new Promise<true | void>((resolve, reject) => {
 			// Wait until events are ready, a new event handler comes in, or no more local channels exist
-			const queuedLocalEvents = this.queuedLocalEvents;
 			const oldResolve = this.queuedLocalEventsResolve;
-			if (queuedLocalEvents) {
-				this.queuedLocalEvents = undefined;
+			if (this.queuedLocalEvents) {
 				if (oldResolve) {
 					this.queuedLocalEventsResolve = resolve;
-					oldResolve(queuedLocalEvents);
+					oldResolve(true);
 				} else {
-					resolve(queuedLocalEvents);
+					resolve(true);
 					return;
 				}
 			} else if (this.localChannelCount) {
@@ -475,7 +480,7 @@ class ConcurrenceSession {
 					oldResolve(undefined);
 				}
 			} else {
-				resolve();
+				resolve(undefined);
 				return;
 			}
 			if (this.localResolveTimeout !== undefined) {
@@ -483,6 +488,14 @@ class ConcurrenceSession {
 			}
 			this.localResolveTimeout = setTimeout(resolve, 30000);
 		});
+	}
+	produceMessage() : Partial<ConcurrenceMessage> {
+		const result: Partial<ConcurrenceMessage> = { messageID: this.outgoingMessageId++ };
+		if (this.queuedLocalEvents) {
+			result.events = this.queuedLocalEvents;
+			this.queuedLocalEvents = undefined;
+		}
+		return result;
 	}
 	sendEvent(event: ConcurrenceEvent) {
 		// Queue an event
@@ -502,9 +515,7 @@ class ConcurrenceSession {
 		const resolve = this.queuedLocalEventsResolve;
 		if (resolve) {
 			this.queuedLocalEventsResolve = undefined;
-			const queuedLocalEvents = this.queuedLocalEvents;
-			this.queuedLocalEvents = undefined;
-			resolve(queuedLocalEvents);
+			resolve(true);
 			if (this.localResolveTimeout !== undefined) {
 				clearTimeout(this.localResolveTimeout);
 				this.localResolveTimeout = undefined;
@@ -603,7 +614,7 @@ class ConcurrenceSession {
 
 	registerRemoteChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
 		if (this.dead) {
-			throw new Error("Session has died!");
+			throw new Error("Session has been destroyed!");
 		}
 		const session = this;
 		session.pendingChannelCount++;
@@ -637,6 +648,9 @@ class ConcurrenceSession {
 	}
 	receiveRemotePromise<T extends ConcurrenceJsonValue>() {
 		return new Promise<T>((resolve, reject) => {
+			if (this.dead) {
+				throw new Error("Session has been destroyed!");
+			}
 			const channel = this.registerRemoteChannel(event => {
 				channel.close();
 				this.enteringCallback();
@@ -720,6 +734,9 @@ class ConcurrenceSession {
 			this.pageRenderer.destroy();
 			this.synchronizeChannels();
 			delete this.host.sessions[this.sessionID];
+			if (this.sendWhenDisconnected) {
+				this.sendWhenDisconnected();
+			}
 		}
 	}
 };
@@ -742,6 +759,40 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 	while (firstChild = fromNode.firstChild) {
 		toNode.appendChild(firstChild);
 	}
+}
+
+function messageFromBody(body: { [key: string]: any }) : ConcurrenceMessage {
+	const message: ConcurrenceMessage = {
+		messageID: (body.messageID as number) | 0,
+		events: body.events ? JSON.parse("[" + body.events + "]") : []
+	}
+	if ("sessionID" in body) {
+		message.sessionID = body.sessionID;
+	}
+	if ("close" in body) {
+		message.close = (body.close | 0) == 1;
+	}
+	if ("destroy" in body) {
+		message.destroy = true;
+	}
+	return message;
+}
+
+function messageFromSocket(messageText: string, defaultMessageID: number) : ConcurrenceMessage {
+	const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as ConcurrenceMessage;
+	result.messageID = result.messageID | defaultMessageID;
+	if (!result.events) {
+		result.events = [];
+	}
+	return result;
+}
+
+function serializeMessage(message: Partial<ConcurrenceMessage>) : string {
+	if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message)) {
+		// Only send events, if that's all we have to send
+		return JSON.stringify(message.events).slice(1, -1);
+	}
+	return JSON.stringify(message);
 }
 
 if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
@@ -770,55 +821,50 @@ server.post("/", function(req, res) {
 	new Promise(resolve => {
 		noCache(res);
 		const body = req.body;
-		if (body.destroy) {
-			// Forcefully clean up sessions
-			host.destroySessionById(req.body.sessionID);
-			res.set("Content-Type", "text/plain");
-			res.send("");
-			resolve();
-		} else {
-			// Process incoming events
-			let messageId = body.messageID = body.messageID | 0;
-			const session = host.sessionById(body.sessionID, messageId == 0 ? req : undefined);
-			if (renderingMode >= ConcurrenceRenderingMode.FullEmulation && req.query["js"] == "no") {
-				const inputEvents: ConcurrenceEvent[] = [];
-				const buttonEvents: ConcurrenceEvent[] = [];
-				for (let key in body) {
-					if (!Object.hasOwnProperty.call(body, key)) {
-						continue;
-					}
-					const match = key.match(/^channelID(\d+)$/);
-					if (match && Object.hasOwnProperty.call(body, key)) {
-						const element = session.pageRenderer.body.querySelector("[name=\"" + key + "\"]");
-						if (element) {
-							const event: ConcurrenceEvent = [Number(match[1]), { value: body[key] }];
-							switch (element.nodeName) {
-								case "INPUT":
-									if ((element as HTMLInputElement).value != body[key]) {
-										inputEvents.unshift(event);
-									}
-									break;
-								case "BUTTON":
-									buttonEvents.unshift(event);
-									break;
-							}
+		const message = messageFromBody(body);
+		// Process incoming events
+		if (renderingMode >= ConcurrenceRenderingMode.FullEmulation && req.query["js"] == "no") {
+			const session = host.sessionFromMessage(message, req);
+			const inputEvents: ConcurrenceEvent[] = [];
+			const buttonEvents: ConcurrenceEvent[] = [];
+			for (let key in body) {
+				if (!Object.hasOwnProperty.call(body, key)) {
+					continue;
+				}
+				const match = key.match(/^channelID(\d+)$/);
+				if (match && Object.hasOwnProperty.call(body, key)) {
+					const element = session.pageRenderer.body.querySelector("[name=\"" + key + "\"]");
+					if (element) {
+						const event: ConcurrenceEvent = [Number(match[1]), { value: body[key] }];
+						switch (element.nodeName) {
+							case "INPUT":
+								if ((element as HTMLInputElement).value != body[key]) {
+									inputEvents.unshift(event);
+								}
+								break;
+							case "BUTTON":
+								buttonEvents.unshift(event);
+								break;
 						}
 					}
 				}
-				body.events = inputEvents.concat(buttonEvents);
-				session.receiveMessage(body).then(session.waitForEvents.bind(session)).then(() => {
-					return session.pageRenderer.render();
-				}).then(html => {
-					res.set("Content-Type", "text/html");
-					res.send(html);
-				});
+			}
+			message.events = message.events.concat(inputEvents.concat(buttonEvents));
+			session.receiveMessage(message).then(session.waitForEvents.bind(session)).then(() => {
+				return session.pageRenderer.render();
+			}).then(html => {
+				res.set("Content-Type", "text/html");
+				res.send(html);
+			});
+		} else {
+			if (message.destroy) {
+				host.destroySessionById(message.sessionID || "");
 			} else {
-				body.events = body.events ? JSON.parse("[" + body.events + "]") : [];
-				session.receiveMessage(body).then(() => session.dequeueEvents()).then(events => {
+				const session = host.sessionFromMessage(message, req);
+				session.receiveMessage(message).then(() => session.dequeueEvents()).then(() => {
 					// Wait to send the response until we have events ready or until there are no more server-side channels open
 					res.set("Content-Type", "text/plain");
-					const message: ConcurrenceMessage = { events: events || [], messageID: session.outgoingMessageId++ };
-					res.send(JSON.stringify(message));
+					res.send(serializeMessage(session.produceMessage()));
 				});
 			}
 		}
@@ -839,42 +885,50 @@ expressWs(server);
 		ws.on("close", function() {
 			closed = true;
 		});
-		const body = qs.parse(req.query) as ConcurrenceMessage;
-		let messageId = body.messageID = (body.messageID as number) | 0;
-		body.events = body.events ? JSON.parse("[" + body.events + "]") : [];
-		const sessionId = body.sessionID;
-		if (!sessionId) {
-			ws.close();
-			return;
-		}
-		const session = host.sessionById(sessionId, (messageId == 0) ? req : undefined);
-		function processBody(body: ConcurrenceMessage) {
-			resolvedPromise.then(() => session.receiveMessage(body)).then(processMoreEvents, e => {
+		const startMessage = messageFromBody(qs.parse(req.query));
+		const session = host.sessionFromMessage(startMessage, req);
+		let lastIncomingMessageId = startMessage.messageID;
+		let lastOutgoingMessageId = -1;
+		function processSocketMessage(message: ConcurrenceMessage) {
+			if (typeof message.close == "boolean") {
+				if (closed = message.close) {
+					ws.close();
+				}
+			}
+			resolvedPromise.then(() => session.receiveMessage(message)).then(processMoreEvents, e => {
 				ws.close();
 			});
 		}
+		let processingEvents = false;
 		function processMoreEvents() {
-			session.dequeueEvents().then(events => {
+			if (processingEvents || closed) {
+				return;
+			}
+			processingEvents = true;
+			session.dequeueEvents().then(keepGoing => {
+				processingEvents = false;
 				if (!closed) {
-					if (events) {
-						ws.send(JSON.stringify({ events, messageID: session.outgoingMessageId++ }));
+					const message = session.produceMessage();
+					if (lastOutgoingMessageId == message.messageID) {
+						delete message.messageID;
+					}
+					lastOutgoingMessageId = session.outgoingMessageId;
+					if (session.localChannelCount == 0 || !keepGoing) {
+						message.close = true;
+						closed = true;
+					} else {
 						processMoreEvents();
 					}
-				} else if (events) {
-					// Re-queue events since WebSocket has died (not 100% correct to do this)
-					for (let i = 0; i < events.length; i++) {
-						session.sendEvent(events[i]);
-					}
+					ws.send(serializeMessage(message));
 				}
 			});
 		}
 		ws.on("message", function(msg: string) {
-			let message = JSON.parse(msg) as ConcurrenceMessage;
-			message.messageID = ++messageId;
-			processBody(message);
+			const message = messageFromSocket(msg, lastIncomingMessageId + 1);
+			lastIncomingMessageId = message.messageID;
+			processSocketMessage(message);
 		});
-		processBody(body);
-		processMoreEvents();
+		processSocketMessage(startMessage);
 	} catch (e) {
 		console.log(e);
 		ws.close();

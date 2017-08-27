@@ -2,6 +2,7 @@
 
 declare namespace concurrence {
 	export function disconnect(): void;
+	export const whenDisconnected: PromiseLike<void>;
 	export let dead: boolean;
 	export let insideCallback: boolean;
 
