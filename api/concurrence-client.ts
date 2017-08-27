@@ -182,7 +182,7 @@ namespace concurrence {
 	// Local channels
 	let localChannelCounter = 0;
 	let queuedLocalEvents: ConcurrenceEvent[] = [];
-	const fencedLocalEvents: { [channelId: number]: ((event: ConcurrenceEvent) => void)[]; } = {};
+	const fencedLocalEvents: [number, (event: ConcurrenceEvent) => void][] = [];
 	let totalBatched = 0;
 	let isBatched: { [channelId: number]: true } = {};
 	let pendingBatchedActions: (() => void)[] = [];
@@ -270,9 +270,15 @@ namespace concurrence {
 				request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
 				request.send(body);
 			}
-			if (sendWhenDisconnected) {
-				sendWhenDisconnected();
-			}
+			// Flush fenced events
+			reduce(fencedLocalEvents, (promise, event) => {
+				return promise.then(() => dispatchEvent([event[0]])).then(defer);
+			}, resolvedPromise).then(() => {
+				// Send disconnection event
+				if (sendWhenDisconnected) {
+					sendWhenDisconnected();
+				}
+			});
 		}
 	}
 	window.addEventListener("unload", destroySession, false);
@@ -283,10 +289,12 @@ namespace concurrence {
 		if (channelId < 0) {
 			// Fenced client-side event
 			channelId = -channelId;
-			let fencedQueue = fencedLocalEvents[channelId];
-			channel = fencedQueue.shift();
-			if (fencedQueue.length == 0) {
-				delete fencedLocalEvents[channelId];
+			for (let i = 0; i < fencedLocalEvents.length; i++) {
+				if (fencedLocalEvents[i][0] == channelId) {
+					channel = fencedLocalEvents[i][1];
+					fencedLocalEvents.splice(i, 1);
+					break;
+				}
 			}
 			// Apply batching
 			if (totalBatched && isBatched[channelId] && ((--totalBatched) == 0)) {
@@ -504,9 +512,6 @@ namespace concurrence {
 	}
 
 	function registerRemoteChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
-		if (dead) {
-			throw new Error("Session has been destroyed!");
-		}
 		// Expect that the server will run some code in parallel that provides data
 		pendingChannelCount++;
 		const channelId = ++remoteChannelCounter;
@@ -530,11 +535,11 @@ namespace concurrence {
 		};
 	}
 
-	function sendEvent(event: ConcurrenceEvent, batched?: boolean, skipsFencing?: boolean) : PromiseLike<ConcurrenceEvent | undefined> {
+	function sendEvent(event: ConcurrenceEvent, batched?: boolean, skipsFencing?: boolean) : PromiseLike<ConcurrenceEvent | void> {
 		if (dead) {
-			return Promise.reject(new Error("Session has died!"));
+			return resolvedPromise;
 		}
-		const result = new Promise<ConcurrenceEvent | undefined>((resolve, reject) => {
+		const result = new Promise<ConcurrenceEvent | void>((resolve, reject) => {
 			if (pendingChannelCount && !skipsFencing) {
 				// Let server decide on the ordering of events since server-side channels are active
 				const channelId = event[0];
@@ -542,8 +547,7 @@ namespace concurrence {
 					isBatched[channelId] = true;
 					++totalBatched;
 				}
-				const fencedQueue = fencedLocalEvents[channelId] || (fencedLocalEvents[channelId] = []);
-				fencedQueue.push(resolve);
+				fencedLocalEvents.push([channelId, resolve]);
 				event[0] = -channelId;
 			} else {
 				// No pending server-side channels, resolve immediately
@@ -573,6 +577,9 @@ namespace concurrence {
 	// APIs for client/, not to be used inside src/
 	export function receiveServerPromise<T extends ConcurrenceJsonValue>(...args: any[]) : PromiseLike<T> { // Must be cast to the proper signature
 		return new Promise<T>((resolve, reject) => {
+			if (dead) {
+				return reject(new Error("Session has been disconnected!"));
+			}
 			const channel = registerRemoteChannel(event => {
 				channel.close();
 				enteringCallback();
@@ -627,7 +634,7 @@ namespace concurrence {
 
 	function parseValueEvent<T>(event: ConcurrenceEvent | undefined, resolve: (value: ConcurrenceJsonValue) => T, reject: (error: Error | ConcurrenceJsonValue) => T) : T {
 		if (!event) {
-			return reject(new Error("Disconnected from server!"));
+			return reject(new Error("Session has been disconnected!"));
 		}
 		let value = event[1];
 		if (event.length != 3) {

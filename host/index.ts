@@ -92,7 +92,7 @@ function eventForException(channelId: number, error: any) : ConcurrenceEvent {
 
 function parseValueEvent<T>(event: ConcurrenceEvent | undefined, resolve: (value: ConcurrenceJsonValue) => T, reject: (error: Error | ConcurrenceJsonValue) => T) : T {
 	if (!event) {
-		return reject(new Error("Disconnected from client!"));
+		return reject(new Error("Session has been disconnected!"));
 	}
 	let value = event[1];
 	if (event.length != 3) {
@@ -360,7 +360,7 @@ class ConcurrenceSession {
 	localChannelCounter: number = 0;
 	localChannelCount: number = 0;
 	remoteChannelCounter: number = 0;
-	pendingChannels: { [channelId: number]: (event: ConcurrenceEvent) => void; } = {};
+	pendingChannels: { [channelId: number]: (event?: ConcurrenceEvent) => void; } = {};
 	pendingChannelCount: number = 0;
 	incomingMessageId: number = 0;
 	outgoingMessageId: number = 0;
@@ -390,8 +390,8 @@ class ConcurrenceSession {
 		context.request = request;
 		const observeServerPromise = this.observeLocalPromise.bind(this);
 		context.concurrence = {
-			disconnect : this.destroy.bind(this),
-			whenDisconnected : new Promise(resolve => this.sendWhenDisconnected = resolve),
+			disconnect: this.destroy.bind(this),
+			whenDisconnected: new Promise(resolve => this.sendWhenDisconnected = resolve),
 			secrets: secrets,
 			dead: false,
 			receiveClientPromise: this.receiveRemotePromise.bind(this),
@@ -613,9 +613,6 @@ class ConcurrenceSession {
 	}
 
 	registerRemoteChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
-		if (this.dead) {
-			throw new Error("Session has been destroyed!");
-		}
 		const session = this;
 		session.pendingChannelCount++;
 		const channelId = ++session.remoteChannelCounter;
@@ -649,7 +646,7 @@ class ConcurrenceSession {
 	receiveRemotePromise<T extends ConcurrenceJsonValue>() {
 		return new Promise<T>((resolve, reject) => {
 			if (this.dead) {
-				throw new Error("Session has been destroyed!");
+				return reject(new Error("Session has been disconnected!"));
 			}
 			const channel = this.registerRemoteChannel(event => {
 				channel.close();
@@ -733,6 +730,12 @@ class ConcurrenceSession {
 			this.context.concurrence.dead = true;
 			this.pageRenderer.destroy();
 			this.synchronizeChannels();
+			for (let i in this.pendingChannels) {
+				if (Object.hasOwnProperty.call(this.pendingChannels, i)) {
+					this.pendingChannels[i]();
+					delete this.pendingChannels[i];
+				}
+			}
 			delete this.host.sessions[this.sessionID];
 			if (this.sendWhenDisconnected) {
 				this.sendWhenDisconnected();
