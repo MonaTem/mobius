@@ -1,7 +1,7 @@
 {
 	"include": [
-		"node_modules/preact/dist/preact.min.js",
 		"api/concurrence-client.ts",
+		"node_modules/preact/dist/preact.min.js",
 		"api/**/*-client.ts",
 		"api/**/*-client.js",
 		"api/**/*.ts",
