@@ -173,15 +173,20 @@ namespace concurrence {
 	}
 
 	// Session state
-	let sessionID: string | undefined;
-	let clientID = 0;
-	const bootstrapElement = (elements => {
+	const bootstrapData = (elements => {
 		for (let i = 0; i < elements.length; i++) {
-			if (elements[i].getAttribute("type") == "application/x-concurrence-bootstrap") {
-				return elements[i];
+			const element = elements[i];
+			if (element.getAttribute("type") == "application/x-concurrence-bootstrap") {
+				element.parentNode!.removeChild(element);
+				return JSON.parse(element.textContent || element.innerHTML) as Partial<BootstrapData>;
 			}
 		}
+		return {} as Partial<BootstrapData>;
 	})(document.getElementsByTagName("script"));
+	const hasBootstrap = "sessionID" in bootstrapData;
+	let sessionID: string | undefined = hasBootstrap ? bootstrapData.sessionID : uuid();
+	const clientID = (bootstrapData.clientID as number) | 0;
+	const allowMultiple = !!bootstrapData.multiple;
 	const serverURL = location.href.match(/^[^?]*/)![0];
 	let activeConnectionCount = 0;
 	export let dead = false;
@@ -191,7 +196,6 @@ namespace concurrence {
 	const pendingChannels : { [channelId: number]: (event?: ConcurrenceEvent) => void; } = {};
 	let pendingChannelCount = 0;
 	let hadOpenServerChannel = false;
-	let allowMultiple = false;
 
 	// Local channels
 	let localChannelCounter = 0;
@@ -211,14 +215,7 @@ namespace concurrence {
 	let WebSocketClass = (window as any).WebSocket as typeof WebSocket | undefined;
 	let websocket: WebSocket | undefined;
 
-	if (bootstrapElement) {
-		bootstrapElement.parentNode!.removeChild(bootstrapElement);
-		const bootstrapData = JSON.parse(bootstrapElement.textContent || bootstrapElement.innerHTML) as BootstrapData;
-		sessionID = bootstrapData.sessionID;
-		clientID = (bootstrapData.clientID as number) | 0;
-		if (bootstrapData.multiple) {
-			allowMultiple = true;
-		}
+	if (hasBootstrap) {
 		++outgoingMessageId;
 		const concurrenceForm = document.getElementById("concurrence-form") as HTMLFormElement;
 		if (concurrenceForm) {
@@ -229,7 +226,6 @@ namespace concurrence {
 		willSynchronizeChannels = true;
 		defer().then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(exitCallback).then(escaping(synchronizeChannels));
 	} else {
-		sessionID = uuid();
 		defer().then(exitCallback);
 	}
 
