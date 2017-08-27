@@ -7,8 +7,8 @@ namespace concurrence {
 		return typeof value == "object" && "then" in (value as any);
 	}
 
-	export const microTaskQueue : Task[] = [];
-	export const taskQueue : Task[] = [];
+	const microTaskQueue : Task[] = [];
+	const taskQueue : Task[] = [];
 
 	const scheduleFlushTasks = (() => {
 		const setImmediate = window.setImmediate;
@@ -51,14 +51,19 @@ namespace concurrence {
 		return setTimeout.bind(window, flushTasks, 0);
 	})();
 
+	function flushMicroTasks() {
+		let task: Task | undefined;
+		while (task = microTaskQueue.shift()) {
+			task();
+		}
+	}
+
 	function flushTasks() {
 		let completed: boolean | undefined;
 		try {
-			let task: Task | undefined;
-			while (task = microTaskQueue.shift()) {
-				task();
-			}
-			if (task = taskQueue.shift()) {
+			flushMicroTasks();
+			let task = taskQueue.shift();
+			if (task) {
 				task();
 			}
 			completed = !taskQueue.length;
@@ -69,7 +74,7 @@ namespace concurrence {
 		}
 	}
 
-	export function submitTask(queue: Task[], task: Task) {
+	function submitTask(queue: Task[], task: Task) {
 		queue.push(task);
 		if (microTaskQueue.length + taskQueue.length == 1) {
 			scheduleFlushTasks();
@@ -677,7 +682,7 @@ namespace concurrence {
 		});
 	};
 
-	export function observeClientEventCallback<T extends Function>(callback: T, batched?: boolean) : ConcurrenceLocalChannel<T> {
+	export function observeClientEventCallback<T extends Function>(callback: T, batched?: boolean, shouldFlushMicroTasks?: true) : ConcurrenceLocalChannel<T> {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
@@ -698,6 +703,9 @@ namespace concurrence {
 							(callback as any as Function).apply(null, roundTrip(args));
 						}
 					});
+					if (shouldFlushMicroTasks) {
+						flushMicroTasks();
+					}
 				}
 			} as any as T,
 			close() {
