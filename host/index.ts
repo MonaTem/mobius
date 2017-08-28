@@ -256,6 +256,7 @@ interface ConcurrenceClientMessage extends ConcurrenceServerMessage {
 	sessionID?: string;
 	clientID?: number;
 	destroy?: true;
+	allEvents?: ConcurrenceEvent[];
 }
 
 const enum ConcurrenceRenderingMode {
@@ -273,7 +274,7 @@ interface BootstrapData {
 }
 
 const renderingMode : ConcurrenceRenderingMode = ConcurrenceRenderingMode.Prerendering;
-const allowMultipleClientsPerSession = true;
+const allowMultipleClientsPerSession = false;
 
 class ConcurrencePageRenderer {
 	session: ConcurrenceSession;
@@ -356,7 +357,7 @@ class ConcurrencePageRenderer {
 			if (client.clientID) {
 				bootstrapData.clientID = client.clientID;
 			}
-			if (allowMultipleClientsPerSession) {
+			if (session.allEvents) {
 				bootstrapData.multiple = true;
 			}
 			textNode = session.host.document.createTextNode(compatibleStringify(bootstrapData));
@@ -431,6 +432,10 @@ class ConcurrenceClient {
 		}
 		if (messageId < this.incomingMessageId) {
 			return Promise.resolve();
+		}
+		const allEvents = message.allEvents;
+		if (allEvents) {
+			this.session.allEvents = allEvents;
 		}
 		this.incomingMessageId++;
 		this.willSynchronizeChannels = true;
@@ -887,6 +892,9 @@ function messageFromBody(body: { [key: string]: any }) : ConcurrenceClientMessag
 		clientID: (body.clientID as number) | 0,
 		events: body.events ? JSON.parse("[" + body.events + "]") : []
 	}
+	if (body.allEvents) {
+		message.allEvents = JSON.parse("[" + body.allEvents + "]");
+	}
 	if ("close" in body) {
 		message.close = (body.close | 0) == 1;
 	}
@@ -913,33 +921,40 @@ function serializeMessage(message: Partial<ConcurrenceServerMessage>) : string {
 	return JSON.stringify(message);
 }
 
-if (renderingMode >= ConcurrenceRenderingMode.Prerendering || allowMultipleClientsPerSession) {
-	server.get("/", (request, response) => {
-		resolvedPromise.then(() => {
-			const sessionID = request.query.sessionID;
-			const client = sessionID ? host.sessionFromId(sessionID, allowMultipleClientsPerSession ? request : undefined).newClient() : host.newClient(request);
-			const session = client.session;
-			session.hadOpenServerChannel = true;
-			if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
-				return session.waitForEvents().then(() => {
-					client.incomingMessageId++;
-					client.outgoingMessageId++;
-					return session.pageRenderer.render().then(() => session.pageRenderer.generateHTML(client));
-				});
-			} else {
-				return session.pageRenderer.generateHTML(client);
-			}
-		}).then(html => {
-			noCache(response);
-			response.set("Content-Type", "text/html");
-			response.send(html);
-		}, e => {
-			response.status(500);
-			response.set("Content-Type", "text/plain");
-			response.send(util.inspect(e));
-		});
+server.get("/", (request, response) => {
+	resolvedPromise.then(() => {
+		const sessionID = request.query.sessionID;
+		let session: ConcurrenceSession;
+		let client: ConcurrenceClient;
+		if (sessionID) {
+			session = host.sessionFromId(sessionID, request);
+			client = session.newClient();
+		} else if (renderingMode < ConcurrenceRenderingMode.Prerendering) {
+			return host.htmlSource;
+		} else {
+			client = host.newClient(request);
+			session = client.session;
+		}
+		session.hadOpenServerChannel = true;
+		if (renderingMode >= ConcurrenceRenderingMode.Prerendering) {
+			return session.waitForEvents().then(() => {
+				client.incomingMessageId++;
+				client.outgoingMessageId++;
+				return session.pageRenderer.render().then(() => session.pageRenderer.generateHTML(client));
+			});
+		} else {
+			return session.pageRenderer.generateHTML(client);
+		}
+	}).then(html => {
+		noCache(response);
+		response.set("Content-Type", "text/html");
+		response.send(html);
+	}, e => {
+		response.status(500);
+		response.set("Content-Type", "text/plain");
+		response.send(util.inspect(e));
 	});
-}
+});
 
 server.post("/", function(req, res) {
 	new Promise(resolve => {

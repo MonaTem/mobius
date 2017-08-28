@@ -224,6 +224,7 @@ concurrence.host((
 			<NewItemWidget/>
 			<ItemsWidget/>
 		</ShowHideWidget>
+		<button onClick={() => concurrence.shareSession().then(console.log)}>Share Session</button>
 	</div>
 ));
 

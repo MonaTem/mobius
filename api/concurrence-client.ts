@@ -133,6 +133,7 @@ namespace concurrence {
 		sessionID?: string;
 		clientID?: number;
 		destroy?: true;
+		allEvents?: ConcurrenceEvent[];
 	}
 
 	function logOrdering(from: "client" | "server", type: "open" | "close" | "message", channelId: number) {
@@ -186,10 +187,14 @@ namespace concurrence {
 	const hasBootstrap = "sessionID" in bootstrapData;
 	let sessionID: string | undefined = hasBootstrap ? bootstrapData.sessionID : uuid();
 	const clientID = (bootstrapData.clientID as number) | 0;
-	const allowMultiple = !!bootstrapData.multiple;
 	const serverURL = location.href.match(/^[^?]*/)![0];
 	let activeConnectionCount = 0;
 	export let dead = false;
+
+	// Session sharing
+	let allowMultiple = !!bootstrapData.multiple;
+	export const allEvents: ConcurrenceEvent[] = [];
+	let sendAllEvents = false;
 
 	// Remote channels
 	let remoteChannelCounter = 0;
@@ -200,7 +205,7 @@ namespace concurrence {
 	// Local channels
 	let localChannelCounter = 0;
 	let queuedLocalEvents: ConcurrenceEvent[] = [];
-	const fencedLocalEvents: [number, (event: ConcurrenceEvent) => void][] = [];
+	const fencedLocalEvents: ConcurrenceEvent[] = [];
 	const pendingLocalChannels: { [channelId: number]: (event: ConcurrenceEvent) => void; } = {};
 	let totalBatched = 0;
 	let isBatched: { [channelId: number]: true } = {};
@@ -237,6 +242,10 @@ namespace concurrence {
 		}
 		if (clientID) {
 			result.clientID = clientID;
+		}
+		if (sendAllEvents) {
+			sendAllEvents = false;
+			result.allEvents = allEvents;
 		}
 		return result;
 	}
@@ -290,7 +299,7 @@ namespace concurrence {
 			}
 			// Flush fenced events
 			reduce(fencedLocalEvents, (promise, event) => {
-				return promise.then(() => dispatchEvent([event[0]])).then(defer);
+				return promise.then(() => dispatchEvent(event)).then(defer);
 			}, resolvedPromise).then(() => {
 				// Send disconnection event
 				if (sendWhenDisconnected) {
@@ -301,22 +310,21 @@ namespace concurrence {
 	}
 	window.addEventListener("unload", destroySession, false);
 
-	function dispatchEvent(event: ConcurrenceEvent) : PromiseLike<void> | undefined {
+	function dispatchEvent(event: ConcurrenceEvent) : PromiseLike<void> | void {
 		let channelId = event[0];
 		let channel: ((event: ConcurrenceEvent) => void) | undefined;
 		if (channelId < 0) {
 			// Fenced client-side event
-			channelId = -channelId;
 			for (let i = 0; i < fencedLocalEvents.length; i++) {
-				if (fencedLocalEvents[i][0] == channelId) {
-					channel = fencedLocalEvents[i][1];
+				const fencedEvent = fencedLocalEvents[i];
+				if (fencedEvent[0] == channelId) {
+					event = fencedEvent;
 					fencedLocalEvents.splice(i, 1);
 					break;
 				}
 			}
-			if (!channel && allowMultiple) {
-				channel = pendingLocalChannels[channelId];
-			}
+			channelId = -channelId;
+			channel = pendingLocalChannels[channelId];
 			// Apply batching
 			if (totalBatched && isBatched[channelId] && ((--totalBatched) == 0)) {
 				const batchedActions = pendingBatchedActions;
@@ -335,13 +343,12 @@ namespace concurrence {
 
 	function callChannelWithEvent(channel: ((event: ConcurrenceEvent) => void) | undefined, event: ConcurrenceEvent) {
 		if (channel) {
+			allEvents.push(event);
 			if (totalBatched) {
 				pendingBatchedActions.push(channel.bind(null, event));
 			} else {
 				channel(event);
 			}
-		} else {
-			throw new Error("Guru meditation error!");
 		}
 	}
 
@@ -388,11 +395,15 @@ namespace concurrence {
 	}
 
 	function messageAsSocketText(message: Partial<ConcurrenceClientMessage>) : string {
-		if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message) && !("clientID" in message)) {
+		if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message) && !("clientID" in message) && !("allEvents" in message)) {
 			// Only send events, if that's all we have to send
 			return JSON.stringify(message.events).slice(1, -1);
 		}
 		return JSON.stringify(message);
+	}
+
+	function cheesyEncodeURIComponent(text: string) {
+		return encodeURIComponent(text).replace(/%5B/g, "[").replace(/%5D/g, "]").replace(/%2C/g, ",").replace(/%20/g, "+");
 	}
 
 	function messageAsQueryString(message: Partial<ConcurrenceClientMessage>) : string {
@@ -404,7 +415,10 @@ namespace concurrence {
 			result += "&messageID=" + message.messageID;
 		}
 		if ("events" in message) {
-			result += "&events=" + encodeURIComponent(JSON.stringify(message.events).slice(1, -1)).replace(/%5B/g, "[").replace(/%5D/g, "]").replace(/%2C/g, ",").replace(/%20/g, "+");
+			result += "&events=" + cheesyEncodeURIComponent(JSON.stringify(message.events).slice(1, -1));
+		}
+		if ("allEvents" in message) {
+			result += "&allEvents=" + cheesyEncodeURIComponent(JSON.stringify(message.allEvents).slice(1, -1));
 		}
 		if (message.destroy) {
 			result += "&destroy=1";
@@ -562,31 +576,30 @@ namespace concurrence {
 		};
 	}
 
-	function sendEvent(event: ConcurrenceEvent, batched?: boolean, skipsFencing?: boolean) : PromiseLike<ConcurrenceEvent> {
+	function sendEvent(event: ConcurrenceEvent, batched?: boolean, skipsFencing?: boolean) {
 		if (dead) {
-			return Promise.resolve(event);
+			return;
 		}
-		const result = new Promise<ConcurrenceEvent>((resolve, reject) => {
-			if ((pendingChannelCount || allowMultiple) && !skipsFencing) {
-				// Let server decide on the ordering of events since server-side channels are active
-				const channelId = event[0];
-				if (batched) {
-					isBatched[channelId] = true;
-					++totalBatched;
-				}
-				fencedLocalEvents.push([channelId, resolve]);
-				event[0] = -channelId;
-			} else {
-				// No pending server-side channels, resolve immediately
-				resolve(event);
+		const channelId = event[0];
+		if ((pendingChannelCount || allowMultiple) && !skipsFencing) {
+			// Let server decide on the ordering of events since server-side channels are active
+			if (batched) {
+				isBatched[channelId] = true;
+				++totalBatched;
 			}
-		});
+			event[0] = -channelId;
+			fencedLocalEvents.push(event);
+		} else {
+			// No pending server-side channels, resolve immediately
+			const eventClone = event.slice() as ConcurrenceEvent;
+			eventClone[0] = -channelId;
+			dispatchEvent(eventClone);
+		}
 		// Queue an event to be sent to the server in the next flush
 		queuedLocalEvents.push(event);
 		if (!batched || websocket || queuedLocalEvents.length > 9) {
 			flush();
 		}
-		return result;
 	}
 
 	export function flush() {
@@ -687,10 +700,9 @@ namespace concurrence {
 		return new Promise<T>((resolve, reject) => {
 			let channelId = ++localChannelCounter;
 			logOrdering("client", "open", channelId);
-			let resolved = false;
-			const finish = function(event: ConcurrenceEvent) {
-				if (event && !resolved) {
-					resolved = true;
+			pendingLocalChannels[channelId] = function(event: ConcurrenceEvent) {
+				if (event) {
+					delete pendingLocalChannels[channelId];
 					parseValueEvent(event, value => {
 						logOrdering("client", "message", channelId);
 						logOrdering("client", "close", channelId);
@@ -701,11 +713,20 @@ namespace concurrence {
 						reject(error);
 					});
 				}
+			};
+			// Allow pending event from the server to take precedence
+			const events = currentEvents;
+			if (events) {
+				for (var i = 0; i < events.length; i++) {
+					if (events[i][0] == channelId) {
+						return;
+					}
+				}
 			}
-			pendingLocalChannels[channelId] = finish;
+			// Resolve value
 			Promise.resolve(value).then(
-				value => escaping(() => sendEvent(eventForValue(channelId, value), true)),
-				error => escaping(() => sendEvent(eventForException(channelId, error), true))
+				escaping((value: T) => sendEvent(eventForValue(channelId, value))),
+				escaping((error: any) => sendEvent(eventForException(channelId, error)))
 			);
 		});
 	};
@@ -714,46 +735,32 @@ namespace concurrence {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
-		const channelId: number = ++localChannelCounter;
+		let channelId: number = ++localChannelCounter;
 		logOrdering("client", "open", channelId);
-		if (allowMultiple) {
-			pendingLocalChannels[channelId] = function(event: ConcurrenceEvent) {
+		pendingLocalChannels[channelId] = function(event: ConcurrenceEvent) {
+			if (channelId >= 0) {
 				logOrdering("server", "message", channelId);
 				enteringCallback();
 				callback.apply(null, event.slice(1));
 				if (shouldFlushMicroTasks) {
 					flushMicroTasks();
 				}
-			};
-		}
+			}
+		};
 		return {
 			channelId,
 			send: function(this: ConcurrenceChannel) {
 				if (this.channelId >= 0) {
 					const message = roundTrip(slice.call(arguments));
-					const args = message.slice();
 					message.unshift(this.channelId);
-					const promise = resolvedPromise.then(escaping(() => sendEvent(message, batched)));
-					if (!allowMultiple) {
-						promise.then(() => {
-							// Finally send event if a destroy call hasn't won the race
-							if (this.channelId >= 0) {
-								logOrdering("client", "message", this.channelId);
-								enteringCallback();
-								(callback as any as Function).apply(null, roundTrip(args));
-							}
-						});
-						if (shouldFlushMicroTasks) {
-							flushMicroTasks();
-						}
-					}
+					resolvedPromise.then(escaping(() => sendEvent(message, batched)));
 				}
 			} as any as T,
 			close() {
-				if (this.channelId >= 0) {
+				if (channelId >= 0) {
 					delete pendingLocalChannels[channelId];
 					logOrdering("client", "close", this.channelId);
-					this.channelId = -1;
+					this.channelId = channelId = -1;
 				}
 			}
 		};
@@ -952,6 +959,14 @@ namespace concurrence {
 		};
 
 		return Promise;
+	}
+
+	export function shareSession() : PromiseLike<string> {
+		if (!allowMultiple) {
+			allowMultiple = true;
+			sendAllEvents = true;
+		}
+		return observeClientPromise(serverURL + "?sessionID=" + sessionID);
 	}
 
 }
