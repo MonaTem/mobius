@@ -307,16 +307,15 @@ namespace concurrence {
 		if (channelId < 0) {
 			// Fenced client-side event
 			channelId = -channelId;
-			if (allowMultiple) {
-				channel = pendingLocalChannels[channelId];
-			} else {
-				for (let i = 0; i < fencedLocalEvents.length; i++) {
-					if (fencedLocalEvents[i][0] == channelId) {
-						channel = fencedLocalEvents[i][1];
-						fencedLocalEvents.splice(i, 1);
-						break;
-					}
+			for (let i = 0; i < fencedLocalEvents.length; i++) {
+				if (fencedLocalEvents[i][0] == channelId) {
+					channel = fencedLocalEvents[i][1];
+					fencedLocalEvents.splice(i, 1);
+					break;
 				}
+			}
+			if (!channel && allowMultiple) {
+				channel = pendingLocalChannels[channelId];
 			}
 			// Apply batching
 			if (totalBatched && isBatched[channelId] && ((--totalBatched) == 0)) {
