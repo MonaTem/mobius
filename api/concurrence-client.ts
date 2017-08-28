@@ -201,7 +201,7 @@ namespace concurrence {
 	let localChannelCounter = 0;
 	let queuedLocalEvents: ConcurrenceEvent[] = [];
 	const fencedLocalEvents: [number, (event: ConcurrenceEvent) => void][] = [];
-	const pendingLocalChannels: { [channelId: number]: (event?: ConcurrenceEvent) => void; } = {};
+	const pendingLocalChannels: { [channelId: number]: (event: ConcurrenceEvent) => void; } = {};
 	let totalBatched = 0;
 	let isBatched: { [channelId: number]: true } = {};
 	let pendingBatchedActions: (() => void)[] = [];
@@ -303,7 +303,7 @@ namespace concurrence {
 
 	function dispatchEvent(event: ConcurrenceEvent) : PromiseLike<void> | undefined {
 		let channelId = event[0];
-		let channel: ((event?: ConcurrenceEvent) => void) | undefined;
+		let channel: ((event: ConcurrenceEvent) => void) | undefined;
 		if (channelId < 0) {
 			// Fenced client-side event
 			channelId = -channelId;
@@ -563,11 +563,11 @@ namespace concurrence {
 		};
 	}
 
-	function sendEvent(event: ConcurrenceEvent, batched?: boolean, skipsFencing?: boolean) : PromiseLike<ConcurrenceEvent | void> {
+	function sendEvent(event: ConcurrenceEvent, batched?: boolean, skipsFencing?: boolean) : PromiseLike<ConcurrenceEvent> {
 		if (dead) {
-			return resolvedPromise;
+			return Promise.resolve(event);
 		}
-		const result = new Promise<ConcurrenceEvent | void>((resolve, reject) => {
+		const result = new Promise<ConcurrenceEvent>((resolve, reject) => {
 			if ((pendingChannelCount || allowMultiple) && !skipsFencing) {
 				// Let server decide on the ordering of events since server-side channels are active
 				const channelId = event[0];
@@ -579,7 +579,7 @@ namespace concurrence {
 				event[0] = -channelId;
 			} else {
 				// No pending server-side channels, resolve immediately
-				resolve();
+				resolve(event);
 			}
 		});
 		// Queue an event to be sent to the server in the next flush
@@ -685,23 +685,29 @@ namespace concurrence {
 	}
 
 	export function observeClientPromise<T extends ConcurrenceJsonValue | void>(value: PromiseLike<T> | T) : PromiseLike<T> {
-		let channelId = ++localChannelCounter;
-		logOrdering("client", "open", channelId);
-		return Promise.resolve(value).then(value => {
-			return resolvedPromise.then(escaping(() => sendEvent(eventForValue(channelId, value), true))).then(() => {
-				logOrdering("client", "message", channelId);
-				logOrdering("client", "close", channelId);
-				let roundtripped = roundTrip(value);
-				enteringCallback();
-				return roundtripped;
-			});
-		}, error => {
-			return resolvedPromise.then(escaping(() => sendEvent(eventForException(channelId, error), true))).then(() => {
-				logOrdering("client", "message", channelId);
-				logOrdering("client", "close", channelId);
-				enteringCallback();
-				return Promise.reject(error) as any as T;
-			});
+		return new Promise<T>((resolve, reject) => {
+			let channelId = ++localChannelCounter;
+			logOrdering("client", "open", channelId);
+			let resolved = false;
+			const finish = function(event: ConcurrenceEvent) {
+				if (event && !resolved) {
+					resolved = true;
+					parseValueEvent(event, value => {
+						logOrdering("client", "message", channelId);
+						logOrdering("client", "close", channelId);
+						resolve(value as T);
+					}, error => {
+						logOrdering("client", "message", channelId);
+						logOrdering("client", "close", channelId);
+						reject(error);
+					});
+				}
+			}
+			pendingLocalChannels[channelId] = finish;
+			Promise.resolve(value).then(
+				value => escaping(() => sendEvent(eventForValue(channelId, value), true)),
+				error => escaping(() => sendEvent(eventForException(channelId, error), true))
+			);
 		});
 	};
 
@@ -712,12 +718,10 @@ namespace concurrence {
 		const channelId: number = ++localChannelCounter;
 		logOrdering("client", "open", channelId);
 		if (allowMultiple) {
-			pendingLocalChannels[channelId] = function(event?: ConcurrenceEvent) {
+			pendingLocalChannels[channelId] = function(event: ConcurrenceEvent) {
 				logOrdering("server", "message", channelId);
-				if (event) {
-					enteringCallback();
-					callback.apply(null, event.slice(1));
-				}
+				enteringCallback();
+				callback.apply(null, event.slice(1));
 				if (shouldFlushMicroTasks) {
 					flushMicroTasks();
 				}
