@@ -167,10 +167,30 @@ namespace concurrence {
 	let willSynchronizeChannels : boolean = false;
 	let currentEvents: ConcurrenceEvent[] | undefined;
 
+	// Maintain whether or not inside callback
 	let dispatchingEvent = 1;
+	let dispatchingAPIImplementation: number = 0;
 	export let insideCallback: boolean = true;
+	function updateInsideCallback() {
+		insideCallback = dispatchingEvent != 0 && dispatchingAPIImplementation == 0;
+	}
+	function insideAPIImplementation<T>(block: () => T) : T {
+		dispatchingAPIImplementation++;
+		insideCallback = false;
+		try {
+			const result = block();
+			dispatchingAPIImplementation--;
+			updateInsideCallback();
+			return result;
+		} catch (e) {
+			dispatchingAPIImplementation--;
+			updateInsideCallback();
+			throw e;
+		}
+	}
 	function exitCallback() {
-		insideCallback = (dispatchingEvent--) != 0;
+		dispatchingEvent--;
+		updateInsideCallback();
 	}
 
 	// Session state
@@ -620,6 +640,9 @@ namespace concurrence {
 			if (dead) {
 				return reject(new Error("Session has been disconnected!"));
 			}
+			if (!insideCallback) {
+				return reject(new Error("Unable to create server promise in this context!"));
+			}
 			const channel = createRawServerChannel(event => {
 				channel.close();
 				enteringCallback();
@@ -633,6 +656,9 @@ namespace concurrence {
 	export function createServerChannel<T extends Function>(callback: T): ConcurrenceChannel {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
+		}
+		if (!insideCallback) {
+			throw new Error("Unable to create server channel in this context!");
 		}
 		const channel = createRawServerChannel(event => {
 			if (event) {
@@ -697,6 +723,9 @@ namespace concurrence {
 	}
 
 	export function createClientPromise<T extends ConcurrenceJsonValue | void>(ask: () => (PromiseLike<T> | T)) : PromiseLike<T> {
+		if (!insideCallback) {
+			return new Promise<T>(resolve => resolve(insideAPIImplementation(ask)));
+		}
 		return new Promise<T>((resolve, reject) => {
 			let channelId = ++localChannelCounter;
 			logOrdering("client", "open", channelId);
@@ -724,13 +753,7 @@ namespace concurrence {
 				}
 			}
 			// Resolve value
-			let result: PromiseLike<T>;
-			try {
-				result = Promise.resolve(ask());
-			} catch (e) {
-				result = Promise.reject(e);
-			}
-			result.then(
+			new Promise<T>(resolve => resolve(insideAPIImplementation(ask))).then(
 				escaping((value: T) => sendEvent(eventForValue(channelId, value))),
 				escaping((error: any) => sendEvent(eventForException(channelId, error)))
 			);
@@ -740,6 +763,36 @@ namespace concurrence {
 	export function createClientChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, batched?: boolean, shouldFlushMicroTasks?: true) : ConcurrenceChannel {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
+		}
+		let state: U | undefined;
+		if (!insideCallback) {
+			let open = true;
+			try {
+				const potentialState = insideAPIImplementation(() => onOpen(function() {
+					if (open) {
+						callback.apply(null, Array.prototype.slice.call(arguments));
+					}
+				} as any as T));
+				if (onClose) {
+					state = potentialState;
+				}
+			} catch (e) {
+				onClose = undefined;
+				escape(e);
+			}
+			return {
+				channelId: -1,
+				close() {
+					if (open) {
+						open = false;
+						try {
+							insideAPIImplementation(() => onClose && onClose(state as U));
+						} catch (e) {
+							escape(e);
+						}
+					}
+				}
+			};
 		}
 		let channelId: number = ++localChannelCounter;
 		pendingLocalChannels[channelId] = function(event: ConcurrenceEvent) {
@@ -752,24 +805,34 @@ namespace concurrence {
 				}
 			}
 		};
-		const state = onOpen(function(this: ConcurrenceChannel) {
-			if (channelId >= 0) {
-				const message = roundTrip(slice.call(arguments));
-				message.unshift(channelId);
-				resolvedPromise.then(escaping(() => sendEvent(message, batched)));
+		try {
+			const potentialState = insideAPIImplementation(() => onOpen(function() {
+				if (channelId >= 0) {
+					const message = roundTrip(slice.call(arguments));
+					message.unshift(channelId);
+					resolvedPromise.then(escaping(() => sendEvent(message, batched)));
+				}
+			} as any as T));
+			if (onClose) {
+				state = potentialState;
 			}
-		} as any as T);
+		} catch (e) {
+			onClose = undefined;
+			escape(e);
+		}
 		logOrdering("client", "open", channelId);
 		return {
 			channelId,
 			close() {
 				if (channelId >= 0) {
-					if (onClose) {
-						onClose(state);
-					}
 					delete pendingLocalChannels[channelId];
 					logOrdering("client", "close", this.channelId);
 					this.channelId = channelId = -1;
+					try {
+						insideAPIImplementation(() => onClose && onClose(state as U));
+					} catch (e) {
+						escape(e);
+					}
 				}
 			}
 		};
@@ -974,6 +1037,7 @@ namespace concurrence {
 		if (!allowMultiple) {
 			allowMultiple = true;
 			sendAllEvents = true;
+			flush();
 		}
 		return serverURL + "?sessionID=" + sessionID;
 	});

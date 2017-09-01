@@ -537,6 +537,7 @@ class ConcurrenceSession {
 	pendingChannels: { [channelId: number]: (event?: ConcurrenceEvent) => void; } = {};
 	pendingChannelCount: number = 0;
 	dispatchingEvent: number = 0;
+	dispatchingAPIImplementation: number = 0;
 	context: ConcurrenceSandboxContext;
 	pageRenderer: ConcurrencePageRenderer;
 	currentEvents: ConcurrenceEvent[] | undefined;
@@ -560,6 +561,9 @@ class ConcurrenceSession {
 		context.concurrence = {
 			disconnect: this.destroy,
 			whenDisconnected: new Promise(resolve => this.sendWhenDisconnected = resolve),
+			get insideCallback() {
+				return this.insideCallback;
+			},
 			secrets: secrets,
 			dead: false,
 			createClientPromise: this.createClientPromise.bind(this),
@@ -658,22 +662,29 @@ class ConcurrenceSession {
 		this.enterLocalChannel();
 		return this.run().then(defer).then(escaping(this.exitLocalChannel.bind(this)));
 	}
+	get insideCallback() {
+		return this.dispatchingEvent != 0 && this.dispatchingAPIImplementation == 0;
+	}
 	enteringCallback() {
 		this.dispatchingEvent++;
-		this.context.concurrence.insideCallback = true;
-		defer().then(() => this.context.concurrence.insideCallback = (this.dispatchingEvent--) != 0);
+		defer().then(() => this.dispatchingEvent--);
 	}
 	createServerPromise<T extends ConcurrenceJsonValue | void>(ask: () => (PromiseLike<T> | T), includedInPrerender: boolean = true): PromiseLike<T> {
+		if (!this.insideCallback) {
+			return new Promise(resolve => resolve(ask()));
+		}
 		// Record and ship values/errors of server-side promises
 		this.enterLocalChannel(includedInPrerender);
 		const channelId = ++this.localChannelCounter;
 		logOrdering("server", "open", channelId, this);
+		this.dispatchingAPIImplementation++;
 		let result: PromiseLike<T>;
 		try {
 			result = Promise.resolve(ask());
 		} catch (e) {
 			result = Promise.reject(e);
 		}
+		this.dispatchingAPIImplementation--;
 		return result.then(value => {
 			return resolvedPromise.then(escaping(() => this.sendEvent(eventForValue(channelId, value)))).then(() => {
 				logOrdering("server", "message", channelId, this);
@@ -697,43 +708,86 @@ class ConcurrenceSession {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
+		let state: U | undefined;
+		if (!this.insideCallback) {
+			// Not coordinating
+			let open = true;
+			try {
+				const potentialState = onOpen(function() {
+					if (!closed) {
+						callback.apply(null, arguments);
+					}
+				} as any as T);
+				if (onClose) {
+					state = potentialState;
+				}
+			} catch (e) {
+				onClose = undefined;
+				escape(e);
+			}
+			return {
+				channelId: -1,
+				close() {
+					if (open) {
+						open = false;
+						if (onClose) {
+							session.dispatchingAPIImplementation++;
+							escaping(onClose)(state as U);
+							session.dispatchingAPIImplementation--;
+						}
+					}
+				}
+			};
+		}
 		// Record and ship arguments of server-side events
 		const session = this;
 		session.enterLocalChannel(includedInPrerender);
 		let channelId = ++session.localChannelCounter;
-		const state = onOpen(function() {
-			if (channelId >= 0) {
-				let args = roundTrip([...arguments]);
-				resolvedPromise.then(escaping(() => session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent))).then(() => {
-					logOrdering("server", "message", channelId, session);
-					session.enteringCallback();
-					(callback as any as Function).apply(null, args)
-				});
-			}
-		} as any as T);
 		logOrdering("server", "open", channelId, this);
+		try {
+			this.dispatchingAPIImplementation++;
+			const potentialState = onOpen(function() {
+				if (channelId >= 0) {
+					let args = roundTrip([...arguments]);
+					resolvedPromise.then(escaping(() => session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent))).then(() => {
+						logOrdering("server", "message", channelId, session);
+						session.enteringCallback();
+						(callback as any as Function).apply(null, args)
+					});
+				}
+			} as any as T);
+			if (onClose) {
+				state = potentialState
+			}
+			this.dispatchingAPIImplementation--;
+		} catch (e) {
+			this.dispatchingAPIImplementation--;
+			onClose = undefined;
+			escape(e);
+		}
 		return {
 			channelId,
 			close() {
-				if (this.channelId >= 0) {
-					if (onClose) {
-						onClose(state);
-					}
+				if (channelId >= 0) {
 					logOrdering("server", "close", this.channelId, session);
-					this.channelId = -1;
-					channelId = -1;
+					this.channelId = channelId = -1;
 					resolvedPromise.then(escaping(() => {
 						if (session.exitLocalChannel(includedInPrerender) == 0) {
 							// If this was the last server channel, reevaluate queued events so the session can be potentially collected
 							session.scheduleSynchronize();
 						}
 					}));
+					if (onClose) {
+						session.dispatchingAPIImplementation++;
+						escaping(onClose)(state as U);
+						session.dispatchingAPIImplementation--;
+					}
 				}
 			}
 		};
 	}
 
-	createRawRemoteChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
+	createRawClientChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
 		const session = this;
 		session.pendingChannelCount++;
 		const channelId = ++session.remoteChannelCounter;
@@ -756,10 +810,13 @@ class ConcurrenceSession {
 	}
 	createClientPromise<T extends ConcurrenceJsonValue>() {
 		return new Promise<T>((resolve, reject) => {
+			if (!this.insideCallback) {
+				return reject(new Error("Unable to create client promise in this context!"));
+			}
 			if (this.dead) {
 				return reject(new Error("Session has been disconnected!"));
 			}
-			const channel = this.createRawRemoteChannel(event => {
+			const channel = this.createRawClientChannel(event => {
 				channel.close();
 				this.enteringCallback();
 				parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
@@ -770,7 +827,10 @@ class ConcurrenceSession {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
-		const channel = this.createRawRemoteChannel(event => {
+		if (!this.insideCallback) {
+			throw new Error("Unable to create client channel in this context!");
+		}
+		const channel = this.createRawClientChannel(event => {
 			if (event) {
 				event.shift();
 				this.enteringCallback();
@@ -783,7 +843,7 @@ class ConcurrenceSession {
 	}
 
 	coordinateValue<T extends ConcurrenceJsonValue>(generator: () => T) : T {
-		if (!this.dispatchingEvent) {
+		if (!this.insideCallback) {
 			return generator();
 		}
 		let value: T;
