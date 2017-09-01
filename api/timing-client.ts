@@ -73,7 +73,7 @@ namespace concurrence {
 			return realSetInterval(callback, delay);
 		}
 		const result = --currentTimerId;
-		timers[result] = concurrence.receiveServerEventStream(callback);
+		timers[result] = createServerChannel(callback);
 		return result;
 	};
 
@@ -98,7 +98,7 @@ namespace concurrence {
 			return realSetTimeout(callback, delay);
 		}
 		const result = --currentTimerId;
-		timers[result] = concurrence.receiveServerEventStream(callback);
+		timers[result] = createServerChannel(callback);
 		return result;
 	};
 

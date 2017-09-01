@@ -557,18 +557,17 @@ class ConcurrenceSession {
 			body: { value: this.pageRenderer.body }
 		});
 		context.request = request;
-		const observeServerPromise = this.observeLocalPromise.bind(this);
 		context.concurrence = {
 			disconnect: this.destroy,
 			whenDisconnected: new Promise(resolve => this.sendWhenDisconnected = resolve),
 			secrets: secrets,
 			dead: false,
-			receiveClientPromise: this.receiveRemotePromise.bind(this),
-			observeServerPromise,
-			receiveClientEventStream: this.receiveRemoteEventStream.bind(this),
-			observeServerEventCallback: this.observeLocalEventCallback.bind(this),
+			createClientPromise: this.createClientPromise.bind(this),
+			createServerPromise: this.createServerPromise.bind(this),
+			createClientChannel: this.createClientChannel.bind(this),
+			createServerChannel: this.createServerChannel.bind(this),
 			coordinateValue: this.coordinateValue.bind(this),
-			synchronize: observeServerPromise as () => PromiseLike<void>,
+			synchronize: () => this.createServerPromise(() => undefined),
 			showDeterminismWarning: showDeterminismWarning
 		};
 		this.context = context;
@@ -618,6 +617,7 @@ class ConcurrenceSession {
 		}
 		const channel = this.pendingChannels[channelId];
 		if (channel) {
+			logOrdering("client", "message", channelId, this);
 			channel(event);
 		} else {
 			// Client-side event source was destroyed on the server between the time it generated an event and the time the server received it
@@ -663,12 +663,18 @@ class ConcurrenceSession {
 		this.context.concurrence.insideCallback = true;
 		defer().then(() => this.context.concurrence.insideCallback = (this.dispatchingEvent--) != 0);
 	}
-	observeLocalPromise<T extends ConcurrenceJsonValue>(value: PromiseLike<T> | T, includedInPrerender: boolean = true): PromiseLike<T> {
+	createServerPromise<T extends ConcurrenceJsonValue | void>(ask: () => (PromiseLike<T> | T), includedInPrerender: boolean = true): PromiseLike<T> {
 		// Record and ship values/errors of server-side promises
 		this.enterLocalChannel(includedInPrerender);
 		const channelId = ++this.localChannelCounter;
 		logOrdering("server", "open", channelId, this);
-		return Promise.resolve(value).then(value => {
+		let result: PromiseLike<T>;
+		try {
+			result = Promise.resolve(ask());
+		} catch (e) {
+			result = Promise.reject(e);
+		}
+		return result.then(value => {
 			return resolvedPromise.then(escaping(() => this.sendEvent(eventForValue(channelId, value)))).then(() => {
 				logOrdering("server", "message", channelId, this);
 				logOrdering("server", "close", channelId, this);
@@ -687,7 +693,7 @@ class ConcurrenceSession {
 			});
 		});
 	}
-	observeLocalEventCallback<T extends Function>(callback: T, includedInPrerender: boolean = true): ConcurrenceLocalChannel<T> {
+	createServerChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender: boolean = true): ConcurrenceChannel {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
@@ -695,21 +701,24 @@ class ConcurrenceSession {
 		const session = this;
 		session.enterLocalChannel(includedInPrerender);
 		let channelId = ++session.localChannelCounter;
+		const state = onOpen(function() {
+			if (channelId >= 0) {
+				let args = roundTrip([...arguments]);
+				resolvedPromise.then(escaping(() => session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent))).then(() => {
+					logOrdering("server", "message", channelId, session);
+					session.enteringCallback();
+					(callback as any as Function).apply(null, args)
+				});
+			}
+		} as any as T);
 		logOrdering("server", "open", channelId, this);
 		return {
 			channelId,
-			send: function() {
-				if (channelId >= 0) {
-					let args = roundTrip([...arguments]);
-					resolvedPromise.then(escaping(() => session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent))).then(() => {
-						logOrdering("server", "message", channelId, session);
-						session.enteringCallback();
-						(callback as any as Function).apply(null, args)
-					});
-				}
-			} as any as T,
 			close() {
 				if (this.channelId >= 0) {
+					if (onClose) {
+						onClose(state);
+					}
 					logOrdering("server", "close", this.channelId, session);
 					this.channelId = -1;
 					channelId = -1;
@@ -724,19 +733,12 @@ class ConcurrenceSession {
 		};
 	}
 
-	registerRemoteChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
+	createRawRemoteChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
 		const session = this;
 		session.pendingChannelCount++;
 		const channelId = ++session.remoteChannelCounter;
 		logOrdering("client", "open", channelId, this);
-		// this.pendingChannels[channelId] = callback;
-		session.pendingChannels[channelId] = function() {
-			let args = [...arguments];
-			resolvedPromise.then(() => {
-				logOrdering("client", "message", channelId, session);
-				callback.apply(null, args);
-			});
-		};
+		this.pendingChannels[channelId] = callback;
 		return {
 			channelId,
 			close() {
@@ -752,23 +754,23 @@ class ConcurrenceSession {
 			}
 		};
 	}
-	receiveRemotePromise<T extends ConcurrenceJsonValue>() {
+	createClientPromise<T extends ConcurrenceJsonValue>() {
 		return new Promise<T>((resolve, reject) => {
 			if (this.dead) {
 				return reject(new Error("Session has been disconnected!"));
 			}
-			const channel = this.registerRemoteChannel(event => {
+			const channel = this.createRawRemoteChannel(event => {
 				channel.close();
 				this.enteringCallback();
 				parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
 			});
 		});
 	}
-	receiveRemoteEventStream<T extends Function>(callback: T): ConcurrenceChannel {
+	createClientChannel<T extends Function>(callback: T): ConcurrenceChannel {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
-		const channel = this.registerRemoteChannel(event => {
+		const channel = this.createRawRemoteChannel(event => {
 			if (event) {
 				event.shift();
 				this.enteringCallback();

@@ -3,10 +3,6 @@ interface ConcurrenceChannel {
 	close(): void;
 }
 
-interface ConcurrenceLocalChannel<T extends Function> extends ConcurrenceChannel {
-	send: T; // return type of T should be void
-}
-
 interface ConcurrenceJsonMap {
 	[key: string]: ConcurrenceJsonValue;
 }

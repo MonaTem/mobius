@@ -23,7 +23,7 @@ namespace concurrence {
 			return Promise.resolve(pool);
 		}
 		export function execute(host: string, sql: string, ...params: any[]) : Promise<ExecuteResult> {
-			return concurrence.observeServerPromise(getPool(host).then(pool => new Promise<ExecuteResult & ConcurrenceJsonMap>((resolve, reject) => {
+			return createServerPromise(() => getPool(host).then(pool => new Promise<ExecuteResult & ConcurrenceJsonMap>((resolve, reject) => {
 				pool.query({
 					sql: sql,
 					values: params

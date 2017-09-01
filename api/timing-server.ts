@@ -77,15 +77,8 @@ namespace concurrence {
 			return realSetInterval(callback, delay);
 		}
 		registerCleanup();
-		const channel = concurrence.observeServerEventCallback(callback, false);
-		const realIntervalId = realSetInterval(channel.send.bind(channel), delay);
 		const result = --currentTimerId;
-		const close = channel.close;
-		channel.close = function(this: ConcurrenceChannel) {
-			realClearInterval(realIntervalId);
-			close.call(this);
-		};
-		timers[result] = channel;
+		timers[result] = createServerChannel(callback, send => realSetInterval(send, delay), realClearInterval, false);
 		return result as any as NodeJS.Timer;
 	};
 
@@ -110,22 +103,15 @@ namespace concurrence {
 			return realSetTimeout(callback, delay);
 		}
 		registerCleanup();
-		const channel = concurrence.observeServerEventCallback(callback, false);
-		const realTimeoutId = realSetTimeout(() => {
-			channel.send();
-			channel.close();
-		}, delay);
 		const result = --currentTimerId;
-		const close = channel.close;
-		channel.close = function(this: ConcurrenceChannel) {
-			realClearTimeout(realTimeoutId);
-			close.call(this);
-		};
-		timers[result] = channel;
+		timers[result] = createServerChannel(callback, send => realSetTimeout(() => {
+			send();
+			realClearTimeout(result as any as NodeJS.Timer);
+		}, delay), realClearTimeout, false);
 		return result as any as NodeJS.Timer;
 	};
 
-	self.clearInterval = function(timeoutId: NodeJS.Timer) {
+	self.clearTimeout = function(timeoutId: NodeJS.Timer) {
 		if (typeof timeoutId == "number" && timeoutId < 0) {
 			const channel = timers[timeoutId];
 			if (channel) {

@@ -15,23 +15,22 @@ namespace concurrence {
 		}
 	}
 	export function receive(topic: string, callback: (message: ConcurrenceJsonValue) => void): ConcurrenceChannel {
-		const channel = concurrence.observeServerEventCallback<typeof callback>(callback, false);
 		const topics = global.observers || (global.observers = {});
-		const observers = Object.hasOwnProperty.call(topics, topic) ? topics[topic] : (topics[topic] = []);
-		const dispatch = (message: ConcurrenceJsonValue) => channel.send(message);
-		observers.push(dispatch);
-		const close = channel.close;
-		channel.close = function() {
-			// Cleanup when unregistering
-			const index = observers.indexOf(dispatch);
-			if (index != -1) {
-				observers.splice(index, 1);
+		return createServerChannel(callback, send => {
+			const observers = Object.hasOwnProperty.call(topics, topic) ? topics[topic] : (topics[topic] = []);
+			observers.push(send);
+			return send;
+		}, send => {
+			if (Object.hasOwnProperty.call(topics, topic)) {
+				const observers = topics[topic];
+				const index = observers.indexOf(send);
+				if (index != -1) {
+					observers.splice(index, 1);
+				}
+				if (observers.length == 0) {
+					delete topics[topic];
+				}
 			}
-			if (observers.length == 0) {
-				delete topics[topic];
-			}
-			return close.apply(this, arguments);
-		};
-		return channel;
+		}, false);
 	}
 }

@@ -552,7 +552,7 @@ namespace concurrence {
 		}
 	}
 
-	function registerRemoteChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
+	function createRawServerChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
 		// Expect that the server will run some code in parallel that provides data
 		pendingChannelCount++;
 		const channelId = ++remoteChannelCounter;
@@ -615,12 +615,12 @@ namespace concurrence {
 	}
 
 	// APIs for client/, not to be used inside src/
-	export function receiveServerPromise<T extends ConcurrenceJsonValue>(...args: any[]) : PromiseLike<T> { // Must be cast to the proper signature
+	export function createServerPromise<T extends ConcurrenceJsonValue>(...args: any[]) : PromiseLike<T> { // Must be cast to the proper signature
 		return new Promise<T>((resolve, reject) => {
 			if (dead) {
 				return reject(new Error("Session has been disconnected!"));
 			}
-			const channel = registerRemoteChannel(event => {
+			const channel = createRawServerChannel(event => {
 				channel.close();
 				enteringCallback();
 				parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
@@ -628,13 +628,13 @@ namespace concurrence {
 		});
 	};
 
-	export const synchronize = receiveServerPromise as () => PromiseLike<void>;
+	export const synchronize = createServerPromise as () => PromiseLike<void>;
 
-	export function receiveServerEventStream<T extends Function>(callback: T): ConcurrenceChannel {
+	export function createServerChannel<T extends Function>(callback: T): ConcurrenceChannel {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
-		const channel = registerRemoteChannel(event => {
+		const channel = createRawServerChannel(event => {
 			if (event) {
 				enteringCallback();
 				callback.apply(null, event.slice(1));
@@ -696,7 +696,7 @@ namespace concurrence {
 		return reject(value);
 	}
 
-	export function observeClientPromise<T extends ConcurrenceJsonValue | void>(value: PromiseLike<T> | T) : PromiseLike<T> {
+	export function createClientPromise<T extends ConcurrenceJsonValue | void>(ask: () => (PromiseLike<T> | T)) : PromiseLike<T> {
 		return new Promise<T>((resolve, reject) => {
 			let channelId = ++localChannelCounter;
 			logOrdering("client", "open", channelId);
@@ -724,19 +724,24 @@ namespace concurrence {
 				}
 			}
 			// Resolve value
-			Promise.resolve(value).then(
+			let result: PromiseLike<T>;
+			try {
+				result = Promise.resolve(ask());
+			} catch (e) {
+				result = Promise.reject(e);
+			}
+			result.then(
 				escaping((value: T) => sendEvent(eventForValue(channelId, value))),
 				escaping((error: any) => sendEvent(eventForException(channelId, error)))
 			);
 		});
 	};
 
-	export function observeClientEventCallback<T extends Function>(callback: T, batched?: boolean, shouldFlushMicroTasks?: true) : ConcurrenceLocalChannel<T> {
+	export function createClientChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, batched?: boolean, shouldFlushMicroTasks?: true) : ConcurrenceChannel {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
 		let channelId: number = ++localChannelCounter;
-		logOrdering("client", "open", channelId);
 		pendingLocalChannels[channelId] = function(event: ConcurrenceEvent) {
 			if (channelId >= 0) {
 				logOrdering("server", "message", channelId);
@@ -747,17 +752,21 @@ namespace concurrence {
 				}
 			}
 		};
+		const state = onOpen(function(this: ConcurrenceChannel) {
+			if (channelId >= 0) {
+				const message = roundTrip(slice.call(arguments));
+				message.unshift(channelId);
+				resolvedPromise.then(escaping(() => sendEvent(message, batched)));
+			}
+		} as any as T);
+		logOrdering("client", "open", channelId);
 		return {
 			channelId,
-			send: function(this: ConcurrenceChannel) {
-				if (this.channelId >= 0) {
-					const message = roundTrip(slice.call(arguments));
-					message.unshift(this.channelId);
-					resolvedPromise.then(escaping(() => sendEvent(message, batched)));
-				}
-			} as any as T,
 			close() {
 				if (channelId >= 0) {
+					if (onClose) {
+						onClose(state);
+					}
 					delete pendingLocalChannels[channelId];
 					logOrdering("client", "close", this.channelId);
 					this.channelId = channelId = -1;
@@ -961,12 +970,12 @@ namespace concurrence {
 		return Promise;
 	}
 
-	export function shareSession() : PromiseLike<string> {
+	export const shareSession = () => createClientPromise(() => {
 		if (!allowMultiple) {
 			allowMultiple = true;
 			sendAllEvents = true;
 		}
-		return observeClientPromise(serverURL + "?sessionID=" + sessionID);
-	}
+		return serverURL + "?sessionID=" + sessionID;
+	});
 
 }
