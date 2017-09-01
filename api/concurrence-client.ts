@@ -31,12 +31,11 @@ namespace concurrence {
 			}
 		}
 		// Try a <script> tag's onreadystatechange
-		let script: any = document.createElement("script");
-		if ("onreadystatechange" in script) {
+		if ("onreadystatechange" in document.createElement("script")) {
 			return () => {
+				const script = document.createElement("script");
 				(script as any).onreadystatechange = () => {
 					document.head.removeChild(script);
-					script = document.createElement("script")
 					flushTasks();
 				}
 				document.head.appendChild(script);
