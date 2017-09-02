@@ -1,6 +1,7 @@
 ///<reference types="preact"/>
 namespace concurrence {
 	const setTimeout = window.setTimeout;
+	const clearTimeout = window.clearTimeout;
 
 	type Task = () => void;
 	function isPromiseLike<T>(value: T | PromiseLike<T> | undefined) : value is PromiseLike<T> {
@@ -173,7 +174,17 @@ namespace concurrence {
 	function updateInsideCallback() {
 		insideCallback = dispatchingEvent != 0 && dispatchingAPIImplementation == 0;
 	}
-	function insideAPIImplementation<T>(block: () => T) : T {
+	function willEnterCallback() {
+		dispatchingEvent++;
+		insideCallback = true;
+		defer().then(didExitCallback);
+	}
+	function didExitCallback() {
+		dispatchingEvent--;
+		updateInsideCallback();
+	}
+
+	function runAPIImplementation<T>(block: () => T) : T {
 		dispatchingAPIImplementation++;
 		insideCallback = false;
 		try {
@@ -187,22 +198,19 @@ namespace concurrence {
 			throw e;
 		}
 	}
-	function exitCallback() {
-		dispatchingEvent--;
-		updateInsideCallback();
-	}
 
 	// Session state
+	const startupScripts = document.getElementsByTagName("script");
 	const bootstrapData = (elements => {
-		for (let i = 0; i < elements.length; i++) {
-			const element = elements[i];
+		for (let i = 0; i < startupScripts.length; i++) {
+			const element = startupScripts[i];
 			if (element.getAttribute("type") == "application/x-concurrence-bootstrap") {
 				element.parentNode!.removeChild(element);
 				return JSON.parse(element.textContent || element.innerHTML) as Partial<BootstrapData>;
 			}
 		}
 		return {} as Partial<BootstrapData>;
-	})(document.getElementsByTagName("script"));
+	})();
 	const hasBootstrap = "sessionID" in bootstrapData;
 	let sessionID: string | undefined = hasBootstrap ? bootstrapData.sessionID : uuid();
 	const clientID = (bootstrapData.clientID as number) | 0;
@@ -239,6 +247,17 @@ namespace concurrence {
 	let WebSocketClass = (window as any).WebSocket as typeof WebSocket | undefined;
 	let websocket: WebSocket | undefined;
 
+	const afterLoaded = new Promise(resolve => {
+		for (let i = 0; i < startupScripts.length; i++) {
+			const element = startupScripts[i];
+			if (/\/client\.js$/.test(element.src)) {
+				element.addEventListener("load", resolve, false);
+				return;
+			}
+		}
+		window.addEventListener("load", resolve, false);
+	}).then(defer);
+
 	if (hasBootstrap) {
 		++outgoingMessageId;
 		const concurrenceForm = document.getElementById("concurrence-form") as HTMLFormElement;
@@ -248,9 +267,9 @@ namespace concurrence {
 		currentEvents = bootstrapData.events || [];
 		hadOpenServerChannel = true;
 		willSynchronizeChannels = true;
-		defer().then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(exitCallback).then(escaping(synchronizeChannels));
+		afterLoaded.then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(didExitCallback).then(escaping(synchronizeChannels));
 	} else {
-		defer().then(exitCallback);
+		afterLoaded.then(didExitCallback);
 	}
 
 	function produceMessage() : Partial<ConcurrenceClientMessage> {
@@ -578,6 +597,7 @@ namespace concurrence {
 		logOrdering("server", "open", channelId);
 		pendingChannels[channelId] = function(event?: ConcurrenceEvent) {
 			logOrdering("server", "message", channelId);
+			willEnterCallback();
 			callback(event);
 		}
 		flush();
@@ -628,11 +648,6 @@ namespace concurrence {
 		}
 	}
 
-	function enteringCallback() {
-		dispatchingEvent++;
-		defer().then(exitCallback);
-	}
-
 	// APIs for client/, not to be used inside src/
 	export function createServerPromise<T extends ConcurrenceJsonValue>(...args: any[]) : PromiseLike<T> { // Must be cast to the proper signature
 		return new Promise<T>((resolve, reject) => {
@@ -644,7 +659,6 @@ namespace concurrence {
 			}
 			const channel = createRawServerChannel(event => {
 				channel.close();
-				enteringCallback();
 				parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
 			});
 		});
@@ -661,7 +675,6 @@ namespace concurrence {
 		}
 		const channel = createRawServerChannel(event => {
 			if (event) {
-				enteringCallback();
 				callback.apply(null, event.slice(1));
 			} else {
 				channel.close();
@@ -723,7 +736,7 @@ namespace concurrence {
 
 	export function createClientPromise<T extends ConcurrenceJsonValue | void>(ask: () => (PromiseLike<T> | T)) : PromiseLike<T> {
 		if (!insideCallback) {
-			return new Promise<T>(resolve => resolve(insideAPIImplementation(ask)));
+			return new Promise<T>(resolve => resolve(runAPIImplementation(ask)));
 		}
 		return new Promise<T>((resolve, reject) => {
 			let channelId = ++localChannelCounter;
@@ -731,6 +744,7 @@ namespace concurrence {
 			pendingLocalChannels[channelId] = function(event: ConcurrenceEvent) {
 				if (event) {
 					delete pendingLocalChannels[channelId];
+					willEnterCallback();
 					parseValueEvent(event, value => {
 						logOrdering("client", "message", channelId);
 						logOrdering("client", "close", channelId);
@@ -752,7 +766,7 @@ namespace concurrence {
 				}
 			}
 			// Resolve value
-			new Promise<T>(resolve => resolve(insideAPIImplementation(ask))).then(
+			new Promise<T>(resolve => resolve(runAPIImplementation(ask))).then(
 				escaping((value: T) => sendEvent(eventForValue(channelId, value))),
 				escaping((error: any) => sendEvent(eventForException(channelId, error)))
 			);
@@ -767,7 +781,7 @@ namespace concurrence {
 		if (!insideCallback) {
 			let open = true;
 			try {
-				const potentialState = insideAPIImplementation(() => onOpen(function() {
+				const potentialState = runAPIImplementation(() => onOpen(function() {
 					if (open) {
 						callback.apply(null, Array.prototype.slice.call(arguments));
 					}
@@ -785,7 +799,7 @@ namespace concurrence {
 					if (open) {
 						open = false;
 						try {
-							insideAPIImplementation(() => onClose && onClose(state as U));
+							runAPIImplementation(() => onClose && onClose(state as U));
 						} catch (e) {
 							escape(e);
 						}
@@ -796,8 +810,8 @@ namespace concurrence {
 		let channelId: number = ++localChannelCounter;
 		pendingLocalChannels[channelId] = function(event: ConcurrenceEvent) {
 			if (channelId >= 0) {
-				logOrdering("server", "message", channelId);
-				enteringCallback();
+				logOrdering("client", "message", channelId);
+				willEnterCallback();
 				callback.apply(null, event.slice(1));
 				if (shouldFlushMicroTasks) {
 					flushMicroTasks();
@@ -805,11 +819,11 @@ namespace concurrence {
 			}
 		};
 		try {
-			const potentialState = insideAPIImplementation(() => onOpen(function() {
+			const potentialState = runAPIImplementation(() => onOpen(function() {
 				if (channelId >= 0) {
 					const message = roundTrip(slice.call(arguments));
 					message.unshift(channelId);
-					resolvedPromise.then(escaping(() => sendEvent(message, batched)));
+					resolvedPromise.then(() => sendEvent(message, batched));
 				}
 			} as any as T));
 			if (onClose) {
@@ -828,7 +842,7 @@ namespace concurrence {
 					logOrdering("client", "close", this.channelId);
 					this.channelId = channelId = -1;
 					try {
-						insideAPIImplementation(() => onClose && onClose(state as U));
+						runAPIImplementation(() => onClose && onClose(state as U));
 					} catch (e) {
 						escape(e);
 					}

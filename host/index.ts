@@ -558,11 +558,12 @@ class ConcurrenceSession {
 			body: { value: this.pageRenderer.body }
 		});
 		context.request = request;
+		const session = this;
 		context.concurrence = {
 			disconnect: this.destroy,
 			whenDisconnected: new Promise(resolve => this.sendWhenDisconnected = resolve),
 			get insideCallback() {
-				return this.insideCallback;
+				return session.insideCallback;
 			},
 			secrets: secrets,
 			dead: false,
