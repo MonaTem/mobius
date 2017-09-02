@@ -148,7 +148,7 @@ class ConcurrenceHost {
 	staleSessionTimeout: any;
 	constructor(scriptPath: string, htmlPath: string) {
 		const serverScript = fs.readFileSync(scriptPath).toString();
-		if (sandboxMode == ConcurrenceSandboxMode.Simple) {
+		if (sandboxMode == ConcurrenceSandboxMode.Full) {
 			// Full sandboxing, creating a new global context each time
 			const vmScript = new vm.Script(serverScript, {
 				filename: scriptPath
