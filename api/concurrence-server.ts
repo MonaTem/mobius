@@ -1,5 +1,3 @@
-/// <reference path="../types/reduced-dom.d.ts" />
-
 declare namespace concurrence {
 	export function disconnect(): void;
 	export const whenDisconnected: PromiseLike<void>;

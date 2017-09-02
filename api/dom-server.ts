@@ -1,4 +1,5 @@
 /// <reference types="preact" />
+/// <reference path="../types/reduced-dom.d.ts" />
 
 declare const self: NodeJS.Global;
 
