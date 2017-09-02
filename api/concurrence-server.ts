@@ -11,6 +11,7 @@ declare namespace concurrence {
 	export function createServerChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender?: boolean): ConcurrenceChannel;
 	export function showDeterminismWarning(deprecated: string, instead: string): void;
 	export function coordinateValue<T extends ConcurrenceJsonValue>(generator: () => T) : T;
+	export function shareSession() : PromiseLike<string>;
 
 	export let secrets: { [key: string]: any };
 

@@ -51,6 +51,9 @@ namespace concurrence {
 		return setTimeout.bind(window, flushTasks, 0);
 	})();
 
+	function emptyFunction() {
+	}
+
 	function flushMicroTasks() {
 		let task: Task | undefined;
 		while (task = microTaskQueue.shift()) {
@@ -133,7 +136,6 @@ namespace concurrence {
 		sessionID?: string;
 		clientID?: number;
 		destroy?: true;
-		allEvents?: ConcurrenceEvent[];
 	}
 
 	function logOrdering(from: "client" | "server", type: "open" | "close" | "message", channelId: number) {
@@ -156,7 +158,7 @@ namespace concurrence {
 	interface BootstrapData {
 		sessionID: string;
 		clientID?: number;
-		events?: ConcurrenceEvent[];
+		events?: (ConcurrenceEvent | boolean)[];
 		multiple?: true;
 	}
 
@@ -165,7 +167,7 @@ namespace concurrence {
 	let incomingMessageId = 0;
 	const reorderedMessages : { [messageId: number]: ConcurrenceServerMessage } = {};
 	let willSynchronizeChannels : boolean = false;
-	let currentEvents: ConcurrenceEvent[] | undefined;
+	let currentEvents: (ConcurrenceEvent | boolean)[] | undefined;
 
 	// Maintain whether or not inside callback
 	let dispatchingEvent = 1;
@@ -220,8 +222,6 @@ namespace concurrence {
 
 	// Session sharing
 	let allowMultiple = !!bootstrapData.multiple;
-	export const allEvents: ConcurrenceEvent[] = [];
-	let sendAllEvents = false;
 
 	// Remote channels
 	let remoteChannelCounter = 0;
@@ -262,7 +262,7 @@ namespace concurrence {
 		++outgoingMessageId;
 		const concurrenceForm = document.getElementById("concurrence-form") as HTMLFormElement;
 		if (concurrenceForm) {
-			concurrenceForm.onsubmit = function() { return false; };
+			concurrenceForm.onsubmit = () => false;
 		}
 		currentEvents = bootstrapData.events || [];
 		hadOpenServerChannel = true;
@@ -280,10 +280,6 @@ namespace concurrence {
 		}
 		if (clientID) {
 			result.clientID = clientID;
-		}
-		if (sendAllEvents) {
-			sendAllEvents = false;
-			result.allEvents = allEvents;
 		}
 		return result;
 	}
@@ -381,13 +377,22 @@ namespace concurrence {
 
 	function callChannelWithEvent(channel: ((event: ConcurrenceEvent) => void) | undefined, event: ConcurrenceEvent) {
 		if (channel) {
-			allEvents.push(event);
 			if (totalBatched) {
 				pendingBatchedActions.push(channel.bind(null, event));
 			} else {
 				channel(event);
 			}
 		}
+	}
+
+	function processEvents(events: (ConcurrenceEvent | boolean)[]) {
+		return reduce(currentEvents = events, (promise: PromiseLike<any>, event: ConcurrenceEvent | boolean) => {
+			if (typeof event == "boolean") {
+				return promise.then(() => hadOpenServerChannel = event);
+			} else {
+				return promise.then(escaping(dispatchEvent.bind(null, event))).then(defer);
+			}
+		}, resolvedPromise).then(() => currentEvents = undefined);
 	}
 
 	function processMessage(message: ConcurrenceServerMessage) : PromiseLike<void> {
@@ -406,10 +411,7 @@ namespace concurrence {
 		if (!allowMultiple) {
 			hadOpenServerChannel = pendingChannelCount != 0;
 		}
-		const promise = reduce(currentEvents = message.events, (promise: PromiseLike<any>, event: ConcurrenceEvent) => {
-			return promise.then(escaping(dispatchEvent.bind(null, event))).then(defer);
-		}, resolvedPromise).then(() => {
-			currentEvents = undefined;
+		const promise = processEvents(message.events).then(() => {
 			const reorderedMessage = reorderedMessages[incomingMessageId];
 			if (reorderedMessage) {
 				delete reorderedMessages[incomingMessageId];
@@ -433,7 +435,7 @@ namespace concurrence {
 	}
 
 	function messageAsSocketText(message: Partial<ConcurrenceClientMessage>) : string {
-		if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message) && !("clientID" in message) && !("allEvents" in message)) {
+		if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message) && !("clientID" in message)) {
 			// Only send events, if that's all we have to send
 			return JSON.stringify(message.events).slice(1, -1);
 		}
@@ -454,9 +456,6 @@ namespace concurrence {
 		}
 		if ("events" in message) {
 			result += "&events=" + cheesyEncodeURIComponent(JSON.stringify(message.events).slice(1, -1));
-		}
-		if ("allEvents" in message) {
-			result += "&allEvents=" + cheesyEncodeURIComponent(JSON.stringify(message.allEvents).slice(1, -1));
 		}
 		if (message.destroy) {
 			result += "&destroy=1";
@@ -760,7 +759,7 @@ namespace concurrence {
 			const events = currentEvents;
 			if (events) {
 				for (var i = 0; i < events.length; i++) {
-					if (events[i][0] == channelId) {
+					if ((events[i] as ConcurrenceEvent)[0] == channelId) {
 						return;
 					}
 				}
@@ -857,24 +856,25 @@ namespace concurrence {
 		}
 		let value: T;
 		let events = currentEvents;
-		if (events && (hadOpenServerChannel || allowMultiple)) {
+		if (hadOpenServerChannel) {
 			let channelId = ++remoteChannelCounter;
 			logOrdering("server", "open", channelId);
 			// Peek at incoming events to find the value generated on the server
-			for (var i = 0; i < events.length; i++) {
-				var event = events[i];
-				if (event[0] == channelId) {
-					pendingChannels[channelId] = function() {
-					};
-					return parseValueEvent(event, value => {
-						logOrdering("server", "message", channelId);
-						logOrdering("server", "close", channelId);
-						return value;
-					}, error => {
-						logOrdering("server", "message", channelId);
-						logOrdering("server", "close", channelId);
-						throw error
-					}) as T;
+			if (events) {
+				for (var i = 0; i < events.length; i++) {
+					var event = events[i] as ConcurrenceEvent;
+					if (event[0] == channelId) {
+						pendingChannels[channelId] = emptyFunction;
+						return parseValueEvent(event, value => {
+							logOrdering("server", "message", channelId);
+							logOrdering("server", "close", channelId);
+							return value;
+						}, error => {
+							logOrdering("server", "message", channelId);
+							logOrdering("server", "close", channelId);
+							throw error
+						}) as T;
+					}
 				}
 			}
 			console.log("Expected a value from the server, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
@@ -884,6 +884,23 @@ namespace concurrence {
 		} else {
 			let channelId = ++localChannelCounter;
 			logOrdering("client", "open", channelId);
+			if (events) {
+				for (var i = 0; i < events.length; i++) {
+					var event = events[i] as ConcurrenceEvent;
+					if (event[0] == -channelId) {
+						pendingLocalChannels[channelId] = emptyFunction;
+						return parseValueEvent(event, value => {
+							logOrdering("client", "message", channelId);
+							logOrdering("client", "close", channelId);
+							return value;
+						}, error => {
+							logOrdering("client", "message", channelId);
+							logOrdering("client", "close", channelId);
+							throw error
+						}) as T;
+					}
+				}
+			}
 			try {
 				value = generator();
 				try {
@@ -1046,13 +1063,12 @@ namespace concurrence {
 		return Promise;
 	}
 
-	export const shareSession = () => createClientPromise(() => {
+	export const shareSession = () => createServerPromise().then(() => createClientPromise(() => {
 		if (!allowMultiple) {
 			allowMultiple = true;
-			sendAllEvents = true;
 			flush();
 		}
 		return serverURL + "?sessionID=" + sessionID;
-	});
+	}));
 
 }

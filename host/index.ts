@@ -256,7 +256,6 @@ interface ConcurrenceClientMessage extends ConcurrenceServerMessage {
 	sessionID?: string;
 	clientID?: number;
 	destroy?: true;
-	allEvents?: ConcurrenceEvent[];
 }
 
 const enum ConcurrenceRenderingMode {
@@ -269,12 +268,12 @@ const enum ConcurrenceRenderingMode {
 interface BootstrapData {
 	sessionID: string;
 	clientID?: number;
-	events?: ConcurrenceEvent[];
+	events?: (ConcurrenceEvent | boolean)[];
 	multiple?: true;
 }
 
 const renderingMode : ConcurrenceRenderingMode = ConcurrenceRenderingMode.Prerendering;
-const allowMultipleClientsPerSession = false;
+const allowMultipleClientsPerSession = true;
 
 class ConcurrencePageRenderer {
 	session: ConcurrenceSession;
@@ -348,8 +347,8 @@ class ConcurrencePageRenderer {
 		const bootstrapScript = this.bootstrapScript;
 		let textNode: Node | undefined;
 		if (bootstrapScript) {
-			const bootstrapData: BootstrapData = { sessionID: this.session.sessionID };
-			const queuedLocalEvents = client.queuedLocalEvents;
+			const bootstrapData: BootstrapData = { sessionID: session.sessionID };
+			const queuedLocalEvents = client.queuedLocalEvents || session.allEvents;
 			if (queuedLocalEvents) {
 				client.queuedLocalEvents = undefined;
 				bootstrapData.events = queuedLocalEvents;
@@ -357,7 +356,7 @@ class ConcurrencePageRenderer {
 			if (client.clientID) {
 				bootstrapData.clientID = client.clientID;
 			}
-			if (session.allEvents) {
+			if (session.sharingEnabled) {
 				bootstrapData.multiple = true;
 			}
 			textNode = session.host.document.createTextNode(compatibleStringify(bootstrapData));
@@ -404,10 +403,9 @@ class ConcurrenceClient {
 	localResolveTimeout: NodeJS.Timer | undefined;
 	willSynchronizeChannels = false;
 
-	constructor(session: ConcurrenceSession, clientID: number, startingEvents?: ConcurrenceEvent[]) {
+	constructor(session: ConcurrenceSession, clientID: number) {
 		this.session = session;
 		this.clientID = clientID;
-		this.queuedLocalEvents = startingEvents;
 	}
 
 	destroy = () => {
@@ -432,10 +430,6 @@ class ConcurrenceClient {
 		}
 		if (messageId < this.incomingMessageId) {
 			return Promise.resolve();
-		}
-		const allEvents = message.allEvents;
-		if (allEvents) {
-			this.session.allEvents = allEvents;
 		}
 		this.incomingMessageId++;
 		this.willSynchronizeChannels = true;
@@ -476,7 +470,7 @@ class ConcurrenceClient {
 					resolve(true);
 					return;
 				}
-			} else if (this.session.localChannelCount || this.session.allEvents) {
+			} else if (this.session.localChannelCount || this.session.sharingEnabled) {
 				this.queuedLocalEventsResolve = resolve;
 				if (oldResolve) {
 					oldResolve(undefined);
@@ -492,7 +486,7 @@ class ConcurrenceClient {
 		});
 	}
 
-	sendClientEvent(event: ConcurrenceEvent) {
+	sendEvent(event: ConcurrenceEvent) {
 		// Queue an event
 		const queuedLocalEvents = this.queuedLocalEvents;
 		if (queuedLocalEvents) {
@@ -544,7 +538,8 @@ class ConcurrenceSession {
 	hadOpenServerChannel: boolean = false;
 	hasRun: boolean = false;
 	clients: (ConcurrenceClient | undefined)[] = [];
-	allEvents: ConcurrenceEvent[] | undefined;
+	allEvents: (ConcurrenceEvent | boolean)[] = [];
+	sharingEnabled: true | undefined;
 	constructor(host: ConcurrenceHost, sessionID: string, request: Express.Request) {
 		this.host = host;
 		this.sessionID = sessionID;
@@ -573,19 +568,16 @@ class ConcurrenceSession {
 			createServerChannel: this.createServerChannel.bind(this),
 			coordinateValue: this.coordinateValue.bind(this),
 			synchronize: () => this.createServerPromise(() => undefined),
+			shareSession: this.shareSession,
 			showDeterminismWarning: showDeterminismWarning
 		};
 		this.context = context;
-		if (allowMultipleClientsPerSession) {
-			this.allEvents = [];
-		}
 	}
 
 	newClient() {
-		const events = this.allEvents;
 		const newClientId = this.clients.length;
-		if (events || (newClientId == 0)) {
-			const result = new ConcurrenceClient(this, newClientId, events);
+		if (this.sharingEnabled || (newClientId == 0)) {
+			const result = new ConcurrenceClient(this, newClientId);
 			this.clients[newClientId] = result;
 			return result;
 		}
@@ -602,39 +594,53 @@ class ConcurrenceSession {
 	}
 
 	sendEvent(event: ConcurrenceEvent) {
-		const allEvents = this.allEvents;
-		if (allEvents) {
-			allEvents.push(event);
+		if (this.allEvents) {
+			this.allEvents.push(event);
 		}
 		for (const client of this.clients) {
 			if (client) {
-				client.sendClientEvent(event);
+				client.sendEvent(event);
 			}
 		}
 	}
 
-	dispatchEvent(event: ConcurrenceEvent) {
+	dispatchClientEvent(event: ConcurrenceEvent) {
 		let channelId = event[0];
 		if (channelId < 0) {
 			// Server decided the ordering on "fenced" events
-			this.sendEvent(this.allEvents ? event.slice() as ConcurrenceEvent : [channelId]);
+			this.sendEvent(event);
 			channelId = -channelId;
+		} else {
+			// Record the event ordering, but don't send to client as they've already processed it
+			event[0] = -channelId;
+			if (this.allEvents) {
+				this.allEvents.push(event);
+			}
 		}
 		const channel = this.pendingChannels[channelId];
 		if (channel) {
 			logOrdering("client", "message", channelId, this);
-			channel(event);
+			channel(event.slice() as ConcurrenceEvent);
 		} else {
 			// Client-side event source was destroyed on the server between the time it generated an event and the time the server received it
 			// This event will be silently dropped--dispatching would cause split brain!
 		}
 	}
 
+	updateOpenServerChannelStatus(newValue: boolean) {
+		if (this.hadOpenServerChannel != newValue) {
+			this.hadOpenServerChannel = newValue;
+			if (this.allEvents) {
+				this.allEvents.push(newValue);
+			}
+		}
+	}
+
 	processEvents(events: ConcurrenceEvent[]) : PromiseLike<void> {
 		// Read each event and dispatch the appropriate event in order
-		this.hadOpenServerChannel = this.localChannelCount != 0;
+		this.updateOpenServerChannelStatus(this.localChannelCount != 0);
 		this.currentEvents = events;
-		return events.reduce((promise: PromiseLike<any>, event: ConcurrenceEvent) => promise.then(escaping(this.dispatchEvent.bind(this, event))).then(defer), this.run()).then(() => {
+		return events.reduce((promise: PromiseLike<any>, event: ConcurrenceEvent) => promise.then(escaping(this.dispatchClientEvent.bind(this, event))).then(defer), this.run()).then(() => {
 			this.currentEvents = undefined;
 		});
 	}
@@ -687,7 +693,10 @@ class ConcurrenceSession {
 		}
 		this.dispatchingAPIImplementation--;
 		return result.then(value => {
-			return resolvedPromise.then(escaping(() => this.sendEvent(eventForValue(channelId, value)))).then(() => {
+			return (this.currentEvents ? defer() : resolvedPromise).then(escaping(() => {
+				this.updateOpenServerChannelStatus(true);
+				this.sendEvent(eventForValue(channelId, value));
+			})).then(() => {
 				logOrdering("server", "message", channelId, this);
 				logOrdering("server", "close", channelId, this);
 				resolvedPromise.then(escaping(() => this.exitLocalChannel(includedInPrerender)));
@@ -696,7 +705,10 @@ class ConcurrenceSession {
 				return roundtripped;
 			});
 		}, error => {
-			return resolvedPromise.then(escaping(() => this.sendEvent(eventForException(channelId, error)))).then(() => {
+			return (this.currentEvents ? defer() : resolvedPromise).then(escaping(() => {
+				this.updateOpenServerChannelStatus(true);
+				this.sendEvent(eventForException(channelId, error));
+			})).then(() => {
 				logOrdering("server", "message", channelId, this);
 				logOrdering("server", "close", channelId, this);
 				resolvedPromise.then(escaping(() => this.exitLocalChannel(includedInPrerender)));
@@ -750,7 +762,10 @@ class ConcurrenceSession {
 			const potentialState = onOpen(function() {
 				if (channelId >= 0) {
 					let args = roundTrip([...arguments]);
-					resolvedPromise.then(escaping(() => session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent))).then(() => {
+					(session.currentEvents ? defer() : resolvedPromise).then(escaping(() => {
+						session.updateOpenServerChannelStatus(true);
+						session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent);
+					})).then(() => {
 						logOrdering("server", "message", channelId, session);
 						session.enteringCallback();
 						(callback as any as Function).apply(null, args)
@@ -848,22 +863,24 @@ class ConcurrenceSession {
 			return generator();
 		}
 		let value: T;
-		let events = this.currentEvents;
-		if (events && !this.hadOpenServerChannel && !this.allEvents) {
+		if (!this.hadOpenServerChannel && !this.sharingEnabled) {
 			let channelId = ++this.remoteChannelCounter;
 			logOrdering("client", "open", channelId, this);
 			// Peek at incoming events to find the value generated on the client
-			for (let event of events) {
-				if (event[0] == channelId) {
-					return parseValueEvent(event, value => {
-						logOrdering("client", "message", channelId, this);
-						logOrdering("client", "close", channelId, this);
-						return value;
-					}, error => {
-						logOrdering("client", "message", channelId, this);
-						logOrdering("client", "close", channelId, this);
-						throw error;
-					}) as T;
+			let events = this.currentEvents;
+			if (events) {
+				for (let event of events) {
+					if (event[0] == channelId) {
+						return parseValueEvent(event, value => {
+							logOrdering("client", "message", channelId, this);
+							logOrdering("client", "close", channelId, this);
+							return value;
+						}, error => {
+							logOrdering("client", "message", channelId, this);
+							logOrdering("client", "close", channelId, this);
+							throw error;
+						}) as T;
+					}
 				}
 			}
 			console.log("Expected a value from the client, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
@@ -894,6 +911,17 @@ class ConcurrenceSession {
 			}
 		}
 		return roundTrip(value);
+	}
+
+	shareSession = () => {
+		return this.createServerPromise(() => {
+			if (allowMultipleClientsPerSession) {
+				this.sharingEnabled = true;
+				return Promise.resolve();
+			} else {
+				return Promise.reject(new Error("Sharing has been disabled!"));
+			}
+		}).then(() => this.createClientPromise());
 	}
 
 	destroy = () => {
@@ -954,9 +982,6 @@ function messageFromBody(body: { [key: string]: any }) : ConcurrenceClientMessag
 		messageID: (body.messageID as number) | 0,
 		clientID: (body.clientID as number) | 0,
 		events: body.events ? JSON.parse("[" + body.events + "]") : []
-	}
-	if (body.allEvents) {
-		message.allEvents = JSON.parse("[" + body.allEvents + "]");
 	}
 	if ("close" in body) {
 		message.close = (body.close | 0) == 1;
@@ -1116,7 +1141,7 @@ expressWs(server);
 						delete message.messageID;
 					}
 					lastOutgoingMessageId = client.outgoingMessageId;
-					if ((client.session.localChannelCount == 0 || !keepGoing) && !client.session.allEvents) {
+					if ((client.session.localChannelCount == 0 || !keepGoing) && !client.session.sharingEnabled) {
 						message.close = true;
 						closed = true;
 					} else {
