@@ -271,7 +271,17 @@ namespace concurrence {
 		currentEvents = bootstrapData.events || [];
 		hadOpenServerChannel = true;
 		willSynchronizeChannels = true;
-		afterLoaded.then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(didExitCallback).then(escaping(synchronizeChannels));
+		// Create a hidden DOM element to render into until all events are processed
+		const serverRenderedHostElement = document.body.children[0];
+		serverRenderedHostElement.setAttribute("style", "pointer-events:none;user-select:none");
+		const clientRenderedHostElement = document.createElement(serverRenderedHostElement.nodeName);
+		clientRenderedHostElement.style.display = "none";
+		document.body.insertBefore(clientRenderedHostElement, serverRenderedHostElement);
+		afterLoaded.then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(() => {
+			// Swap the prerendered DOM element out for the one with mounted components
+			document.body.removeChild(serverRenderedHostElement);
+			clientRenderedHostElement.style.display = null;
+		}).then(didExitCallback).then(escaping(synchronizeChannels));
 	} else {
 		afterLoaded.then(didExitCallback);
 	}
