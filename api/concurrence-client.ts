@@ -952,9 +952,6 @@ namespace concurrence {
 
 	function bundledPromiseImplementation() {
 		// Promise implementation that properly schedules as a micro-task
-		function isPromise<T>(value: T | PromiseLike<T> | undefined) : value is Promise<T> {
-			return typeof value == "object" && "then" in (value as any) && "catch" in (value as any);
-		}
 
 		const enum PromiseState {
 			Pending = 0,
@@ -962,7 +959,7 @@ namespace concurrence {
 			Rejected = 2,
 		};
 
-		function populatePromise<T>(this: Promise<T>, state: PromiseState, value: any) {
+		function settlePromise<T>(this: Promise<T>, state: PromiseState, value: any) {
 			if (!this.__state) {
 				if (value instanceof Promise) {
 					if (value.__state) {
@@ -971,11 +968,11 @@ namespace concurrence {
 							value = value.__value;
 						}
 					} else {
-						(value.__observers || (value.__observers = [])).push(populatePromise.bind(this, state, value));
+						(value.__observers || (value.__observers = [])).push(settlePromise.bind(this, state, value));
 						return;
 					}
 				} else if (isPromiseLike(value)) {
-					value.then(populatePromise.bind(this, state), populatePromise.bind(this, PromiseState.Rejected));
+					value.then(settlePromise.bind(this, state), settlePromise.bind(this, PromiseState.Rejected));
 					return;
 				}
 				this.__state = state;
@@ -996,11 +993,12 @@ namespace concurrence {
 			__observers?: Task[];
 			constructor(executor?: (resolve: (value?: T | PromiseLike<T>) => void, reject: (reason?: any) => void) => void) {
 				if (executor) {
-					const reject = populatePromise.bind(this, PromiseState.Rejected);
+					const reject = settlePromise.bind(this, PromiseState.Rejected);
 					try {
-						executor(populatePromise.bind(this, PromiseState.Fulfilled), reject);
+						executor(settlePromise.bind(this, PromiseState.Fulfilled), reject);
 					} catch (e) {
-						reject(e);
+						this.__state = PromiseState.Rejected;
+						this.__value = e;
 					}
 				}
 			}
@@ -1030,9 +1028,6 @@ namespace concurrence {
 			static resolve<T>(value: PromiseLike<T> | T) : PromiseLike<T>;
 		    static resolve(): Promise<void>;
 			static resolve<T>(value?: PromiseLike<T> | T) : PromiseLike<T> {
-				if (isPromise(value)) {
-					return value;
-				}
 				if (isPromiseLike(value)) {
 					return new Promise<T>((resolve, reject) => value.then(resolve, reject));
 				}
@@ -1042,7 +1037,10 @@ namespace concurrence {
 				return result;
 			}
 			static reject<T = never>(reason: any) : PromiseLike<T> {
-				return new Promise<T>((resolve, reject) => reject(reason));
+				const result = new Promise<T>();
+				result.__value = reason;
+				result.__state = PromiseState.Rejected;
+				return result;
 			}
 			static race<T>(values: ReadonlyArray<PromiseLike<T> | T>) : PromiseLike<T> {
 				for (let i = 0; i < values.length; i++) {
@@ -1053,7 +1051,10 @@ namespace concurrence {
 						result.__state = PromiseState.Fulfilled;
 						return result;
 					} else if (value instanceof Promise && value.__state) {
-						return value;
+						const result = new Promise<T>();
+						result.__value = value.__value;
+						result.__state = value.__state;
+						return result;
 					}
 				}
 				return new Promise<T>((resolve, reject) => {
