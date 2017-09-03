@@ -11,14 +11,11 @@ namespace concurrence {
 	const microTaskQueue : Task[] = [];
 	const taskQueue : Task[] = [];
 
-	const scheduleFlushTasks = (() => {
-		const setImmediate = window.setImmediate;
-		// Try native setImmediate support
-		if (setImmediate) {
-			return setImmediate.bind(window, flushTasks);
-		}
+	const { scheduleFlushTasks, setImmediate } = (() => {
+		let setImmediate: (callback: () => void) => void = window.setImmediate;
+		let scheduleFlushTasks: (() => void) | undefined;
 		// Attempt postMessage, but only if it's asynchronous
-		if (window.postMessage && window.addEventListener) {
+		if (!setImmediate && window.postMessage && window.addEventListener) {
 			let isAsynchronous = true;
 			const synchronousTest = () => isAsynchronous = false;
 			window.addEventListener("message", synchronousTest, false);
@@ -26,29 +23,36 @@ namespace concurrence {
 			window.removeEventListener("message", synchronousTest, false);
 			if (isAsynchronous) {
 				window.addEventListener("message", flushTasks, false);
-				return () => {
+				scheduleFlushTasks = () => {
 					window.postMessage("__concurrence_flush", "*")
 				};
 			}
 		}
 		// Try a <script> tag's onreadystatechange
-		if ("onreadystatechange" in document.createElement("script")) {
-			return () => {
+		if (!setImmediate && "onreadystatechange" in document.createElement("script")) {
+			setImmediate = callback => {
 				const script = document.createElement("script");
 				(script as any).onreadystatechange = () => {
 					document.head.removeChild(script);
-					flushTasks();
-				}
+					callback();
+				};
 				document.head.appendChild(script);
 			};
 		}
 		// Try requestAnimationFrame
-		const requestAnimationFrame = window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame;
-		if (requestAnimationFrame) {
-			return requestAnimationFrame.bind(window, flushTasks);
+		if (!setImmediate) {
+			const requestAnimationFrame = window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame;
+			if (requestAnimationFrame) {
+				setImmediate = requestAnimationFrame;
+			}
 		}
 		// Fallback to setTimeout(..., 0)
-		return setTimeout.bind(window, flushTasks, 0);
+		if (!setImmediate) {
+			setImmediate = callback => {
+				setTimeout.call(window, callback, 0);
+			}
+		}
+		return { scheduleFlushTasks: scheduleFlushTasks || setImmediate.bind(window, flushTasks), setImmediate };
 	})();
 
 	function emptyFunction() {
@@ -98,7 +102,7 @@ namespace concurrence {
 	}
 
 	function escape(e: any) {
-		submitTask(microTaskQueue, () => {
+		setImmediate(() => {
 			throw e;
 		});
 	}
@@ -332,9 +336,7 @@ namespace concurrence {
 				request.send(body);
 			}
 			// Flush fenced events
-			reduce(fencedLocalEvents, (promise, event) => {
-				return promise.then(() => dispatchEvent(event)).then(defer);
-			}, resolvedPromise).then(() => {
+			reduce(fencedLocalEvents, (promise, event) => promise.then(escaping(dispatchEvent.bind(null, event))).then(defer), resolvedPromise).then(() => {
 				// Send disconnection event
 				if (sendWhenDisconnected) {
 					sendWhenDisconnected();
@@ -735,7 +737,11 @@ namespace concurrence {
 
 	export function createClientPromise<T extends ConcurrenceJsonValue | void>(ask: () => (PromiseLike<T> | T)) : PromiseLike<T> {
 		if (!insideCallback) {
-			return new Promise<T>(resolve => resolve(runAPIImplementation(ask)));
+			try {
+				return Promise.resolve(runAPIImplementation(ask));
+			} catch (e) {
+				return Promise.reject(e);
+			}
 		}
 		return new Promise<T>((resolve, reject) => {
 			let channelId = ++localChannelCounter;
@@ -822,7 +828,7 @@ namespace concurrence {
 				if (channelId >= 0) {
 					const message = roundTrip(slice.call(arguments));
 					message.unshift(channelId);
-					resolvedPromise.then(() => sendEvent(message, batched));
+					resolvedPromise.then(escaping(sendEvent.bind(null, message, batched)));
 				}
 			} as any as T));
 			if (onClose) {
@@ -922,6 +928,16 @@ namespace concurrence {
 			}
 		}
 		return roundTrip(value);
+	}
+
+	export function shareSession() : Promise<string> {
+		return Promise.all([
+			createServerPromise(),
+			createClientPromise(() => {
+				allowMultiple = true;
+				return serverURL + "?sessionID=" + sessionID;
+			})
+		]).then(value => value[1]);
 	}
 
 	function bundledPromiseImplementation() {
@@ -1062,13 +1078,5 @@ namespace concurrence {
 
 		return Promise;
 	}
-
-	export const shareSession = () => createServerPromise().then(() => createClientPromise(() => {
-		if (!allowMultiple) {
-			allowMultiple = true;
-			flush();
-		}
-		return serverURL + "?sessionID=" + sessionID;
-	}));
 
 }
