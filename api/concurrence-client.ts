@@ -290,9 +290,13 @@ namespace concurrence {
 		if (concurrenceForm) {
 			concurrenceForm.onsubmit = () => false;
 		}
-		currentEvents = bootstrapData.events || [];
+		const events = bootstrapData.events || [];
+		currentEvents = events;
 		bootstrappingChannels = bootstrapData.channels;
-		hadOpenServerChannel = true;
+		const firstEvent = events[0];
+		if (typeof firstEvent == "boolean") {
+			hadOpenServerChannel = firstEvent;
+		}
 		willSynchronizeChannels = true;
 		// Create a hidden DOM element to render into until all events are processed
 		const serverRenderedHostElement = document.body.children[0];
@@ -939,20 +943,20 @@ namespace concurrence {
 			try {
 				value = generator();
 				try {
+					logOrdering("client", "message", channelId);
+					logOrdering("client", "close", channelId);
 					sendEvent(eventForValue(channelId, value), true, true);
 				} catch(e) {
 					escape(e);
 				}
-				logOrdering("client", "message", channelId);
-				logOrdering("client", "close", channelId);
 			} catch(e) {
 				try {
+					logOrdering("client", "message", channelId);
+					logOrdering("client", "close", channelId);
 					sendEvent(eventForException(channelId, e), true, true);
 				} catch(e) {
 					escape(e);
 				}
-				logOrdering("client", "message", channelId);
-				logOrdering("client", "close", channelId);
 				throw e;
 			}
 		}
