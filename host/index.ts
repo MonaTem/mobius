@@ -148,7 +148,7 @@ interface ConcurrenceSandboxContext {
 };
 
 class ConcurrenceHost {
-	sessions: { [key: string]: ConcurrenceSession; } = {};
+	sessions = new Map<string, ConcurrenceSession>();
 	sandbox: (context: ConcurrenceSandboxContext) => void;
 	htmlSource: string;
 	dom: JSDOM;
@@ -181,20 +181,17 @@ class ConcurrenceHost {
 		patchJSDOM(this.document);
 		this.staleSessionTimeout = setInterval(() => {
 			const now = Date.now();
-			for (let i in this.sessions) {
-				if (Object.hasOwnProperty.call(this.sessions, i)) {
-					const session = this.sessions[i];
-					if (now - session.lastMessageTime > 5 * 60 * 1000) {
-						session.destroy().catch(escape);
-					} else {
-						session.archiveEvents(false).catch(escape);
-					}
+			for (let session of this.sessions.values()) {
+				if (now - session.lastMessageTime > 5 * 60 * 1000) {
+					session.destroy().catch(escape);
+				} else {
+					session.archiveEvents(false).catch(escape);
 				}
 			}
 		}, 10 * 1000);
 	}
 	async sessionFromId(sessionID: string, request?: express.Request) {
-		let session = this.sessions[sessionID];
+		let session = this.sessions.get(sessionID);
 		if (session) {
 			return session;
 		}
@@ -212,11 +209,14 @@ class ConcurrenceHost {
 			}
 			if (archive) {
 				session = new ConcurrenceSession(this, sessionID, request);
+				this.sessions.set(sessionID, session);
 				await session.restoreFromArchive(archive as ArchivedSession);
-				return this.sessions[sessionID] = session;
+				return session;
 			}
 		}
-		return this.sessions[sessionID] = new ConcurrenceSession(this, sessionID, request);
+		session = new ConcurrenceSession(this, sessionID, request);
+		this.sessions.set(sessionID, session);
+		return session;
 	}
 	pathForSessionId(sessionId: string) {
 		return "sessions/" + sessionId + ".json";
@@ -224,7 +224,7 @@ class ConcurrenceHost {
 	async clientFromMessage(message: ConcurrenceClientMessage, request: express.Request) {
 		const allowCreation = message.messageID == 0;
 		const session = await this.sessionFromId(message.sessionID || "", allowCreation ? request : undefined);
-		let client = session.clients[message.clientID as number | 0];
+		let client = session.clients.get(message.clientID as number | 0);
 		if (!client) {
 			if (!allowCreation) {
 				throw new Error("Message ID is not valid: " + message.messageID);
@@ -246,16 +246,17 @@ class ConcurrenceHost {
 	async newClient(request: express.Request) {
 		for (;;) {
 			const sessionID = uuid();
-			if (!this.sessions[sessionID] && (!allowMultipleClientsPerSession || !await exists(this.pathForSessionId(sessionID)))) {
-				const session = this.sessions[sessionID] = new ConcurrenceSession(this, sessionID, request);
+			if (!this.sessions.has(sessionID) && (!allowMultipleClientsPerSession || !await exists(this.pathForSessionId(sessionID)))) {
+				const session = new ConcurrenceSession(this, sessionID, request);
+				this.sessions.set(sessionID, session);
 				return session.newClient(request);
 			}
 		}
 	}
 	async destroyClientById(sessionID: string, clientID: number) {
-		const session = this.sessions[sessionID];
+		const session = this.sessions.get(sessionID);
 		if (session) {
-			const client = session.clients[clientID];
+			const client = session.clients.get(clientID);
 			if (client) {
 				await client.destroy();
 			}
@@ -263,11 +264,11 @@ class ConcurrenceHost {
 	}
 	async destroy() {
 		clearInterval(this.staleSessionTimeout);
-		for (let i in this.sessions) {
-			if (Object.hasOwnProperty.call(this.sessions, i)) {
-				await this.sessions[i].destroy();
-			}
+		const promises: Promise<void>[] = [];
+		for (let session of this.sessions.values()) {
+			promises.push(session.destroy());
 		}
+		await Promise.all(promises);
 		await writeFile("sessions/.graceful", "");
 	}
 }
@@ -480,19 +481,19 @@ class ConcurrenceClient {
 
 	static requestRequiresForcedEmulation(request: express.Request) : boolean {
 		const userAgent = request.headers['user-agent']+"";
-		return /\bMSIE [1-8]\b/.test(userAgent);
+		return /\bMSIE [1-8]\b/.test(userAgent) || /Firefox/.test(userAgent);
 	}
 
-	destroy() {
-		this.synchronizeChannels();
-		delete this.session.clients[this.clientID];
-		// Destroy the session if we were the last client
-		for (const client of this.session.clients) {
-			if (client) {
-				return;
-			}
+	async destroy() {
+		this.session.clients.delete(this.clientID);
+		if (this.queuedLocalEventsResolve) {
+			this.queuedLocalEventsResolve(undefined);
 		}
-		this.session.destroy();
+		this.synchronizeChannels();
+		// Destroy the session if we were the last client
+		if (this.session.clients.size == 0) {
+			await this.session.destroy();
+		}
 	}
 
 	async processMessage(message: ConcurrenceClientMessage) : Promise<void> {
@@ -517,7 +518,7 @@ class ConcurrenceClient {
 		this.synchronizeChannels();
 		// Destroy if asked to by client
 		if (message.destroy) {
-			this.destroy();
+			await this.destroy();
 		}
 	}
 
@@ -616,7 +617,8 @@ class ConcurrenceSession {
 	context: ConcurrenceSandboxContext;
 	hasRun: boolean = false;
 	pageRenderer: ConcurrencePageRenderer;
-	clients: (ConcurrenceClient | undefined)[] = [];
+	clients = new Map<number, ConcurrenceClient>();
+	currentClientID: number = 0;
 	lastMessageTime: number = Date.now();
 	// Local channels
 	localChannelCounter: number = 0;
@@ -636,6 +638,7 @@ class ConcurrenceSession {
 	archivingEvents?: PromiseLike<void>;
 	archiveStatus: ArchiveStatus = ArchiveStatus.None;
 	bootstrappingChannels?: Set<number>;
+	bootstrappingPromise?: Promise<void>;
 	// Session sharing
 	sharingEnabled?: true;
 	constructor(host: ConcurrenceHost, sessionID: string, request: express.Request) {
@@ -676,11 +679,11 @@ class ConcurrenceSession {
 	}
 
 	newClient(request: express.Request) {
-		const newClientId = this.clients.length;
+		const newClientId = this.currentClientID++;
 		if (this.sharingEnabled || (newClientId == 0)) {
 			const renderingMode = ConcurrenceClient.requestRequiresForcedEmulation(request) ? ConcurrenceRenderingMode.ForcedEmulation : this.host.renderingMode;
 			const result = new ConcurrenceClient(this, newClientId, renderingMode);
-			this.clients[newClientId] = result;
+			this.clients.set(newClientId, result);
 			return result;
 		}
 		throw new Error("Multiple clients attached to the same session are not supported!");
@@ -699,10 +702,8 @@ class ConcurrenceSession {
 		if (this.recentEvents) {
 			this.recentEvents.push(event);
 		}
-		for (const client of this.clients) {
-			if (client) {
-				client.sendEvent(event);
-			}
+		for (const client of this.clients.values()) {
+			client.sendEvent(event);
 		}
 	}
 
@@ -752,10 +753,8 @@ class ConcurrenceSession {
 	}
 
 	scheduleSynchronize() {
-		for (const client of this.clients) {
-			if (client) {
-				client.scheduleSynchronize();
-			}
+		for (const client of this.clients.values()) {
+			client.scheduleSynchronize();
 		}
 	}
 
@@ -800,12 +799,17 @@ class ConcurrenceSession {
 			logOrdering("server", "open", channelId, this);
 			this.enterLocalChannel(includedInPrerender);
 			this.localChannels.set(channelId, (event?: ConcurrenceEvent) => {
-				if (event && channelId >= 0) {
-					logOrdering("server", "message", channelId, this);
-					logOrdering("server", "close", channelId, this);
-					resolvedPromise.then(exit);
-					this.enteringCallback();
-					parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
+				if (channelId >= 0) {
+					if (event) {
+						logOrdering("server", "message", channelId, this);
+						logOrdering("server", "close", channelId, this);
+						resolvedPromise.then(exit);
+						this.enteringCallback();
+						parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
+					} else {
+						logOrdering("server", "close", channelId, this);
+						exit();
+					}
 				}
 			});
 			if (!this.shouldImplementLocalChannel(channelId)) {
@@ -816,6 +820,9 @@ class ConcurrenceSession {
 			this.dispatchingAPIImplementation--;
 			result.then(async value => {
 				if (this.currentEvents) {
+					if (this.bootstrappingPromise) {
+						await this.bootstrappingPromise;
+					}
 					await defer();
 				}
 				if (channelId >= 0) {
@@ -834,6 +841,9 @@ class ConcurrenceSession {
 				}
 			}, async error => {
 				if (this.currentEvents) {
+					if (this.bootstrappingPromise) {
+						await this.bootstrappingPromise;
+					}
 					await defer();
 				}
 				if (channelId >= 0) {
@@ -874,7 +884,6 @@ class ConcurrenceSession {
 				escape(e);
 			}
 			return {
-				channelId: -1,
 				close() {
 					if (open) {
 						open = false;
@@ -892,11 +901,31 @@ class ConcurrenceSession {
 		let channelId = ++session.localChannelCounter;
 		logOrdering("server", "open", channelId, this);
 		session.enterLocalChannel(includedInPrerender);
+		const close = () => {
+			if (channelId >= 0) {
+				logOrdering("server", "close", channelId, session);
+				session.localChannels.delete(channelId);
+				channelId = -1;
+				resolvedPromise.then(escaping(() => {
+					if (session.exitLocalChannel(includedInPrerender) == 0) {
+						// If this was the last server channel, reevaluate queued events so the session can be potentially collected
+						session.scheduleSynchronize();
+					}
+				}));
+				if (onClose) {
+					session.dispatchingAPIImplementation++;
+					escaping(onClose)(state as U);
+					session.dispatchingAPIImplementation--;
+				}
+			}
+		};
 		session.localChannels.set(channelId, (event?: ConcurrenceEvent) => {
 			if (event) {
 				logOrdering("server", "message", channelId, this);
 				session.enteringCallback();
 				(callback as any as Function).apply(null, roundTrip(event.slice(1)));
+			} else {
+				close();
 			}
 		});
 		if (this.shouldImplementLocalChannel(channelId)) {
@@ -907,6 +936,9 @@ class ConcurrenceSession {
 						let args = roundTrip([...arguments]);
 						(async () => {
 							if (session.currentEvents) {
+								if (session.bootstrappingPromise) {
+									await session.bootstrappingPromise;
+								}
 								await defer();
 							}
 							try {
@@ -934,40 +966,22 @@ class ConcurrenceSession {
 			onClose = undefined;
 		}
 		return {
-			channelId,
-			close() {
-				if (channelId >= 0) {
-					logOrdering("server", "close", this.channelId, session);
-					session.localChannels.delete(channelId);
-					this.channelId = channelId = -1;
-					resolvedPromise.then(escaping(() => {
-						if (session.exitLocalChannel(includedInPrerender) == 0) {
-							// If this was the last server channel, reevaluate queued events so the session can be potentially collected
-							session.scheduleSynchronize();
-						}
-					}));
-					if (onClose) {
-						session.dispatchingAPIImplementation++;
-						escaping(onClose)(state as U);
-						session.dispatchingAPIImplementation--;
-					}
-				}
-			}
+			close
 		};
 	}
 
 	createRawClientChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
 		const session = this;
 		session.pendingChannelCount++;
-		const channelId = ++session.remoteChannelCounter;
+		let channelId = ++session.remoteChannelCounter;
 		logOrdering("client", "open", channelId, this);
 		this.pendingChannels.set(channelId, callback);
 		return {
-			channelId,
 			close() {
-				if (session.pendingChannels.delete(this.channelId)) {
-					logOrdering("client", "close", this.channelId, session);
-					this.channelId = -1;
+				if (channelId != -1) {
+					logOrdering("client", "close", channelId, session);
+					session.pendingChannels.delete(channelId);
+					channelId = -1;
 					if ((--session.pendingChannelCount) == 0) {
 						// If this was the last client channel, reevaluate queued events so the session can be potentially collected
 						session.scheduleSynchronize();
@@ -987,7 +1001,11 @@ class ConcurrenceSession {
 			const channel = this.createRawClientChannel(event => {
 				channel.close();
 				this.enteringCallback();
-				parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
+				if (event) {
+					parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
+				} else {
+					reject(new Error("Session has been disconnected!"))
+				}
 			});
 		});
 	}
@@ -1111,13 +1129,15 @@ class ConcurrenceSession {
 				pair[1]();
 			}
 			this.pendingChannels.clear();
-			for (const client of this.clients) {
-				if (client) {
-					client.destroy();
-				}
+			for (const pair of this.localChannels) {
+				pair[1]();
 			}
+			this.localChannels.clear();
 			this.pageRenderer.completeRender();
-			delete this.host.sessions[this.sessionID];
+			for (const client of this.clients.values()) {
+				await client.destroy();
+			}
+			this.host.sessions.delete(this.sessionID);
 			if (this.sendWhenDisconnected) {
 				this.sendWhenDisconnected();
 			}
@@ -1216,6 +1236,8 @@ class ConcurrenceSession {
 
 	async restoreFromArchive(archive: ArchivedSession) : Promise<void> {
 		this.bootstrappingChannels = new Set<number>(archive.channels);
+		let completedBootstrapping: () => void;
+		this.bootstrappingPromise = new Promise<void>(resolve => completedBootstrapping = resolve);
 		// Read each event and dispatch the appropriate event in order
 		const events = archive.events;
 		this.currentEvents = events;
@@ -1247,6 +1269,8 @@ class ConcurrenceSession {
 		this.currentEvents = undefined;
 		this.recentEvents = archive.events;
 		this.bootstrappingChannels = undefined;
+		this.bootstrappingPromise = undefined;
+		completedBootstrapping!();
 	}
 };
 
@@ -1476,7 +1500,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 							delete message.messageID;
 						}
 						lastOutgoingMessageId = client.outgoingMessageId;
-						if ((client.session.localChannelCount == 0 || !keepGoing) && !client.session.sharingEnabled) {
+						if (client.session.localChannelCount == 0 || !keepGoing) {
 							message.close = true;
 							closed = true;
 						}
@@ -1516,10 +1540,9 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 		acceptSocket.close((err: any) => {
 			if (err) {
 				escape(err);
-			} else {
-				host.destroy().catch(escape);
 			}
 		});
+		host.destroy().catch(escape);
 	}
 
 })().catch(escape);

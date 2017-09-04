@@ -581,18 +581,13 @@ namespace concurrence {
 					lastWebSocketMessageId = message.messageID;
 					const promise = processMessage(message)
 					if (message.close) {
-						promise.then(escaping(() => {
-							if (pendingChannelCount) {
-								// Reopen the same web socket,
-								const message = produceMessage();
-								message.close = false;
-								newSocket.send(messageAsSocketText(message));
-							} else {
-								// Disconnect with orderly shutdown from server
-								newSocket.close();
-								websocket = undefined;
-							}
-						}));
+						// Disconnect with orderly shutdown from server
+						websocket = undefined;
+						newSocket.close();
+						if (!willSynchronizeChannels) {
+							willSynchronizeChannels = true;
+							promise.then(escaping(synchronizeChannels));
+						}
 					}
 				});
 				websocket = newSocket;
@@ -622,10 +617,10 @@ namespace concurrence {
 		}
 	}
 
-	function createRawServerChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
+	function createRawServerChannel(callback: (event?: ConcurrenceEvent) => void) : ConcurrenceChannel {
 		// Expect that the server will run some code in parallel that provides data
 		pendingChannelCount++;
-		const channelId = ++remoteChannelCounter;
+		let channelId = ++remoteChannelCounter;
 		logOrdering("server", "open", channelId);
 		pendingChannels[channelId] = function(event?: ConcurrenceEvent) {
 			logOrdering("server", "message", channelId);
@@ -634,25 +629,21 @@ namespace concurrence {
 		}
 		flush();
 		return {
-			channelId,
-			close() {
+			close: () => {
 				// Cleanup the bookkeeping
-				if (pendingChannels[this.channelId]) {
-					logOrdering("server", "close", this.channelId);
+				if (pendingChannels[channelId]) {
+					logOrdering("server", "close", channelId);
 					pendingChannelCount--;
-					delete pendingChannels[this.channelId];
-					this.channelId = -1
+					delete pendingChannels[channelId];
+					channelId = -1;
 				}
 			}
 		};
 	}
 
 	function sendEvent(event: ConcurrenceEvent, batched?: boolean, skipsFencing?: boolean) {
-		if (dead) {
-			return;
-		}
 		const channelId = event[0];
-		if (pendingChannelCount && !skipsFencing) {
+		if (pendingChannelCount && !skipsFencing && !dead) {
 			// Let server decide on the ordering of events since server-side channels are active
 			if (batched) {
 				isBatched[channelId] = true;
@@ -680,18 +671,26 @@ namespace concurrence {
 		}
 	}
 
+	function disconnectedError() {
+		return new Error("Session has been disconnected!");
+	}
+
 	// APIs for client/, not to be used inside src/
 	export function createServerPromise<T extends ConcurrenceJsonValue>(...args: any[]) : PromiseLike<T> { // Must be cast to the proper signature
 		return new Promise<T>((resolve, reject) => {
 			if (dead) {
-				return reject(new Error("Session has been disconnected!"));
+				return reject(disconnectedError());
 			}
 			if (!insideCallback) {
 				return reject(new Error("Unable to create server promise in this context!"));
 			}
 			const channel = createRawServerChannel(event => {
 				channel.close();
-				parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
+				if (event) {
+					parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
+				} else {
+					reject(disconnectedError());
+				}
 			});
 		});
 	};
@@ -744,7 +743,7 @@ namespace concurrence {
 
 	function parseValueEvent<T>(event: ConcurrenceEvent | undefined, resolve: (value: ConcurrenceJsonValue) => T, reject: (error: Error | ConcurrenceJsonValue) => T) : T {
 		if (!event) {
-			return reject(new Error("Session has been disconnected!"));
+			return reject(disconnectedError());
 		}
 		let value = event[1];
 		if (event.length != 3) {
@@ -823,7 +822,6 @@ namespace concurrence {
 				escape(e);
 			}
 			return {
-				channelId: -1,
 				close() {
 					if (open) {
 						open = false;
@@ -868,12 +866,11 @@ namespace concurrence {
 		}
 		logOrdering("client", "open", channelId);
 		return {
-			channelId,
 			close() {
 				if (channelId >= 0) {
 					delete pendingLocalChannels[channelId];
-					logOrdering("client", "close", this.channelId);
-					this.channelId = channelId = -1;
+					logOrdering("client", "close", channelId);
+					channelId = -1;
 					try {
 						runAPIImplementation(() => onClose && onClose(state as U));
 					} catch (e) {
@@ -958,8 +955,8 @@ namespace concurrence {
 		return roundTrip(value);
 	}
 
-	export function shareSession() : Promise<string> {
-		return createServerPromise().then(value => {
+	export function shareSession() : PromiseLike<string> {
+		return createServerPromise<string>().then(value => {
 			// Dummy channel that stays open
 			createServerChannel(emptyFunction);
 			return value;

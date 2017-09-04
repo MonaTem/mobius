@@ -1,5 +1,4 @@
 interface ConcurrenceChannel {
-	channelId: number;
 	close(): void;
 }
 

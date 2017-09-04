@@ -69,7 +69,7 @@ namespace concurrence {
 
 	self.setInterval = function(func: Function, delay: number) {
 		const callback = func.bind(this, Array.prototype.slice.call(arguments, 2)) as () => void;
-		if (!insideCallback) {
+		if (!insideCallback || dead) {
 			return realSetInterval(callback, delay);
 		}
 		const result = --currentTimerId;
@@ -94,7 +94,7 @@ namespace concurrence {
 
 	self.setTimeout = function(func: Function, delay: number) {
 		const callback = func.bind(this, Array.prototype.slice.call(arguments, 2)) as () => void;
-		if (!insideCallback) {
+		if (!insideCallback || dead) {
 			return realSetTimeout(callback, delay);
 		}
 		const result = --currentTimerId;
