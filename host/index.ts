@@ -59,6 +59,9 @@ function escaping(handler: (value?: any) => any | Promise<any>) : (value?: any) 
 	};
 }
 
+function emptyFunction() {
+}
+
 function compatibleStringify(value: any): string {
 	return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\/script/g, "<\\/script");
 }
@@ -278,7 +281,7 @@ interface BootstrapData {
 	sessionID: string;
 	clientID?: number;
 	events?: (ConcurrenceEvent | boolean)[];
-	multiple?: true;
+	channels?: number[]
 }
 
 const renderingMode : ConcurrenceRenderingMode = ConcurrenceRenderingMode.Prerendering;
@@ -359,7 +362,7 @@ class ConcurrencePageRenderer {
 		const bootstrapScript = this.bootstrapScript;
 		let textNode: Node | undefined;
 		if (bootstrapScript) {
-			const bootstrapData: BootstrapData = { sessionID: session.sessionID };
+			const bootstrapData: BootstrapData = { sessionID: session.sessionID, channels: Object.keys(session.pendingChannels).map(key => (key as any as number) | 0) };
 			const queuedLocalEvents = events || client.queuedLocalEvents;
 			if (queuedLocalEvents) {
 				client.queuedLocalEvents = undefined;
@@ -367,9 +370,6 @@ class ConcurrencePageRenderer {
 			}
 			if (client.clientID) {
 				bootstrapData.clientID = client.clientID;
-			}
-			if (session.sharingEnabled) {
-				bootstrapData.multiple = true;
 			}
 			textNode = session.host.document.createTextNode(compatibleStringify(bootstrapData));
 			bootstrapScript.appendChild(textNode);
@@ -713,10 +713,10 @@ class ConcurrenceSession {
 		return result.then(value => {
 			return (this.currentEvents ? defer() : resolvedPromise).then(escaping(() => {
 				this.updateOpenServerChannelStatus(true);
-				this.sendEvent(eventForValue(channelId, value));
-			})).then(() => {
 				logOrdering("server", "message", channelId, this);
 				logOrdering("server", "close", channelId, this);
+				this.sendEvent(eventForValue(channelId, value));
+			})).then(() => {
 				resolvedPromise.then(escaping(() => this.exitLocalChannel(includedInPrerender)));
 				const roundtripped = roundTrip(value);
 				this.enteringCallback();
@@ -725,10 +725,10 @@ class ConcurrenceSession {
 		}, error => {
 			return (this.currentEvents ? defer() : resolvedPromise).then(escaping(() => {
 				this.updateOpenServerChannelStatus(true);
-				this.sendEvent(eventForException(channelId, error));
-			})).then(() => {
 				logOrdering("server", "message", channelId, this);
 				logOrdering("server", "close", channelId, this);
+				this.sendEvent(eventForException(channelId, error));
+			})).then(() => {
 				resolvedPromise.then(escaping(() => this.exitLocalChannel(includedInPrerender)));
 				this.enteringCallback();
 				return Promise.reject(error);
@@ -938,15 +938,20 @@ class ConcurrenceSession {
 	}
 
 	shareSession = async () => {
+		// Server promise so that client can confirm that sharing is enabled
 		const server = this.createServerPromise(async () => {
 			if (!allowMultipleClientsPerSession) {
 				throw new Error("Sharing has been disabled!");
 			}
 			this.sharingEnabled = true;
 		});
+		// Client promise to get the sharing URL (may be behind a load balancer)
 		const client = this.createClientPromise<string>();
 		await server;
-		return await client;
+		const result = await client;
+		// Dummy channel that stays open
+		this.createServerChannel(emptyFunction, emptyFunction, undefined, false);
+		return result;
 	}
 
 	destroy = () => {
