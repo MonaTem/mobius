@@ -29,7 +29,7 @@ class RandomWidget extends preact.Component<{}, { value: string }> {
 	}
 	interval = setInterval(this.updateRandom, 1000);
 	render() {
-		return <span>So random: {this.state.value}</span>;
+		return <span>So random: <span>{this.state.value}</span></span>;
 	}
 	componentWillUnmount() {
 		console.log("Destroying random stream");
@@ -207,6 +207,19 @@ class ListWidget<T extends DbRecord> extends preact.Component<{ fetch: () => Pro
 
 const ItemsWidget = () => <ListWidget fetch={() => concurrence.mysql.query("localhost", "SELECT id, text FROM concurrence_todo.items ORDER BY id DESC")} render={(item: Item) => <ItemWidget item={item} key={item.id}/>} topic="item-changes" />;
 
+class SharingWidget extends preact.Component<{}, { url?: string }> {
+	constructor(props: any, context: any) {
+		super(props, context);
+		concurrence.shareSession().then(url => this.setState({ url }));
+	}
+	render() {
+		const url = this.state.url;
+		if (url) {
+			return <a href={url} target="_blank">Share</a>
+		}
+		return <span>Loading...</span>
+	}
+}
 
 concurrence.host((
 	<div>
@@ -214,17 +227,23 @@ concurrence.host((
 		<ShowHideWidget>
 			<RandomWidget/>
 		</ShowHideWidget>
+		<p/>
 		<strong>Messaging:</strong>
 		<ShowHideWidget>
 			<ReceiveWidget/>
 		</ShowHideWidget>
 		<BroadcastWidget/>
+		<p/>
 		<strong>To Do App:</strong>
 		<ShowHideWidget>
 			<NewItemWidget/>
 			<ItemsWidget/>
 		</ShowHideWidget>
-		<button onClick={() => concurrence.shareSession().then(console.log)}>Share Session</button>
+		<p/>
+		<strong>Sharing:</strong>
+		<ShowHideWidget>
+			<SharingWidget/>
+		</ShowHideWidget>
 	</div>
 ));
 
