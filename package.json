@@ -24,5 +24,9 @@
     "rimraf": "^2.6.1",
     "typescript": "^2.5.1",
     "uuid": "^3.1.0"
+  },
+  "optionalDependencies": {
+    "bufferutil": "^3.0.2",
+    "utf-8-validate": "^3.0.3"
   }
 }
