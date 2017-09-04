@@ -963,16 +963,15 @@ namespace concurrence {
 			if (!this.__state) {
 				if (value instanceof Promise) {
 					if (value.__state) {
-						if (state != PromiseState.Rejected) {
-							state = value.__state;
-							value = value.__value;
-						}
+						state = value.__state;
+						value = value.__value;
 					} else {
-						(value.__observers || (value.__observers = [])).push(settlePromise.bind(this, state, value));
+						(value.__observers || (value.__observers = [])).push(settlePromise.bind(this, PromiseState.Fulfilled, value));
 						return;
 					}
 				} else if (isPromiseLike(value)) {
-					value.then(settlePromise.bind(this, state), settlePromise.bind(this, PromiseState.Rejected));
+					const recover = settlePromise.bind(this, PromiseState.Fulfilled);
+					value.then(recover, recover);
 					return;
 				}
 				this.__state = state;
@@ -1006,10 +1005,13 @@ namespace concurrence {
 				return new Promise<TResult1 | TResult2>((resolve, reject) => {
 					const completed = () => {
 						try {
+							const value = this.__value;
 							if (this.__state == PromiseState.Fulfilled) {
-								resolve(onFulfilled ? onFulfilled(this.__value) : this.__value);
+								resolve(onFulfilled ? onFulfilled(value) : value);
+							} else if (onRejected) {
+								resolve(onRejected(value));
 							} else {
-								reject(onRejected ? onRejected(this.__value) : this.__value);
+								reject(value);
 							}
 						} catch (e) {
 							reject(e);
