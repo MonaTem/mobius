@@ -11,18 +11,34 @@ namespace concurrence {
 	const microTaskQueue : Task[] = [];
 	const taskQueue : Task[] = [];
 
+	function addEventListener(target: EventTarget, name: string, eventListener: EventListener) {
+		if (target.addEventListener) {
+			target.addEventListener(name, eventListener, false);
+		} else if ((target as any).attachEvent) {
+			(target as any).attachEvent("on" + name, eventListener);
+		}
+	}
+
+	function removeEventListener(target: EventTarget, name: string, eventListener: EventListener) {
+		if (target.removeEventListener) {
+			target.removeEventListener(name, eventListener, false);
+		} else if ((target as any).detachEvent) {
+			(target as any).detachEvent("on" + name, eventListener);
+		}
+	}
+
 	const { scheduleFlushTasks, setImmediate } = (() => {
 		let setImmediate: (callback: () => void) => void = window.setImmediate;
 		let scheduleFlushTasks: (() => void) | undefined;
 		// Attempt postMessage, but only if it's asynchronous
-		if (!setImmediate && window.postMessage && window.addEventListener) {
+		if (!setImmediate && window.postMessage) {
 			let isAsynchronous = true;
 			const synchronousTest = () => isAsynchronous = false;
-			window.addEventListener("message", synchronousTest, false);
+			addEventListener(window, "message", synchronousTest);
 			window.postMessage("__concurrence_test", "*");
-			window.removeEventListener("message", synchronousTest, false);
+			removeEventListener(window, "message", synchronousTest);
 			if (isAsynchronous) {
-				window.addEventListener("message", flushTasks, false);
+				addEventListener(window, "message", flushTasks);
 				scheduleFlushTasks = () => {
 					window.postMessage("__concurrence_flush", "*")
 				};
@@ -252,14 +268,19 @@ namespace concurrence {
 	let websocket: WebSocket | undefined;
 
 	const afterLoaded = new Promise(resolve => {
+		let eventTarget: EventTarget = window;
 		for (let i = 0; i < startupScripts.length; i++) {
 			const element = startupScripts[i];
 			if (/\/client\.js$/.test(element.src)) {
-				element.addEventListener("load", resolve, false);
-				return;
+				eventTarget = element;
+				break;
 			}
 		}
-		window.addEventListener("load", resolve, false);
+		const onload = () => {
+			resolve();
+			removeEventListener(eventTarget, "load", onload);
+		};
+		addEventListener(eventTarget, "load", onload);
 	}).then(defer);
 
 	if (hasBootstrap) {
@@ -318,7 +339,7 @@ namespace concurrence {
 		if (sessionID) {
 			dead = true;
 			cancelHeartbeat();
-			window.removeEventListener("unload", destroySession, false);
+			removeEventListener(window, "unload", destroySession);
 			// Forcefully tear down WebSocket
 			if (websocket) {
 				if (websocket.readyState < 2) {
@@ -354,7 +375,7 @@ namespace concurrence {
 			});
 		}
 	}
-	window.addEventListener("unload", destroySession, false);
+	addEventListener(window, "unload", destroySession);
 
 	function dispatchEvent(event: ConcurrenceEvent) : PromiseLike<void> | void {
 		let channelId = event[0];
@@ -520,17 +541,17 @@ namespace concurrence {
 				// Coordinate with existing WebSocket that's in the process of being opened,
 				// falling back to a form POST if necessary
 				const existingSocketOpened = () => {
-					existingSocket.removeEventListener("open", existingSocketOpened, false);
-					existingSocket.removeEventListener("error", existingSocketErrored, false);
+					removeEventListener(existingSocket, "open", existingSocketOpened);
+					removeEventListener(existingSocket, "error", existingSocketErrored);
 					existingSocket.send(messageAsSocketText(message));
 				}
 				const existingSocketErrored = () => {
-					existingSocket.removeEventListener("open", existingSocketOpened, false);
-					existingSocket.removeEventListener("error", existingSocketErrored, false);
+					removeEventListener(existingSocket, "open", existingSocketOpened);
+					removeEventListener(existingSocket, "error", existingSocketErrored);
 					sendFormMessage(message);
 				}
-				existingSocket.addEventListener("open", existingSocketOpened, false);
-				existingSocket.addEventListener("error", existingSocketErrored, false);
+				addEventListener(existingSocket, "open", existingSocketOpened);
+				addEventListener(existingSocket, "error", existingSocketErrored);
 			}
 			return;
 		}
@@ -542,8 +563,8 @@ namespace concurrence {
 				const newSocket = new WebSocketClass(socketURL + messageAsQueryString(message));
 				// Attempt to open a WebSocket for channels, but not heartbeats
 				const newSocketOpened = () => {
-					newSocket.removeEventListener("open", newSocketOpened, false);
-					newSocket.removeEventListener("error", newSocketErrored, false);
+					removeEventListener(newSocket, "open", newSocketOpened);
+					removeEventListener(newSocket, "error", newSocketErrored);
 				}
 				const newSocketErrored = () => {
 					// WebSocket failed, fallback using form POSTs
@@ -552,10 +573,10 @@ namespace concurrence {
 					websocket = undefined;
 					sendFormMessage(message);
 				}
-				newSocket.addEventListener("open", newSocketOpened, false);
-				newSocket.addEventListener("error", newSocketErrored, false);
+				addEventListener(newSocket, "open", newSocketOpened);
+				addEventListener(newSocket, "error", newSocketErrored);
 				let lastWebSocketMessageId = -1;
-				newSocket.addEventListener("message", (event: any) => {
+				addEventListener(newSocket, "message", (event: any) => {
 					const message = deserializeMessage(event.data, lastWebSocketMessageId + 1);
 					lastWebSocketMessageId = message.messageID;
 					const promise = processMessage(message)
@@ -573,7 +594,7 @@ namespace concurrence {
 							}
 						}));
 					}
-				}, false);
+				});
 				websocket = newSocket;
 				return;
 			} catch (e) {
