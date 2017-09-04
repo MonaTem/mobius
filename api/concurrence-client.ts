@@ -136,12 +136,6 @@ namespace concurrence {
 	function emptyFunction() {
 	}
 
-	const reduce = function<T, U>(array: ArrayLike<T>, callback: (previousValue: U, currentValue: T, currentIndex: number, array: ArrayLike<T>) => U, initialValue: U) : U {
-		for (var i = 0; i < array.length; i++) {
-			initialValue = callback(initialValue, array[i], i, array);
-		}
-		return initialValue;
-	};
 	const slice = Array.prototype.slice;
 
 	type ConcurrenceEvent = [number] | [number, any] | [number, any, any];
@@ -374,7 +368,7 @@ namespace concurrence {
 				request.send(body);
 			}
 			// Flush fenced events
-			reduce(fencedLocalEvents, (promise, event) => promise.then(escaping(dispatchEvent.bind(null, event))).then(defer), resolvedPromise).then(() => {
+			fencedLocalEvents.reduce((promise, event) => promise.then(escaping(dispatchEvent.bind(null, event))).then(defer), resolvedPromise).then(() => {
 				// Send disconnection event
 				if (sendWhenDisconnected) {
 					sendWhenDisconnected();
@@ -404,7 +398,7 @@ namespace concurrence {
 				const batchedActions = pendingBatchedActions;
 				pendingBatchedActions = [];
 				isBatched = {};
-				return reduce(batchedActions, (promise, action) => {
+				return batchedActions.reduce((promise, action) => {
 					return promise.then(escaping(action)).then(defer);
 				}, resolvedPromise).then(escaping(callChannelWithEvent.bind(null, channel, event)));
 			}
@@ -426,7 +420,8 @@ namespace concurrence {
 	}
 
 	function processEvents(events: (ConcurrenceEvent | boolean)[]) {
-		return reduce(currentEvents = events, (promise: PromiseLike<any>, event: ConcurrenceEvent | boolean) => {
+		currentEvents = events;
+		return events.reduce((promise: PromiseLike<any>, event: ConcurrenceEvent | boolean) => {
 			if (typeof event == "boolean") {
 				return promise.then(() => hadOpenServerChannel = event);
 			} else {
@@ -964,15 +959,10 @@ namespace concurrence {
 	}
 
 	export function shareSession() : Promise<string> {
-		return Promise.all([
-			createServerPromise(),
-			createClientPromise(() => {
-				return serverURL + "?sessionID=" + sessionID;
-			})
-		]).then(value => {
+		return createServerPromise().then(value => {
 			// Dummy channel that stays open
 			createServerChannel(emptyFunction);
-			return value[1];
+			return value;
 		});
 	}
 
