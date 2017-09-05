@@ -521,7 +521,7 @@ class ConcurrenceClient {
 
 	static requestRequiresForcedEmulation(request: express.Request) : boolean {
 		const userAgent = request.headers['user-agent']+"";
-		return /\bMSIE [1-8]\b/.test(userAgent) || /Firefox/.test(userAgent);
+		return /\bMSIE [1-8]\b/.test(userAgent);
 	}
 
 	async destroy() {
