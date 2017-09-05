@@ -1,5 +1,6 @@
 node_modules
 public/client.js
+public/fallback.js
 build/
-*.js.map
 sessions/
+*.js.map

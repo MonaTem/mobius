@@ -8,13 +8,13 @@ SERVER_FILES = $(filter-out $(call rwildcard, api/, *-client.ts) $(call rwildcar
 HOST_FILES = $(call rwildcard, host/, *.ts) $(call rwildcard, host/, *.js)
 
 
-all: public/client.js build/server.js build/index.js
+all: public/client.js public/fallback.js build/server.js build/index.js
 
 run: all
 	node --trace-warnings --inspect build/index.js
 
 clean:
-	rm -rf public/client.js build/
+	rm -rf public/client.js public/fallback.js build/
 
 cleaner: clean
 	rm -rf node_modules
@@ -31,15 +31,21 @@ preact/package.json: .gitmodules
 preact/dist/preact.js: preact/package.json
 	pushd preact && npm install
 
+node_modules/preact/dist/preact.d.ts: preact/src/preact.d.ts preact/dist/preact.js
+	pushd preact && npm run copy-typescript-definition
+
 node_modules/preact: node_modules/typescript/bin/tsc preact/dist/preact.js
 	mkdir -p node_modules
 	pushd node_modules && ln -sf ../preact/ preact
 
 
-public/client.js: $(CLIENT_FILES) tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact
+public/client.js: $(CLIENT_FILES) tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/typescript/bin/tsc -p tsconfig-client.json
 
-build/server.js: $(SERVER_FILES) tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact
+public/fallback.js: concurrence-fallback.ts tsconfig-fallback.json node_modules/typescript/bin/tsc
+	node_modules/typescript/bin/tsc -p tsconfig-fallback.json
+
+build/server.js: $(SERVER_FILES) tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/typescript/bin/tsc -p tsconfig-server.json
 
 build/index.js: $(HOST_FILES) api/concurrence.d.ts tsconfig-host.json node_modules/typescript/bin/tsc

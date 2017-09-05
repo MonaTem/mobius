@@ -629,6 +629,7 @@ namespace concurrence {
 		}
 		flush();
 		return {
+			channelId,
 			close: () => {
 				// Cleanup the bookkeeping
 				if (pendingChannels[channelId]) {
@@ -811,7 +812,7 @@ namespace concurrence {
 			try {
 				const potentialState = runAPIImplementation(() => onOpen(function() {
 					if (open) {
-						callback.apply(null, Array.prototype.slice.call(arguments));
+						callback.apply(null, slice.call(arguments));
 					}
 				} as any as T));
 				if (onClose) {
@@ -822,6 +823,7 @@ namespace concurrence {
 				escape(e);
 			}
 			return {
+				channelId: -1,
 				close() {
 					if (open) {
 						open = false;
@@ -866,6 +868,7 @@ namespace concurrence {
 		}
 		logOrdering("client", "open", channelId);
 		return {
+			channelId,
 			close() {
 				if (channelId >= 0) {
 					delete pendingLocalChannels[channelId];

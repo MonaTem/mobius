@@ -1,0 +1,25 @@
+{
+	"include": [
+		"node_modules/set-dom/dist/set-dom.js",
+		"concurrence-fallback.ts"
+	],
+	"exclude": [
+	],
+	"compilerOptions": {
+		"baseUrl": "./",
+		"outFile": "public/fallback.js",
+		"allowJs": true,
+		"strict": true,
+		"strictNullChecks": true,
+		"noUnusedLocals": true,
+		"noImplicitThis": true,
+		"module": "none",
+		"target": "es3",
+		"downlevelIteration": true,
+		"typeRoots" : [],
+		"lib": [
+			"es5",
+			"dom"
+		]
+	}
+}

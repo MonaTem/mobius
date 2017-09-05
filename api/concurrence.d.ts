@@ -1,5 +1,6 @@
 interface ConcurrenceChannel {
 	close(): void;
+	readonly channelId: number;
 }
 
 interface ConcurrenceJsonMap {

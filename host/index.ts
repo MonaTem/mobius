@@ -307,19 +307,21 @@ const allowMultipleClientsPerSession = true;
 class ConcurrencePageRenderer {
 	session: ConcurrenceSession;
 	body: Element;
-	clientScript: Element;
+	clientScript: HTMLScriptElement;
 	bootstrapScript?: HTMLScriptElement;
 	formNode?: HTMLFormElement;
+	postbackInput?: HTMLInputElement;
 	sessionIdInput?: HTMLInputElement;
 	clientIdInput?: HTMLInputElement;
 	messageIdInput?: HTMLInputElement;
+	hasServerChannelsInput?: HTMLInputElement;
 	channelCount: number = 0;
 	pageIsReady?: Promise<void>;
 	resolvePageIsReady?: () => void;
 	constructor(session: ConcurrenceSession) {
 		this.session = session;
 		this.body = session.host.document.body.cloneNode(true) as Element;
-		const clientScript = this.body.querySelector("script[src=\"client.js\"]");
+		const clientScript = this.body.querySelector("script[src=\"client.js\"]") as HTMLScriptElement | null;
 		if (!clientScript) {
 			throw new Error("HTML does not contain a client.js reference: " + this.body.outerHTML);
 		}
@@ -353,17 +355,19 @@ class ConcurrencePageRenderer {
 		}
 		return resolvedPromise;
 	}
-	async generateHTML(client: ConcurrenceClient) : Promise<string> {
+	async generateHTML(client: ConcurrenceClient, justFormElement: boolean = false) : Promise<string> {
 		const renderingMode = client.renderingMode;
 		const session = this.session;
 		const document = session.host.document;
 		let bootstrapScript: HTMLScriptElement | undefined;
 		let textNode: Node | undefined;
 		let formNode: HTMLFormElement | undefined;
+		let postbackInput: HTMLInputElement | undefined;
 		let sessionIdInput: HTMLInputElement | undefined;
 		let clientIdInput: HTMLInputElement | undefined;
 		let messageIdInput: HTMLInputElement | undefined;
-		let clientScriptSibling: Node | null = null;
+		let hasServerChannelsInput: HTMLInputElement | undefined;
+		let siblingNode: Node | null = null;
 		// Bootstrap script for prerendering/session restoration
 		if ((renderingMode == ConcurrenceRenderingMode.Prerendering) || client.clientID) {
 			bootstrapScript = this.bootstrapScript;
@@ -381,7 +385,7 @@ class ConcurrencePageRenderer {
 			if (client.clientID) {
 				bootstrapData.clientID = client.clientID;
 			}
-			textNode = session.host.document.createTextNode(compatibleStringify(bootstrapData));
+			textNode = document.createTextNode(compatibleStringify(bootstrapData));
 			bootstrapScript.appendChild(textNode);
 			this.clientScript.parentNode!.insertBefore(bootstrapScript, this.clientScript);
 		}
@@ -390,13 +394,21 @@ class ConcurrencePageRenderer {
 			formNode = this.formNode;
 			if (!formNode) {
 				formNode = this.formNode = document.createElement("form");
-				formNode.setAttribute("action", "?js=no");
+				formNode.setAttribute("action", "?");
 				formNode.setAttribute("method", "POST");
 				formNode.setAttribute("id", "concurrence-form");
 			}
+			postbackInput = this.postbackInput;
+			if (!postbackInput) {
+				postbackInput = this.postbackInput = document.createElement("input");
+				postbackInput.setAttribute("name", "postback");
+				postbackInput.setAttribute("type", "hidden");
+				postbackInput.setAttribute("value", "form");
+			}
+			formNode.appendChild(postbackInput);
 			sessionIdInput = this.sessionIdInput;
 			if (!sessionIdInput) {
-				sessionIdInput = document.createElement("input");
+				sessionIdInput = this.sessionIdInput = document.createElement("input");
 				sessionIdInput.setAttribute("name", "sessionID");
 				sessionIdInput.setAttribute("type", "hidden");
 				sessionIdInput.setAttribute("value", session.sessionID);
@@ -416,20 +428,40 @@ class ConcurrencePageRenderer {
 				messageIdInput.setAttribute("name", "messageID");
 				messageIdInput.setAttribute("type", "hidden");
 			}
-			messageIdInput.setAttribute("value", (++client.incomingMessageId).toString());
+			messageIdInput.setAttribute("value", client.incomingMessageId.toString());
 			formNode.appendChild(messageIdInput);
+			hasServerChannelsInput = this.hasServerChannelsInput;
+			if (!hasServerChannelsInput) {
+				hasServerChannelsInput = this.hasServerChannelsInput = document.createElement("input");
+				hasServerChannelsInput.setAttribute("name", "hasServerChannels");
+				hasServerChannelsInput.setAttribute("type", "hidden");
+			}
+			hasServerChannelsInput.setAttribute("value", session.localChannelCount ? "1" : "");
+			formNode.appendChild(hasServerChannelsInput);
 			migrateChildren(this.body, formNode);
 			this.body.appendChild(formNode);
 		}
 		if (renderingMode >= ConcurrenceRenderingMode.ForcedEmulation) {
-			clientScriptSibling = this.clientScript.nextSibling;
-			this.clientScript.parentNode!.removeChild(this.clientScript);
+			if (justFormElement) {
+				siblingNode = document.createTextNode("");
+				this.clientScript.parentNode!.insertBefore(siblingNode, this.clientScript);
+				this.clientScript.parentNode!.removeChild(this.clientScript);
+			} else {
+				this.clientScript.src = "fallback.js";
+			}
 		}
 		try {
-			return session.host.serializeBody(this.body);
+			if (justFormElement && formNode) {
+				return formNode.outerHTML;
+			} else {
+				return session.host.serializeBody(this.body);
+			}
 		} finally {
 			if (renderingMode >= ConcurrenceRenderingMode.FullEmulation && formNode) {
 				if (formNode) {
+					if (postbackInput) {
+						formNode.removeChild(postbackInput);
+					}
 					if (sessionIdInput) {
 						formNode.removeChild(sessionIdInput);
 					}
@@ -438,6 +470,9 @@ class ConcurrencePageRenderer {
 					}
 					if (messageIdInput) {
 						formNode.removeChild(messageIdInput);
+					}
+					if (hasServerChannelsInput) {
+						formNode.removeChild(hasServerChannelsInput);
 					}
 					migrateChildren(formNode, this.body);
 					this.body.removeChild(formNode);
@@ -455,7 +490,12 @@ class ConcurrencePageRenderer {
 				}
 			}
 			if (client.renderingMode >= ConcurrenceRenderingMode.ForcedEmulation) {
-				this.body.insertBefore(this.clientScript, clientScriptSibling);
+				if (siblingNode) {
+					siblingNode.parentNode!.insertBefore(this.clientScript, siblingNode);
+					siblingNode.parentNode!.removeChild(siblingNode);
+				} else {
+					this.clientScript.src = "client.js";
+				}
 			}
 		}
 	}
@@ -884,6 +924,7 @@ class ConcurrenceSession {
 				escape(e);
 			}
 			return {
+				channelId: -1,
 				close() {
 					if (open) {
 						open = false;
@@ -966,6 +1007,7 @@ class ConcurrenceSession {
 			onClose = undefined;
 		}
 		return {
+			channelId,
 			close
 		};
 	}
@@ -977,6 +1019,7 @@ class ConcurrenceSession {
 		logOrdering("client", "open", channelId, this);
 		this.pendingChannels.set(channelId, callback);
 		return {
+			channelId,
 			close() {
 				if (channelId != -1) {
 					logOrdering("client", "close", channelId, session);
@@ -1373,6 +1416,10 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				client.outgoingMessageId++;
 				await session.pageRenderer.render();
 			}
+			// Steal events when using forced emulation
+			if (client.renderingMode == ConcurrenceRenderingMode.ForcedEmulation) {
+				client.queuedLocalEvents = undefined;
+			}
 			// Render the DOM into HTML source
 			return await session.pageRenderer.generateHTML(client);
 		})().then(html => {
@@ -1401,54 +1448,64 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				return;
 			}
 			const client = await host.clientFromMessage(message, req);
-			if ((client.renderingMode >= ConcurrenceRenderingMode.FullEmulation) && req.query["js"] == "no") {
-				// JavaScript is disabled, emulate events from form POST
-				const session = client.session;
-				const inputEvents: ConcurrenceEvent[] = [];
-				const buttonEvents: ConcurrenceEvent[] = [];
-				message.noJavaScript = true;
-				for (let key in body) {
-					if (!Object.hasOwnProperty.call(body, key)) {
-						continue;
-					}
-					const match = key.match(/^channelID(\d+)$/);
-					if (match && Object.hasOwnProperty.call(body, key)) {
-						const element = session.pageRenderer.body.querySelector("[name=\"" + key + "\"]");
-						if (element) {
-							const event: ConcurrenceEvent = [-match[1], { value: body[key] }];
-							switch (element.nodeName) {
-								case "INPUT":
-									if ((element as HTMLInputElement).value != body[key]) {
-										inputEvents.unshift(event);
-									}
-									break;
-								case "BUTTON":
-									buttonEvents.unshift(event);
-									break;
+			if (client.renderingMode >= ConcurrenceRenderingMode.FullEmulation) {
+				const postback = body["postback"];
+				if (postback) {
+					// JavaScript is disabled, emulate events from form POST
+					const session = client.session;
+					const inputEvents: ConcurrenceEvent[] = [];
+					const buttonEvents: ConcurrenceEvent[] = [];
+					message.noJavaScript = true;
+					for (let key in body) {
+						if (!Object.hasOwnProperty.call(body, key)) {
+							continue;
+						}
+						const match = key.match(/^channelID(\d+)$/);
+						if (match && Object.hasOwnProperty.call(body, key)) {
+							const element = session.pageRenderer.body.querySelector("[name=\"" + key + "\"]");
+							if (element) {
+								const event: ConcurrenceEvent = [-match[1], { value: body[key] }];
+								switch (element.nodeName) {
+									case "INPUT":
+										if ((element as HTMLInputElement).value != body[key]) {
+											inputEvents.unshift(event);
+										}
+										break;
+									case "BUTTON":
+										buttonEvents.unshift(event);
+										break;
+								}
 							}
 						}
 					}
+					message.events = message.events.concat(inputEvents.concat(buttonEvents));
+					// Process the faked message normally
+					await client.receiveMessage(message);
+					if (postback == "js") {
+						// Wait for events to be ready
+						await client.dequeueEvents();
+					} else {
+						// client.produceMessage();
+						// Wait for content to be ready
+						await session.pageRenderer.render();
+					}
+					// Render the DOM into HTML source
+					const html = await session.pageRenderer.generateHTML(client, postback == "js");
+					client.queuedLocalEvents = undefined;
+					// Return HTML
+					res.set("Content-Type", postback == "js" ? "text/plain" : "text/html");
+					res.send(html);
+					return;
 				}
-				message.events = message.events.concat(inputEvents.concat(buttonEvents));
-				// Process the faked message normally
-				await client.receiveMessage(message);
-				// Wait for content to be ready
-				await session.pageRenderer.render();
-				// Render the DOM into HTML source
-				const html = await session.pageRenderer.generateHTML(client);
-				// Return HTML
-				res.set("Content-Type", "text/html");
-				res.send(html);
-			} else {
-				// Dispatch the events contained in the message
-				await client.receiveMessage(message);
-				// Wait for events to be ready
-				await client.dequeueEvents();
-				// Send the serialized response message back to the client
-				const responseMessage = serializeMessage(client.produceMessage());
-				res.set("Content-Type", "text/plain");
-				res.send(responseMessage);
 			}
+			// Dispatch the events contained in the message
+			await client.receiveMessage(message);
+			// Wait for events to be ready
+			await client.dequeueEvents();
+			// Send the serialized response message back to the client
+			const responseMessage = serializeMessage(client.produceMessage());
+			res.set("Content-Type", "text/plain");
+			res.send(responseMessage);
 		})().catch(e => {
 			res.status(500);
 			res.set("Content-Type", "text/plain");
