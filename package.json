@@ -4,7 +4,10 @@
   "description": "Experiment for simpler web apps",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "make -j4",
+    "clean": "make clean",
+    "minify": "make minify -j4",
+    "run": "make run -j4"
   },
   "author": "Ryan Petrich",
   "license": "ISC",
