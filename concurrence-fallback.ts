@@ -23,7 +23,9 @@
  * SOFTWARE.
  */
 (() => {
-	if (!("XMLHttpRequest" in window)) {
+	const supportsNativeXHR = "XMLHttpRequest" in window;
+	const supportsActiveXObject = "ActiveXObject" in window;
+	if (!supportsNativeXHR && !supportsActiveXObject) {
 		return;
 	}
 
@@ -80,7 +82,7 @@
 	}
 
 	function send(target?: HTMLElement) {
-		var request = new XMLHttpRequest();
+		var request: XMLHttpRequest = supportsNativeXHR ? new XMLHttpRequest() : new (window as any).ActiveXObject("MSXML2.XMLHTTP.3.0");
 		request.open("POST", location.href, true);
 		request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
 		var body = ["postback=js"];
