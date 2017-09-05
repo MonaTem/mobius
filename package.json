@@ -19,6 +19,7 @@
     "body-parser": "^1.17.2",
     "express": "^4.15.4",
     "express-ws": "^3.0.0",
+    "google-closure-compiler-js": "^20170806.0.0",
     "jsdom": "^11.1.0",
     "mysql": "^2.14.1",
     "rimraf": "^2.6.1",

@@ -4,3 +4,4 @@ public/fallback.js
 build/
 sessions/
 *.js.map
+*.min.js
