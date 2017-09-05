@@ -9,8 +9,8 @@
     "minify": "make minify -j4",
     "run": "make run -j4"
   },
-  "author": "Ryan Petrich",
-  "license": "ISC",
+  "author": "Ryan Petrich <rpetrich@gmail.com>",
+  "license": "MIT",
   "dependencies": {
     "@types/body-parser": "^1.16.4",
     "@types/express": "^4.0.37",
