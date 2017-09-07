@@ -161,7 +161,9 @@ class ConcurrenceHost {
 		if (sandboxMode == ConcurrenceSandboxMode.Full) {
 			// Full sandboxing, creating a new global context each time
 			const vmScript = new vm.Script(scriptContents, {
-				filename: scriptPath
+				filename: scriptPath,
+				lineOffset: 0,
+				displayErrors: true
 			});
 			this.sandbox = vmScript.runInNewContext.bind(vmScript) as (context: ConcurrenceSandboxContext) => void;
 		} else {
@@ -171,7 +173,9 @@ class ConcurrenceHost {
 				},
 			};
 			vm.runInNewContext("function app(self){with(self){return(function(self,global,require,document,request,concurrence){" + scriptContents + "\n})(self,self.global,self.require,self.document,self.request,self.concurrence)}}", context, {
-				filename: scriptPath
+				filename: scriptPath,
+				lineOffset: 0,
+				displayErrors: true
 			});
 			this.sandbox = context.app;
 			delete context.app;
