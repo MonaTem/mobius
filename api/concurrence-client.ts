@@ -363,6 +363,7 @@ namespace concurrence {
 	function destroySession() {
 		if (sessionID) {
 			dead = true;
+			hadOpenServerChannel = false;
 			cancelHeartbeat();
 			removeEventListener(window, "unload", destroySession);
 			// Forcefully tear down WebSocket
@@ -645,6 +646,12 @@ namespace concurrence {
 	}
 
 	function createRawServerChannel(callback: (event?: ConcurrenceEvent) => void) : ConcurrenceChannel {
+		if (!insideCallback) {
+			throw new Error("Unable to create server channel in this context!");
+		}
+		if (dead) {
+			throw disconnectedError();
+		}
 		// Expect that the server will run some code in parallel that provides data
 		pendingChannelCount++;
 		let channelId = ++remoteChannelCounter;
@@ -704,39 +711,31 @@ namespace concurrence {
 	}
 
 	// APIs for client/, not to be used inside src/
-	export function createServerPromise<T extends ConcurrenceJsonValue>(...args: any[]) : PromiseLike<T> { // Must be cast to the proper signature
-		return new Promise<T>((resolve, reject) => {
-			if (dead) {
-				return reject(disconnectedError());
+	export const createServerPromise: <T extends ConcurrenceJsonValue>(...args: any[]) => PromiseLike<T> = <T extends ConcurrenceJsonValue>() => new Promise<T>((resolve, reject) => {
+		const channel = createRawServerChannel(event => {
+			channel.close();
+			if (event) {
+				parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
+			} else {
+				reject(disconnectedError());
 			}
-			if (!insideCallback) {
-				return reject(new Error("Unable to create server promise in this context!"));
-			}
-			const channel = createRawServerChannel(event => {
-				channel.close();
-				if (event) {
-					parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
-				} else {
-					reject(disconnectedError());
-				}
-			});
 		});
-	};
+	});
 
 	export const synchronize = createServerPromise as () => PromiseLike<void>;
 
-	export function createServerChannel<T extends Function>(callback: T): ConcurrenceChannel {
+	export function createServerChannel<T extends Function>(callback: T, onAbort?: () => void): ConcurrenceChannel {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
-		}
-		if (!insideCallback) {
-			throw new Error("Unable to create server channel in this context!");
 		}
 		const channel = createRawServerChannel(event => {
 			if (event) {
 				callback.apply(null, event.slice(1));
 			} else {
 				channel.close();
+				if (onAbort) {
+					onAbort();
+				}
 			}
 		});
 		return channel;

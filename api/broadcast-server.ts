@@ -14,7 +14,7 @@ namespace concurrence {
 			}
 		}
 	}
-	export function receive(topic: string, callback: (message: ConcurrenceJsonValue) => void): ConcurrenceChannel {
+	export function receive(topic: string, callback: (message: ConcurrenceJsonValue) => void, onAbort?: () => void): ConcurrenceChannel {
 		const topics = global.observers || (global.observers = {});
 		return createServerChannel(callback, send => {
 			const observers = Object.hasOwnProperty.call(topics, topic) ? topics[topic] : (topics[topic] = []);

@@ -5,7 +5,8 @@ namespace concurrence {
 
 	// Override the Date object with one that shows determinism errors
 	// see: https://stackoverflow.com/a/22402079/4007
-	const now = concurrence.coordinateValue.bind(null, Date.now.bind(Date));
+	const originalNow = Date.now.bind(Date);
+	const now = concurrence.coordinateValue.bind(null, originalNow);
 	(self as any).Date = function(__Date) {
 		// Copy that property!
 		for (var i in __Date) {
@@ -61,7 +62,7 @@ namespace concurrence {
 	}(Date);
 	Date.now = now;
 
-	const timers: { [ id: number] : ConcurrenceChannel } = {};
+	const timers: { [ id: number] : { close: () => void } } = {};
 	let currentTimerId = 0;
 
 	const realSetInterval = setInterval;
@@ -73,7 +74,12 @@ namespace concurrence {
 			return realSetInterval(callback, delay);
 		}
 		const result = --currentTimerId;
-		timers[result] = createServerChannel(callback);
+		timers[result] = createServerChannel(callback, () => {
+			const realIntervalId = realSetInterval(callback, delay);
+			timers[result] = {
+				close: () => realClearInterval(realIntervalId)
+			};
+		});
 		return result;
 	};
 
@@ -98,7 +104,13 @@ namespace concurrence {
 			return realSetTimeout(callback, delay);
 		}
 		const result = --currentTimerId;
-		timers[result] = createServerChannel(callback);
+		const targetTime = originalNow() + delay;
+		timers[result] = createServerChannel(callback, () => {
+			const realTimeoutId = realSetTimeout(callback, targetTime - originalNow());
+			timers[result] = {
+				close: () => realClearTimeout(realTimeoutId)
+			};
+		});
 		return result;
 	};
 
