@@ -444,6 +444,7 @@ namespace concurrence {
 	}
 
 	function processEvents(events: (ConcurrenceEvent | boolean)[]) {
+		hadOpenServerChannel = pendingChannelCount != 0;
 		currentEvents = events;
 		return events.reduce((promise: PromiseLike<any>, event: ConcurrenceEvent | boolean) => {
 			if (typeof event == "boolean") {
@@ -451,7 +452,10 @@ namespace concurrence {
 			} else {
 				return promise.then(escaping(dispatchEvent.bind(null, event))).then(defer);
 			}
-		}, resolvedPromise).then(() => currentEvents = undefined);
+		}, resolvedPromise).then(() => {
+			currentEvents = undefined;
+			hadOpenServerChannel = pendingChannelCount != 0;
+		});
 	}
 
 	function processMessage(message: ConcurrenceServerMessage) : PromiseLike<void> {
@@ -467,7 +471,6 @@ namespace concurrence {
 		}
 		incomingMessageId++;
 		// Read each event and dispatch the appropriate event in order
-		hadOpenServerChannel = pendingChannelCount != 0;
 		const promise = processEvents(message.events).then(() => {
 			const reorderedMessage = reorderedMessages[incomingMessageId];
 			if (reorderedMessage) {
