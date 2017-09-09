@@ -13,5 +13,6 @@ namespace concurrence {
 		ok: boolean;
 		statusText: string;
 		text: string;
+		headers: { [name: string]: string };
 	}
 }

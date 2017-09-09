@@ -29,7 +29,7 @@ namespace concurrence {
 					request.send();
 				}
 			})).then(request => {
-				const headerString = response.getAllResponseHeaders ? response.getAllResponseHeaders() : null;
+				const headerString = request.getAllResponseHeaders ? request.getAllResponseHeaders() : null;
 				const headers: { [name: string]: string } = {};
 				if (headerString) {
 					const splitHeaders = headerString.split(/\r?\n/g);
@@ -41,7 +41,7 @@ namespace concurrence {
 					}
 				}
 				const status = request.status;
-				return {
+				const response: FetchResponse = {
 					type: "basic",
 					url,
 					status,
@@ -49,7 +49,8 @@ namespace concurrence {
 					statusText: request.statusText,
 					text: request.responseText,
 					headers,
-				} as FetchResponse;
+				};
+				return response;
 			}));
 		}
 		return createServerPromise<FetchResponse>();
