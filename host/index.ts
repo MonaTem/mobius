@@ -24,6 +24,18 @@ const stat = util.promisify(fs.stat);
 const exists = (path: string) => new Promise<boolean>(resolve => fs.exists(path, resolve));
 const rimraf = util.promisify(rimrafAsync);
 
+function memoize<I, O>(func: (input: I) => O) {
+	const values = new Map<I, O>();
+	return (input: I) => {
+		if (values.has(input)) {
+			return values.get(input) as O;
+		}
+		const result = func(input);
+		values.set(input, result);
+		return result;
+	}
+}
+
 server.disable("x-powered-by");
 server.disable("etag");
 
@@ -136,52 +148,80 @@ const enum ConcurrenceSandboxMode {
 	Full = 1,
 };
 
-const sandboxMode: ConcurrenceSandboxMode = ConcurrenceSandboxMode.Simple;
+const sandboxMode = ConcurrenceSandboxMode.Simple as ConcurrenceSandboxMode;
 
-interface ConcurrenceSandboxContext {
-	self: ConcurrenceSandboxContext,
-	global: NodeJS.Global,
+interface SandboxModule {
+	exports?: any
+}
+
+interface SandboxGlobal {
+	self: this,
+	global: this | NodeJS.Global,
 	require: (name: string) => any,
+	module: SandboxModule,
+};
+
+const sandboxScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: string) => {
+	const scriptContents = fs.readFileSync(scriptPath).toString();
+	if (sandboxMode == ConcurrenceSandboxMode.Full) {
+		// Full sandboxing, creating a new global context each time
+		const vmScript = new vm.Script(scriptContents, {
+			filename: scriptPath,
+			lineOffset: 0,
+			displayErrors: true
+		});
+		return vmScript.runInNewContext.bind(vmScript) as (global: T) => void;
+	} else {
+		// Simple sandboxing, relying on function scope
+		const context = {
+			app: (global: T) => {
+			},
+		};
+		vm.runInNewContext("function app(self){with(self){return(function(self,global,require,document,request,concurrence){" + scriptContents + "\n})(self,self.global,self.require,self.document,self.request,self.concurrence)}}", context, {
+			filename: scriptPath,
+			lineOffset: 0,
+			displayErrors: true
+		});
+		const result = context.app;
+		delete context.app;
+		return result;
+	}
+});
+
+function loadModule<T>(path: string, module: SandboxModule, globalProperties: T, require: (name: string) => any) {
+	const moduleGlobal: SandboxGlobal & T = Object.create(global);
+	for (let key in globalProperties) {
+		if (Object.hasOwnProperty.call(globalProperties, key)) {
+			moduleGlobal[key as keyof T] = globalProperties[key];
+		}
+	}
+	moduleGlobal.self = moduleGlobal;
+	moduleGlobal.global = global;
+	moduleGlobal.require = require;
+	// moduleGlobal.module = module;
+	sandboxScriptAtPath(path)(moduleGlobal);
+}
+
+interface ConcurrenceGlobalProperties {
 	document: Document,
 	request: express.Request,
 	concurrence: any
-};
+}
 
 class ConcurrenceHost {
 	sessions = new Map<string, ConcurrenceSession>();
-	sandbox: (context: ConcurrenceSandboxContext) => void;
+	scriptPath: string;
 	htmlSource: string;
 	dom: JSDOM;
 	document: Document;
 	staleSessionTimeout: any;
 	secrets: ConcurrenceJsonValue;
 	renderingMode: ConcurrenceRenderingMode = ConcurrenceRenderingMode.Prerendering;
-	constructor(scriptPath: string, scriptContents: string, htmlPath: string, htmlContents: string, secrets: ConcurrenceJsonValue) {
+	constructor(scriptPath: string, htmlPath: string, htmlContents: string, secrets: ConcurrenceJsonValue) {
 		this.secrets = secrets;
-		if (sandboxMode == ConcurrenceSandboxMode.Full) {
-			// Full sandboxing, creating a new global context each time
-			const vmScript = new vm.Script(scriptContents, {
-				filename: scriptPath,
-				lineOffset: 0,
-				displayErrors: true
-			});
-			this.sandbox = vmScript.runInNewContext.bind(vmScript) as (context: ConcurrenceSandboxContext) => void;
-		} else {
-			// Simple sandboxing, relying on function scope
-			const context = {
-				app: (context: ConcurrenceSandboxContext) => {
-				},
-			};
-			vm.runInNewContext("function app(self){with(self){return(function(self,global,require,document,request,concurrence){" + scriptContents + "\n})(self,self.global,self.require,self.document,self.request,self.concurrence)}}", context, {
-				filename: scriptPath,
-				lineOffset: 0,
-				displayErrors: true
-			});
-			this.sandbox = context.app;
-			delete context.app;
-		}
 		this.dom = new JSDOM(htmlContents);
 		this.document = (this.dom.window as Window).document as Document;
+		this.scriptPath = scriptPath;
 		patchJSDOM(this.document);
 		this.staleSessionTimeout = setInterval(() => {
 			const now = Date.now();
@@ -652,13 +692,17 @@ const enum ArchiveStatus {
 	Full
 };
 
+const apiPath = path.resolve(__dirname, "../api") + "/";
+
 class ConcurrenceSession {
 	host: ConcurrenceHost;
 	sessionID: string;
 	dead: boolean = false;
 	sendWhenDisconnected: () => void | undefined;
 	// Script context
-	context: ConcurrenceSandboxContext;
+	modules = new Map<string, SandboxModule>();
+	concurrence: any;
+	request: express.Request;
 	hasRun: boolean = false;
 	pageRenderer: ConcurrencePageRenderer;
 	clients = new Map<number, ConcurrenceClient>();
@@ -690,16 +734,8 @@ class ConcurrenceSession {
 		this.sessionID = sessionID;
 		this.pageRenderer = new ConcurrencePageRenderer(this);
 		// Server-side version of the API
-		const context = Object.create(global) as ConcurrenceSandboxContext;
-		context.self = context;
-		context.global = global;
-		context.require = require;
-		context.document = Object.create(this.host.document, {
-			body: { value: this.pageRenderer.body }
-		});
-		context.request = request;
 		const session = this;
-		context.concurrence = {
+		this.concurrence = {
 			disconnect: () => this.destroy().catch(escape),
 			whenDisconnected: new Promise(resolve => this.sendWhenDisconnected = resolve),
 			get insideCallback() {
@@ -716,10 +752,10 @@ class ConcurrenceSession {
 			shareSession: this.shareSession,
 			showDeterminismWarning: showDeterminismWarning
 		};
+		this.request = request;
 		if (allowMultipleClientsPerSession) {
 			this.recentEvents = [];
 		}
-		this.context = context;
 	}
 
 	newClient(request: express.Request) {
@@ -733,12 +769,39 @@ class ConcurrenceSession {
 		throw new Error("Multiple clients attached to the same session are not supported!");
 	}
 
+	loadModule(path: string, newModule: SandboxModule) {
+		const globalProperties: ConcurrenceGlobalProperties = {
+			document: this.host.document,
+			request: this.request,
+			concurrence: this.concurrence
+		};
+		loadModule(path, newModule, globalProperties, (name: string) => {
+			// if (name == "concurrence") {
+			// 	return this.concurrence;
+			// }
+			// const path = require.resolve(name);
+			// console.log(path, __dirname, apiPath);
+			// const existingModule = this.modules.get(path);
+			// if (existingModule) {
+			// 	return existingModule.exports;
+			// }
+			// if (path.substring(0, apiPath.length) == apiPath) {
+			// 	const newModule: SandboxModule = {};
+			// 	this.modules.set(path, newModule);
+			// 	this.loadModule(path, newModule);
+			// 	return newModule.exports;
+			// }
+			return require(name);
+		});
+		return newModule;
+	}
+
+	// Async so that errors inside user code startup will log to console as unhandled promise rejection, but app will proceed
 	async run() {
 		if (!this.hasRun) {
 			this.hasRun = true;
 			this.enteringCallback();
-			// Async so that errors inside user code startup will log to console as unhandled promise rejection, but app will proceed
-			this.host.sandbox(this.context);
+			this.loadModule(this.host.scriptPath, {});
 		}
 	}
 
@@ -1157,7 +1220,7 @@ class ConcurrenceSession {
 				throw new Error("Sharing has been disabled!");
 			}
 			this.sharingEnabled = true;
-			const request: express.Request = this.context.request;
+			const request: express.Request = this.request;
 			return request.protocol + "://" + request.get("host") + request.url + "?sessionID=" + this.sessionID;
 		});
 		const result = await server;
@@ -1169,7 +1232,7 @@ class ConcurrenceSession {
 	async destroy() {
 		if (!this.dead) {
 			this.dead = true;
-			this.context.concurrence.dead = true;
+			this.concurrence.dead = true;
 			await this.archiveEvents(true);
 			// await unlink(this.host.pathForSessionId(this.sessionID));
 			for (const pair of this.pendingChannels) {
@@ -1336,7 +1399,6 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 
 (async () => {
 	const serverJSPath = relativePath("server.js");
-	const serverJSContents = readFile(serverJSPath);
 
 	const htmlPath = relativePath("../public/index.html");
 	const htmlContents = readFile(htmlPath);
@@ -1357,7 +1419,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 		await unlink("sessions/.graceful");
 	}
 
-	const host = new ConcurrenceHost(serverJSPath, (await serverJSContents).toString(), htmlPath, (await htmlContents).toString(), JSON.parse((await secrets).toString()));
+	const host = new ConcurrenceHost(serverJSPath, htmlPath, (await htmlContents).toString(), JSON.parse((await secrets).toString()));
 
 	function messageFromBody(body: { [key: string]: any }) : ConcurrenceClientMessage {
 		const message: ConcurrenceClientMessage = {
