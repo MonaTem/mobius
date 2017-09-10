@@ -16,7 +16,7 @@
 		"noImplicitThis": true,
 		"module": "ES6",
 		"moduleResolution": "node",
-		"target": "es2017",
+		"target": "es5",
 		"downlevelIteration": false,
 		"types": [],
 		"lib": [

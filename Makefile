@@ -77,5 +77,5 @@ src/app.js: $(SRC_FILES) api/concurrence.d.ts types/*.d.ts tsconfig-app.json nod
 	node_modules/typescript/bin/tsc -p tsconfig-app.json
 
 
-%.min.js: %.js
-	node ./node_modules/google-closure-compiler-js/cmd.js --languageIn ES6 --languageOut ES3 --assumeFunctionWrapper true $< > $@
+%.min.js: %.js Makefile
+	node ./node_modules/google-closure-compiler-js/cmd.js --languageIn ES5 --languageOut ES3 --assumeFunctionWrapper true --rewritePolyfills false $< > $@
