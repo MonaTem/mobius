@@ -4,16 +4,16 @@ import { receive, send } from "broadcast";
 import * as sql from "sql";
 import { shareSession } from "concurrence";
 
-class ShowHideWidget extends dom.Component<{}, { visible: boolean }> {
+class CollapsibleSection extends dom.Component<{ title: string }, { visible: boolean }> {
 	constructor(props: any, context: any) {
 		super(props, context);
 		this.state = { visible: false };
 	}
-	render(props: dom.ComponentProps<this>) {
+	render() {
 		if (this.state.visible) {
-			return <div><button onClick={this.hide}>Hide</button><div>{props.children}</div></div>
+			return <div><div><button onClick={this.hide}>–</button> <strong>{this.props.title}:</strong></div><div>{this.props.children}</div></div>
 		} else {
-			return <div><button onClick={this.show}>Show</button></div>
+			return <div><div><button onClick={this.show}>+</button> <strong>{this.props.title}:</strong></div></div>
 		}
 	}
 	show = () => this.setState({ visible: true })
@@ -229,27 +229,23 @@ class SharingWidget extends dom.Component<{}, { url?: string }> {
 
 dom.host((
 	<div>
-		<strong>Random numbers:</strong>
-		<ShowHideWidget>
+		<CollapsibleSection title="Random numbers">
 			<RandomWidget/>
-		</ShowHideWidget>
+		</CollapsibleSection>
 		<p/>
-		<strong>Messaging:</strong>
-		<ShowHideWidget>
+		<CollapsibleSection title="Messaging">
 			<ReceiveWidget/>
-		</ShowHideWidget>
+		</CollapsibleSection>
 		<BroadcastWidget/>
 		<p/>
-		<strong>To Do App:</strong>
-		<ShowHideWidget>
+		<CollapsibleSection title="To Do List">
 			<NewItemWidget/>
 			<ItemsWidget/>
-		</ShowHideWidget>
+		</CollapsibleSection>
 		<p/>
-		<strong>Sharing:</strong>
-		<ShowHideWidget>
+		<CollapsibleSection title="Session Sharing">
 			<SharingWidget/>
-		</ShowHideWidget>
+		</CollapsibleSection>
 	</div>
 ));
 
