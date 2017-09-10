@@ -1,5 +1,6 @@
 import { Channel, JsonValue } from "mobius-types";
 import { interceptGlobals, roundTrip } from "determinism";
+import { logOrdering, eventForValue, eventForException, parseValueEvent, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "_internal";
 /**
  * @license THE MIT License (MIT)
  * 
@@ -162,37 +163,11 @@ function emptyFunction() {
 
 const slice = Array.prototype.slice;
 
-type Event = [number] | [number, any] | [number, any, any];
-
-interface ServerMessage {
-	events: Event[];
-	messageID: number;
-	close?: boolean;
-}
-
-interface ClientMessage extends ServerMessage {
-	sessionID?: string;
-	clientID?: number;
-	destroy?: true;
-}
-
-function logOrdering(from: "client" | "server", type: "open" | "close" | "message", channelId: number) {
-	// const stack = (new Error().stack || "").toString().split(/\n\s*/).slice(2).map(s => s.replace(/^at\s*/, ""));
-	// console.log(from + " " + type + " " + channelId, stack);
-}
-
 function uuid() : string {
 	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
 		const r = Math.random() * 16 | 0;
 		return (c == "x" ? r : (r & 3 | 8)).toString(16);
 	});
-}
-
-interface BootstrapData {
-	sessionID: string;
-	clientID?: number;
-	events?: (Event | boolean)[];
-	channels?: number[];
 }
 
 // Message ordering
@@ -700,10 +675,6 @@ export function flush() {
 	}
 }
 
-function disconnectedError() {
-	return new Error("Session has been disconnected!");
-}
-
 // APIs for client/, not to be used inside src/
 export const createServerPromise: <T extends JsonValue>(...args: any[]) => PromiseLike<T> = <T extends JsonValue>() => new Promise<T>((resolve, reject) => {
 	const channel = createRawServerChannel(event => {
@@ -735,56 +706,6 @@ export function createServerChannel<T extends Function>(callback: T, onAbort?: (
 	return channel;
 }
 
-function eventForValue(channelId: number, value: JsonValue | void) : Event {
-	return typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)];
-}
-
-function eventForException(channelId: number, error: any) : Event {
-	// Convert Error types to a representation that can be reconstituted on the server
-	let type : any = 1;
-	let serializedError: any = error;
-	if (error instanceof Error) {
-		let errorClass : any = error.constructor;
-		if ("name" in errorClass) {
-			type = errorClass.name;
-		} else {
-			// ES5 support
-			type = errorClass.toString().match(/.*? (\w+)/)[0];
-		}
-		serializedError = { message: error.message, stack: error.stack };
-		let anyError : any = error;
-		for (let i in anyError) {
-			if (Object.hasOwnProperty.call(anyError, i)) {
-				serializedError[i] = anyError[i];
-			}
-		}
-	}
-	return [channelId, serializedError, type];
-}
-
-function parseValueEvent<T>(event: Event | undefined, resolve: (value: JsonValue) => T, reject: (error: Error | JsonValue) => T) : T {
-	if (!event) {
-		return reject(disconnectedError());
-	}
-	let value = event[1];
-	if (event.length != 3) {
-		return resolve(value);
-	}
-	const type = event[2];
-	// Convert serialized representation into the appropriate Error type
-	if (type != 1 && /Error$/.test(type)) {
-		const ErrorType : typeof Error = (window as any)[type] || Error;
-		const error: Error = new ErrorType(value.message);
-		delete value.message;
-		for (let i in value) {
-			if (Object.hasOwnProperty.call(value, i)) {
-				(error as any)[i] = value[i];
-			}
-		}
-		return reject(error);
-	}
-	return reject(value);
-}
 
 export function createClientPromise<T extends JsonValue | void>(ask: () => (PromiseLike<T> | T)) : PromiseLike<T> {
 	if (!insideCallback) {

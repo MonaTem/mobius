@@ -13,8 +13,9 @@ const expressWs = require("express-ws");
 import * as uuid from "uuid";
 import { JSDOM } from "jsdom";
 
-import { interceptGlobals, roundTrip, FakedGlobals } from "../common/determinism";
 import { JsonValue, JsonMap, Channel } from "mobius-types";
+import { interceptGlobals, roundTrip, FakedGlobals } from "../common/determinism";
+import { logOrdering, eventForValue, eventForException, parseValueEvent, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "../common/_internal";
 
 const server = express();
 
@@ -42,11 +43,6 @@ function memoize<I, O>(func: (input: I) => O) {
 
 server.disable("x-powered-by");
 server.disable("etag");
-
-function logOrdering(from: "client" | "server", type: "open" | "close" | "message", channelId: number, session: Session) {
-	// const stack = (new Error().stack || "").toString().split(/\n\s*/).slice(2).map(s => s.replace(/^at\s*/, ""));
-	// console.log(from + " " + type + " " + channelId + " on " + session.sessionID, stack);
-}
 
 const resolvedPromise: Promise<void> = Promise.resolve();
 
@@ -79,41 +75,6 @@ function emptyFunction() {
 
 function compatibleStringify(value: any): string {
 	return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\/script/g, "<\\/script");
-}
-
-function eventForValue(channelId: number, value: JsonValue | void) : Event {
-	return typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)];
-}
-
-function eventForException(channelId: number, error: any) : Event {
-	// Serialize the reject error type or string
-	let type: number | string = 1;
-	let serializedError = error;
-	if (error instanceof Error) {
-		// Convert Error types to a representation that can be reconstituted on the client
-		type = error.constructor.name;
-		serializedError = Object.assign({ message: error.message, stack: error.stack }, error);
-	}
-	return [channelId, serializedError, type];
-}
-
-function parseValueEvent<T>(event: Event | undefined, resolve: (value: JsonValue) => T, reject: (error: Error | JsonValue) => T) : T {
-	if (!event) {
-		return reject(new Error("Session has been disconnected!"));
-	}
-	let value = event[1];
-	if (event.length != 3) {
-		return resolve(value);
-	}
-	const type = event[2];
-	// Convert serialized representation into the appropriate Error type
-	if (type != 1 && /Error$/.test(type)) {
-		const ErrorType : typeof Error = (self as any)[type] || Error;
-		const error : Error = new ErrorType(value.message);
-		delete value.message;
-		return reject(Object.assign(error, value));
-	}
-	return reject(value);
 }
 
 let patchedJSDOM = false;
@@ -310,34 +271,12 @@ class Host {
 	}
 }
 
-type Event = [number] | [number, any] | [number, any, any];
-
-interface ServerMessage {
-	events: Event[];
-	messageID: number;
-	close?: boolean;
-}
-
-interface ClientMessage extends ServerMessage {
-	sessionID?: string;
-	clientID?: number;
-	destroy?: true;
-	noJavaScript?: true;
-}
-
 const enum RenderingMode {
 	ClientOnly = 0,
 	Prerendering = 1,
 	FullEmulation = 2,
 	ForcedEmulation = 3,
 };
-
-interface BootstrapData {
-	sessionID: string;
-	clientID?: number;
-	events?: (Event | boolean)[];
-	channels?: number[];
-}
 
 const allowMultipleClientsPerSession = true;
 
@@ -844,7 +783,7 @@ class Session {
 		}
 		const channel = this.pendingChannels.get(channelId);
 		if (channel) {
-			logOrdering("client", "message", channelId, this);
+			logOrdering("client", "message", channelId, this.sessionID);
 			channel(event.slice() as Event);
 		} else {
 			// Client-side event source was destroyed on the server between the time it generated an event and the time the server received it
@@ -918,18 +857,18 @@ class Session {
 			}
 		});
 		return new Promise<T>((resolve, reject) => {
-			logOrdering("server", "open", channelId, this);
+			logOrdering("server", "open", channelId, this.sessionID);
 			this.enterLocalChannel(includedInPrerender);
 			this.localChannels.set(channelId, (event?: Event) => {
 				if (channelId >= 0) {
 					if (event) {
-						logOrdering("server", "message", channelId, this);
-						logOrdering("server", "close", channelId, this);
+						logOrdering("server", "message", channelId, this.sessionID);
+						logOrdering("server", "close", channelId, this.sessionID);
 						resolvedPromise.then(exit);
 						this.enteringCallback();
 						parseValueEvent(event, resolve as (value: JsonValue) => void, reject);
 					} else {
-						logOrdering("server", "close", channelId, this);
+						logOrdering("server", "close", channelId, this.sessionID);
 						exit();
 					}
 				}
@@ -950,8 +889,8 @@ class Session {
 				if (channelId >= 0) {
 					try {
 						this.updateOpenServerChannelStatus(true);
-						logOrdering("server", "message", channelId, this);
-						logOrdering("server", "close", channelId, this);
+						logOrdering("server", "message", channelId, this.sessionID);
+						logOrdering("server", "close", channelId, this.sessionID);
 						this.sendEvent(eventForValue(channelId, value));
 					} catch (e) {
 						escape(e);
@@ -971,8 +910,8 @@ class Session {
 				if (channelId >= 0) {
 					try {
 						this.updateOpenServerChannelStatus(true);
-						logOrdering("server", "message", channelId, this);
-						logOrdering("server", "close", channelId, this);
+						logOrdering("server", "message", channelId, this.sessionID);
+						logOrdering("server", "close", channelId, this.sessionID);
 						this.sendEvent(eventForException(channelId, error));
 					} catch (e) {
 						escape(e);
@@ -1022,11 +961,11 @@ class Session {
 		// Record and ship arguments of server-side events
 		const session = this;
 		let channelId = ++session.localChannelCounter;
-		logOrdering("server", "open", channelId, this);
+		logOrdering("server", "open", channelId, this.sessionID);
 		session.enterLocalChannel(includedInPrerender);
 		const close = () => {
 			if (channelId >= 0) {
-				logOrdering("server", "close", channelId, session);
+				logOrdering("server", "close", channelId, session.sessionID);
 				session.localChannels.delete(channelId);
 				channelId = -1;
 				resolvedPromise.then(escaping(() => {
@@ -1044,7 +983,7 @@ class Session {
 		};
 		session.localChannels.set(channelId, (event?: Event) => {
 			if (event) {
-				logOrdering("server", "message", channelId, this);
+				logOrdering("server", "message", channelId, this.sessionID);
 				session.enteringCallback();
 				(callback as any as Function).apply(null, roundTrip(event.slice(1)));
 			} else {
@@ -1070,7 +1009,7 @@ class Session {
 							} catch (e) {
 								escape(e);
 							}
-							logOrdering("server", "message", channelId, session);
+							logOrdering("server", "message", channelId, session.sessionID);
 							session.enteringCallback();
 							(callback as any as Function).apply(null, args);
 						})();
@@ -1098,13 +1037,13 @@ class Session {
 		const session = this;
 		session.pendingChannelCount++;
 		let channelId = ++session.remoteChannelCounter;
-		logOrdering("client", "open", channelId, this);
+		logOrdering("client", "open", channelId, this.sessionID);
 		this.pendingChannels.set(channelId, callback);
 		return {
 			channelId,
 			close() {
 				if (channelId != -1) {
-					logOrdering("client", "close", channelId, session);
+					logOrdering("client", "close", channelId, session.sessionID);
 					session.pendingChannels.delete(channelId);
 					channelId = -1;
 					if ((--session.pendingChannelCount) == 0) {
@@ -1121,7 +1060,7 @@ class Session {
 				return reject(new Error("Unable to create client promise in this context!"));
 			}
 			if (this.dead) {
-				return reject(new Error("Session has been disconnected!"));
+				return reject(disconnectedError());
 			}
 			const channel = this.createRawClientChannel(event => {
 				channel.close();
@@ -1129,7 +1068,7 @@ class Session {
 				if (event) {
 					parseValueEvent(event, resolve as (value: JsonValue | void) => void, reject);
 				} else {
-					reject(new Error("Session has been disconnected!"))
+					reject(disconnectedError());
 				}
 			});
 		});
@@ -1179,27 +1118,27 @@ class Session {
 		let value: T;
 		if (!this.hadOpenServerChannel) {
 			let channelId = ++this.remoteChannelCounter;
-			logOrdering("client", "open", channelId, this);
+			logOrdering("client", "open", channelId, this.sessionID);
 			// Peek at incoming events to find the value generated on the client
 			const event = this.findValueEvent(-channelId);
 			if (event) {
-				logOrdering("client", "message", channelId, this);
-				logOrdering("client", "close", channelId, this);
+				logOrdering("client", "message", channelId, this.sessionID);
+				logOrdering("client", "close", channelId, this.sessionID);
 				return parseValueEvent(event, value => value, error => {
 					throw error;
 				}) as T;
 			}
 			console.log("Expected a value from the client, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
 			value = generator();
-			logOrdering("client", "message", channelId, this);
-			logOrdering("client", "close", channelId, this);
+			logOrdering("client", "message", channelId, this.sessionID);
+			logOrdering("client", "close", channelId, this.sessionID);
 		} else {
 			let channelId = ++this.localChannelCounter;
-			logOrdering("server", "open", channelId, this);
+			logOrdering("server", "open", channelId, this.sessionID);
 			const event = this.findValueEvent(channelId);
 			if (event) {
-				logOrdering("server", "message", channelId, this);
-				logOrdering("server", "close", channelId, this);
+				logOrdering("server", "message", channelId, this.sessionID);
+				logOrdering("server", "close", channelId, this.sessionID);
 				this.sendEvent(event);
 				return parseValueEvent(event, value => value, error => {
 					throw error;
@@ -1208,16 +1147,16 @@ class Session {
 			try {
 				value = generator();
 				try {
-					logOrdering("server", "message", channelId, this);
-					logOrdering("server", "close", channelId, this);
+					logOrdering("server", "message", channelId, this.sessionID);
+					logOrdering("server", "close", channelId, this.sessionID);
 					this.sendEvent(eventForValue(channelId, value));
 				} catch(e) {
 					escape(e);
 				}
 			} catch(e) {
 				try {
-					logOrdering("server", "message", channelId, this);
-					logOrdering("server", "close", channelId, this);
+					logOrdering("server", "message", channelId, this.sessionID);
+					logOrdering("server", "close", channelId, this.sessionID);
 					this.sendEvent(eventForException(channelId, e));
 				} catch(e) {
 					escape(e);
@@ -1385,7 +1324,7 @@ class Session {
 				}
 				const callback = this.localChannels.get(channelId);
 				if (callback) {
-					logOrdering("server", "message", channelId, this);
+					logOrdering("server", "message", channelId, this.sessionID);
 					callback(event);
 				}
 			}
