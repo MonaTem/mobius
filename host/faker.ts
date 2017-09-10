@@ -1,38 +1,35 @@
-import { ConcurrenceChannel, ConcurrenceJsonValue } from "concurrence-types";
-
-export interface ConcurrenceServer {
-	insideCallback: boolean;
-	dead: boolean;
-	whenDisconnected: PromiseLike<void>;
-	disconnect(): void;
-	flush() : void;
-	synchronize() : PromiseLike<void>;
-	createClientPromise<T extends ConcurrenceJsonValue | void>(...args: any[]): Promise<T>;
-	createServerPromise<T extends ConcurrenceJsonValue | void>(ask: () => (Promise<T> | T), includedInPrerender?: boolean): Promise<T>;
-	createClientChannel<T extends Function>(callback: T): ConcurrenceChannel;
-	createServerChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender?: boolean): ConcurrenceChannel;
-	showDeterminismWarning(deprecated: string, instead: string): void;
-	coordinateValue<T extends ConcurrenceJsonValue>(generator: () => T) : T;
-	shareSession() : PromiseLike<string>;
-	secrets: { [key: string]: any };
-}
+import { ConcurrenceJsonValue } from "concurrence-types";
 
 export interface FakedGlobals {
 	Math: typeof Math;
 	Date: typeof Date,
-	setInterval: (func: Function, interval: number) => NodeJS.Timer,
-	clearInterval: (timerId: NodeJS.Timer) => void,
-	setTimeout: (func: Function, delay: number) => NodeJS.Timer,
-	clearTimeout: (timerId: NodeJS.Timer) => void
+	setInterval: (func: Function, interval: number) => number,
+	clearInterval: (timerId: number) => void,
+	setTimeout: (func: Function, delay: number) => number,
+	clearTimeout: (timerId: number) => void
 }
 
-export function apply<T extends Partial<FakedGlobals>>(globals: T, concurrence: ConcurrenceServer) : T & FakedGlobals {
+export interface Closeable {
+	close: () => void
+}
+
+function showDeterminismWarning(deprecated: string, instead: string): void {
+	console.log("Called " + deprecated + " which may result in split-brain!\nInstead use " + instead + " " + (new Error() as any).stack.split(/\n\s*/g).slice(3).join("\n\t"));
+}
+
+export function apply<T extends Partial<FakedGlobals>>(
+	globals: T,
+	insideCallback: () => boolean,
+	coordinateValue: <T extends ConcurrenceJsonValue>(generator: () => T) => T,
+	coordinateChannel: <T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender?: boolean) => Closeable
+) : T & FakedGlobals {
 	// Override the Math object with one that returns a common stream of random numbers
 	const newMath = globals.Math = Object.create(Math);
-	newMath.random = concurrence.coordinateValue.bind(null, Math.random.bind(Math));
+	newMath.random = coordinateValue.bind(null, Math.random.bind(Math));
 	// Override the Date object with one that shows determinism errors
 	// see: https://stackoverflow.com/a/22402079/4007
-	const now = concurrence.coordinateValue.bind(null, Date.now.bind(Date));
+	const originalNow = Date.now.bind(Date);
+	const now = coordinateValue.bind(null, originalNow);
 	const newDate = globals.Date = function(__Date) {
 		// Copy that property!
 		for (let i of Object.getOwnPropertyNames(__Date)) {
@@ -41,8 +38,8 @@ export function apply<T extends Partial<FakedGlobals>>(globals: T, concurrence: 
 			}
 		}
 		(Date as typeof __Date).parse = function() {
-			if (concurrence.insideCallback) {
-				concurrence.showDeterminismWarning("Date.parse(string)", "a date parsing library");
+			if (insideCallback()) {
+				showDeterminismWarning("Date.parse(string)", "a date parsing library");
 			}
 			return __Date.parse.apply(this, arguments);
 		}
@@ -62,13 +59,13 @@ export function apply<T extends Partial<FakedGlobals>>(globals: T, concurrence: 
 						args.push(now());
 						break;
 					case 2:
-						if (typeof args[1] != "number" && concurrence.insideCallback) {
-							concurrence.showDeterminismWarning("new Date(string)", "a date parsing library");
+						if (typeof args[1] != "number" && insideCallback()) {
+							showDeterminismWarning("new Date(string)", "a date parsing library");
 						}
 						break;
 					default:
-						if (concurrence.insideCallback) {
-							concurrence.showDeterminismWarning("new Date(...)", "new Date(Date.UTC(...))");
+						if (insideCallback()) {
+							showDeterminismWarning("new Date(...)", "new Date(Date.UTC(...))");
 						}
 						break;
 				}
@@ -82,38 +79,23 @@ export function apply<T extends Partial<FakedGlobals>>(globals: T, concurrence: 
 	}(Date);
 	newDate.now = now;
 	// Override timers with ones that are coordinated between client/server
-	const timers: { [ id: number] : ConcurrenceChannel } = {};
+	const timers: { [ id: number] : Closeable } = {};
 	let currentTimerId = 0;
-
-	let registeredCleanup = false;
-	function registerCleanup() {
-		if (!registeredCleanup) {
-			registeredCleanup = true;
-			concurrence.whenDisconnected.then(() => {
-				for (var i in timers) {
-					if (Object.hasOwnProperty.call(timers, i)) {
-						timers[i].close();
-					}
-				}
-			});
-		}
-	}
 
 	const realSetInterval = setInterval;
 	const realClearInterval = clearInterval;
 
 	globals.setInterval = function(func: Function, delay: number) {
 		const callback = func.bind(this, Array.prototype.slice.call(arguments, 2)) as () => void;
-		if (!concurrence.insideCallback) {
-			return realSetInterval(callback, delay);
+		if (!insideCallback()) {
+			return realSetInterval(callback, delay) as any as number;
 		}
-		registerCleanup();
 		const result = --currentTimerId;
-		timers[result] = concurrence.createServerChannel(callback, send => realSetInterval(send, delay), realClearInterval, false);
-		return result as any as NodeJS.Timer;
+		timers[result] = coordinateChannel(callback, send => realSetInterval(send, delay), realClearInterval, false);
+		return result;
 	};
 
-	globals.clearInterval = function(intervalId: NodeJS.Timer) {
+	globals.clearInterval = (intervalId: number) => {
 		if (typeof intervalId == "number" && intervalId < 0) {
 			const channel = timers[intervalId];
 			if (channel) {
@@ -130,19 +112,20 @@ export function apply<T extends Partial<FakedGlobals>>(globals: T, concurrence: 
 
 	globals.setTimeout = function(func: Function, delay: number) {
 		const callback = func.bind(this, Array.prototype.slice.call(arguments, 2)) as () => void;
-		if (!concurrence.insideCallback) {
-			return realSetTimeout(callback, delay);
+		if (!insideCallback()) {
+			return realSetTimeout(callback, delay) as any as number;
 		}
-		registerCleanup();
 		const result = --currentTimerId;
-		timers[result] = concurrence.createServerChannel(callback, send => realSetTimeout(() => {
+		const targetTime = originalNow() + delay;
+		const channel = coordinateChannel(callback, send => realSetTimeout(() => {
 			send();
-			realClearTimeout(result as any as NodeJS.Timer);
-		}, delay), realClearTimeout, false);
-		return result as any as NodeJS.Timer;
+			channel.close();
+		}, targetTime - originalNow()), realClearTimeout, false);
+		timers[result] = channel;
+		return result;
 	};
 
-	globals.clearTimeout = function(timeoutId: NodeJS.Timer) {
+	globals.clearTimeout = (timeoutId: number) => {
 		if (typeof timeoutId == "number" && timeoutId < 0) {
 			const channel = timers[timeoutId];
 			if (channel) {

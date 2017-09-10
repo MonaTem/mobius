@@ -43,10 +43,6 @@ function memoize<I, O>(func: (input: I) => O) {
 server.disable("x-powered-by");
 server.disable("etag");
 
-function showDeterminismWarning(deprecated: string, instead: string): void {
-	console.log("Called " + deprecated + " which may result in split-brain!\nInstead use " + instead + " " + (new Error() as any).stack.split(/\n\s*/g).slice(3).join("\n\t"));
-}
-
 function logOrdering(from: "client" | "server", type: "open" | "close" | "message", channelId: number, session: ConcurrenceSession) {
 	// const stack = (new Error().stack || "").toString().split(/\n\s*/).slice(2).map(s => s.replace(/^at\s*/, ""));
 	// console.log(from + " " + type + " " + channelId + " on " + session.sessionID, stack);
@@ -700,6 +696,22 @@ const enum ArchiveStatus {
 	Full
 };
 
+interface ConcurrenceModuleExports {
+	insideCallback: boolean;
+	dead: boolean;
+	whenDisconnected: PromiseLike<void>;
+	disconnect(): void;
+	flush() : void;
+	synchronize() : PromiseLike<void>;
+	createClientPromise<T extends ConcurrenceJsonValue | void>(...args: any[]): Promise<T>;
+	createServerPromise<T extends ConcurrenceJsonValue | void>(ask: () => (Promise<T> | T), includedInPrerender?: boolean): Promise<T>;
+	createClientChannel<T extends Function>(callback: T): ConcurrenceChannel;
+	createServerChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender?: boolean): ConcurrenceChannel;
+	coordinateValue<T extends ConcurrenceJsonValue>(generator: () => T) : T;
+	shareSession() : PromiseLike<string>;
+	secrets: { [key: string]: any };
+}
+
 class ConcurrenceSession {
 	host: ConcurrenceHost;
 	sessionID: string;
@@ -707,7 +719,7 @@ class ConcurrenceSession {
 	sendWhenDisconnected: () => void | undefined;
 	// Script context
 	modules = new Map<string, SandboxModule>();
-	concurrence: faker.ConcurrenceServer;
+	concurrence: ConcurrenceModuleExports;
 	request: express.Request;
 	hasRun: boolean = false;
 	pageRenderer: ConcurrencePageRenderer;
@@ -743,6 +755,7 @@ class ConcurrenceSession {
 		this.pageRenderer = new ConcurrencePageRenderer(this);
 		// Server-side version of the API
 		const session = this;
+		const createServerChannel = this.createServerChannel.bind(this);
 		this.concurrence = {
 			disconnect: () => this.destroy().catch(escape),
 			whenDisconnected: new Promise(resolve => this.sendWhenDisconnected = resolve),
@@ -754,19 +767,18 @@ class ConcurrenceSession {
 			createClientPromise: this.createClientPromise.bind(this),
 			createServerPromise: this.createServerPromise.bind(this),
 			createClientChannel: this.createClientChannel.bind(this),
-			createServerChannel: this.createServerChannel.bind(this),
+			createServerChannel,
 			coordinateValue: this.coordinateValue,
 			synchronize: () => this.createServerPromise(() => undefined),
 			flush: this.scheduleSynchronize.bind(this),
-			shareSession: this.shareSession,
-			showDeterminismWarning: showDeterminismWarning
+			shareSession: this.shareSession
 		};
 		this.request = request;
 		const globalProperties: ConcurrenceGlobalProperties & Partial<faker.FakedGlobals> = {
 			document: this.host.document,
 			request: this.request
 		};
-		this.globalProperties = faker.apply(globalProperties, this.concurrence);
+		this.globalProperties = faker.apply(globalProperties, () => this.insideCallback, this.coordinateValue, createServerChannel);
 		if (allowMultipleClientsPerSession) {
 			this.recentEvents = [];
 		}
