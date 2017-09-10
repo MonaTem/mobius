@@ -27,11 +27,11 @@ function getPool(host: string) {
 	return pool;
 }
 
-export function execute(host: string, sql: string, ...params: any[]) : Promise<ExecuteResult> {
+export function execute(host: string, sql: string, params?: any[]) : Promise<ExecuteResult> {
 	return createServerPromise(() => new Promise<ExecuteResult & ConcurrenceJsonMap>((resolve, reject) => {
 		getPool(host).query({
 			sql: sql,
-			values: params
+			values: params || []
 		}, (error: any, result: any) => {
 			if (error) {
 				reject(error);

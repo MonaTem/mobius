@@ -139,7 +139,7 @@ class NewItemWidget extends dom.Component<{}, { value: string }> {
 	}
 	onChange = (value: string) => this.setState({ value })
 	send = () => {
-		sql.modify("localhost", "INSERT INTO concurrence_todo.items (text) VALUES (?)", this.state.value).then(result => {
+		sql.modify("localhost", "INSERT INTO concurrence_todo.items (text) VALUES (?)", [this.state.value]).then(result => {
 			const message: DbRecordChange<Item> = {
 				operation: "create",
 				record: { id: result.insertId as number, text: this.state.value }
@@ -174,7 +174,7 @@ class ItemWidget extends dom.Component<{ item: Item }, { pendingText: string | u
 				record: { id: this.props.item.id, text: this.state.pendingText }
 			};
 			this.setState({ inProgress: true });
-			sql.modify("localhost", "UPDATE concurrence_todo.items SET text = ? WHERE id = ?", this.state.pendingText, this.props.item.id).then(result => {
+			sql.modify("localhost", "UPDATE concurrence_todo.items SET text = ? WHERE id = ?", [this.state.pendingText, this.props.item.id]).then(result => {
 				send("item-changes", message);
 				this.setState({ pendingText: undefined, inProgress: false });
 			}).catch(e => console.log(e));
@@ -186,7 +186,7 @@ class ItemWidget extends dom.Component<{ item: Item }, { pendingText: string | u
 			operation: "delete",
 			record: this.props.item
 		};
-		sql.modify("localhost", "DELETE FROM concurrence_todo.items WHERE id = ?", this.props.item.id).then(result => {
+		sql.modify("localhost", "DELETE FROM concurrence_todo.items WHERE id = ?", [this.props.item.id]).then(result => {
 			send("item-changes", message);
 			this.setState({ inProgress: false });
 		});
