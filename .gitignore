@@ -3,15 +3,10 @@ public/client.js
 public/fallback.js
 sessions/
 api/
-host/server/
-host/common/
-host/src/
-host/*.js
+build/
 types/src/
-server/*.js
 common/*.js
 client/*.js
-app/*.js
 src/*.js
 *.js.map
 *.min.js

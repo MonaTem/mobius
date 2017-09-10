@@ -6,6 +6,7 @@
 	"compilerOptions": {
 		"baseUrl": "./",
 		"allowJs": true,
+		"outDir": "build",
 		"strict": true,
 		"strictNullChecks": true,
 		"noUnusedLocals": true,
@@ -25,6 +26,7 @@
 		],
 		"paths": {
 			"*": [
+				"*",
 				"host/*",
 				"types/*"
 			]

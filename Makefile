@@ -13,10 +13,10 @@ all: host server client fallback app
 minify: public/client.min.js public/fallback.min.js all
 
 run: all
-	node --trace-warnings --inspect host/index.js
+	node --trace-warnings --inspect build/host/index.js
 
 clean:
-	rm -rf public/{client,fallback,app}{,.min}.js api/ {common,host,client,src}/*.js host/{common,server,src}
+	rm -rf public/{client,fallback,app}{,.min}.js api/ {common,host,client,src}/*.js build/
 
 cleaner: clean
 	rm -rf node_modules
@@ -45,15 +45,15 @@ api/:
 	mkdir -p api
 
 
-host: host/index.js
+host: build/index.js
 
-host/index.js: $(HOST_FILES) types/concurrence-types.d.ts tsconfig-host.json node_modules/typescript/bin/tsc
+build/index.js: $(HOST_FILES) $(COMMON_FILES) types/concurrence-types.d.ts tsconfig-host.json node_modules/typescript/bin/tsc
 	node_modules/typescript/bin/tsc -p tsconfig-host.json
 
 
-server: host/src/app.js
+server: build/src/app.js
 
-host/src/app.js: $(SERVER_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
+build/src/app.js: $(SERVER_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/typescript/bin/tsc -p tsconfig-server.json
 
 

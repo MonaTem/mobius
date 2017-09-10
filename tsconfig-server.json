@@ -11,7 +11,7 @@
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
-		"outDir": "host",
+		"outDir": "build",
 		"allowJs": false,
 		"declaration": true,
 		"declarationDir": "types",

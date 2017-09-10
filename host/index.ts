@@ -13,7 +13,7 @@ const expressWs = require("express-ws");
 import * as uuid from "uuid";
 import { JSDOM } from "jsdom";
 
-import * as faker from "./faker";
+import { interceptGlobals, FakedGlobals } from "../common/determinism";
 import { ConcurrenceJsonValue, ConcurrenceJsonMap, ConcurrenceChannel } from "concurrence-types";
 
 const server = express();
@@ -723,7 +723,7 @@ class ConcurrenceSession {
 	request: express.Request;
 	hasRun: boolean = false;
 	pageRenderer: ConcurrencePageRenderer;
-	globalProperties: ConcurrenceGlobalProperties & faker.FakedGlobals;
+	globalProperties: ConcurrenceGlobalProperties & FakedGlobals;
 	Math: typeof Math;
 	clients = new Map<number, ConcurrenceClient>();
 	currentClientID: number = 0;
@@ -774,11 +774,11 @@ class ConcurrenceSession {
 			shareSession: this.shareSession
 		};
 		this.request = request;
-		const globalProperties: ConcurrenceGlobalProperties & Partial<faker.FakedGlobals> = {
+		const globalProperties: ConcurrenceGlobalProperties & Partial<FakedGlobals> = {
 			document: this.host.document,
 			request: this.request
 		};
-		this.globalProperties = faker.apply(globalProperties, () => this.insideCallback, this.coordinateValue, createServerChannel);
+		this.globalProperties = interceptGlobals(globalProperties, () => this.insideCallback, this.coordinateValue, createServerChannel);
 		if (allowMultipleClientsPerSession) {
 			this.recentEvents = [];
 		}
@@ -1424,12 +1424,12 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 }
 
 (async () => {
-	const serverJSPath = relativePath("src/app.js");
+	const serverJSPath = relativePath("../src/app.js");
 
-	const htmlPath = relativePath("../public/index.html");
+	const htmlPath = relativePath("../../public/index.html");
 	const htmlContents = readFile(htmlPath);
 
-	const secretsPath = relativePath("../secrets.json");
+	const secretsPath = relativePath("../../secrets.json");
 	const secrets = readFile(secretsPath);
 
 	// Check if we can reuse existing sessions
@@ -1446,7 +1446,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 	}
 
 	//(global.module as any).paths as string[]
-	const modulePaths = [relativePath("server"), relativePath("common"), relativePath("../preact/dist")];
+	const modulePaths = [relativePath("../server"), relativePath("../common"), relativePath("../../preact/dist")];
 
 	const host = new ConcurrenceHost(serverJSPath, modulePaths, htmlPath, (await htmlContents).toString(), JSON.parse((await secrets).toString()));
 	// host.newClient({
@@ -1676,7 +1676,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 		});
 	});
 
-	server.use(express.static(relativePath("../public")));
+	server.use(express.static(relativePath("../../public")));
 
 	const port = 3000;
 	const acceptSocket = server.listen(port, () => {

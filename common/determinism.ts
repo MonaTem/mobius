@@ -14,10 +14,17 @@ export interface Closeable {
 }
 
 function showDeterminismWarning(deprecated: string, instead: string): void {
-	console.log("Called " + deprecated + " which may result in split-brain!\nInstead use " + instead + " " + (new Error() as any).stack.split(/\n\s*/g).slice(3).join("\n\t"));
+	let message = "Called " + deprecated + " which may result in split-brain!\nInstead use " + instead;
+	const stack : string | undefined = (new Error() as any).stack;
+	if (stack) {
+		message += " " + stack.split(/\n\s*/g).slice(3).join("\n\t");
+	}
+	console.log(message);
 }
 
-export function apply<T extends Partial<FakedGlobals>>(
+const setPrototypeOf = (Object as any).setProtoTypeOf || ((obj: any, proto: any) => obj.__proto__ = proto);
+
+export function interceptGlobals<T extends Partial<FakedGlobals>>(
 	globals: T,
 	insideCallback: () => boolean,
 	coordinateValue: <T extends ConcurrenceJsonValue>(generator: () => T) => T,
@@ -37,19 +44,27 @@ export function apply<T extends Partial<FakedGlobals>>(
 				(Date as any)[i] = (__Date as any)[i];
 			}
 		}
+		// Non-enumerable properties
+		(Date as typeof __Date).UTC = __Date.UTC;
 		(Date as typeof __Date).parse = function() {
 			if (insideCallback()) {
 				showDeterminismWarning("Date.parse(string)", "a date parsing library");
 			}
 			return __Date.parse.apply(this, arguments);
 		}
-		const proto = Object.create(__Date.prototype);
+		let proto: any;
+		if (Object.create) {
+			proto = Object.create(__Date.prototype);
+		} else {
+			proto = new Object();
+			proto.__proto__ = __Date.prototype;
+		}
 		// Format as ISO strings by default (node's default for now, but might not be later)
 		proto.toString = proto.toISOString;
 		Date.prototype = proto;
 		return Date as typeof __Date;
 		function Date(this: any) {
-			let args = [...arguments];
+			let args = Array.prototype.slice.call(arguments);
 			args.unshift(this);
 			if (this instanceof __Date) {
 				switch (args.length) {
@@ -70,7 +85,22 @@ export function apply<T extends Partial<FakedGlobals>>(
 						break;
 				}
 				let result = new (Function.prototype.bind.apply(__Date, args));
-				(Object as any).setPrototypeOf(result, proto);
+				setPrototypeOf(result, proto);
+				// Add support for toISOString if it doesn't exist
+				if (!proto.toISOString) {
+					proto.toISOString = function(this: Date) {
+						return this.getUTCFullYear() +
+							'-' + pad(this.getUTCMonth() + 1) +
+							'-' + pad(this.getUTCDate()) +
+							'T' + pad(this.getUTCHours()) +
+							':' + pad(this.getUTCMinutes()) +
+							':' + pad(this.getUTCSeconds()) +
+							'.' + (this.getUTCMilliseconds() / 1000).toFixed(3).slice(2, 5) +
+							'Z';
+					}
+				}
+				// Format as ISO strings by default (browser default is usually locale-specific)
+				proto.toString = proto.toISOString;
 				return result;
 			} else {
 				return new __Date(now()).toUTCString();
@@ -82,8 +112,8 @@ export function apply<T extends Partial<FakedGlobals>>(
 	const timers: { [ id: number] : Closeable } = {};
 	let currentTimerId = 0;
 
-	const realSetInterval = setInterval;
-	const realClearInterval = clearInterval;
+	const realSetInterval = setInterval as Function as (callback: () => void, interval: number) => number;
+	const realClearInterval = clearInterval as Function as (intervalId: number) => void;
 
 	globals.setInterval = function(func: Function, delay: number) {
 		const callback = func.bind(this, Array.prototype.slice.call(arguments, 2)) as () => void;
@@ -107,8 +137,8 @@ export function apply<T extends Partial<FakedGlobals>>(
 		}
 	};
 
-	const realSetTimeout = setTimeout;
-	const realClearTimeout = clearTimeout;
+	const realSetTimeout = setTimeout as Function as (callback: () => void, delay: number) => number;
+	const realClearTimeout = clearTimeout as Function as (timerId: number) => void;
 
 	globals.setTimeout = function(func: Function, delay: number) {
 		const callback = func.bind(this, Array.prototype.slice.call(arguments, 2)) as () => void;
@@ -138,4 +168,8 @@ export function apply<T extends Partial<FakedGlobals>>(
 	};
 	// Recast now that all fields have been filled
 	return globals as (T & FakedGlobals);
+}
+
+function pad(number: number) {
+	return ("0" + number).substr(-2);
 }
