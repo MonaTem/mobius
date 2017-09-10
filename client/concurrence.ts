@@ -188,9 +188,9 @@ function uuid() : string {
 	});
 }
 
-function roundTrip<T>(obj: T) : T {
+function roundTrip<T extends ConcurrenceJsonValue | void>(obj: T) : T {
 	// Round-trip values through JSON so that the client receives exactly the same type of values as the server
-	return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify([obj]))[0] as T;
+	return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify(obj)) as T;
 }
 
 interface BootstrapData {

@@ -83,10 +83,10 @@ function compatibleStringify(value: any): string {
 
 const validateRoundTrips = true;
 
-function roundTrip<T>(obj: T) : T {
+function roundTrip<T extends ConcurrenceJsonValue | void>(obj: T) : T {
 	if (validateRoundTrips) {
 		// Round-trip values through JSON so that the server receives exactly the same type of values as the client
-		return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify([obj]))[0] as T;
+		return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify(obj)) as T;
 	} else {
 		return obj;
 	}
