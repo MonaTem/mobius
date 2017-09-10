@@ -31,6 +31,8 @@
 
 	let isSending = 0;
 	let anyChanged = false;
+	let lastEventKey = "";
+	let queuedEvents: string[] = [];
 
 	const form = document.forms["mobius-form" as any as number] as HTMLFormElement;
 	form.onsubmit = function() {
@@ -47,24 +49,47 @@
 		return false;
 	}
 
-	function onKeyDown(event: Event) {
-		const element = event.target || event.srcElement;
+	function onInputEvent(event: Event) {
+		const element = (event.target || event.srcElement) as Element;
 		if (element) {
-			(element as any).changed = true;
+			const type = event.type || "input";
+			const key = (element.getAttribute && element.getAttribute(`data-mobius-on${type}`)) || (element as HTMLInputElement).name;
+			const pair = key + "=" + encodeURIComponent((element as HTMLInputElement).value);
+			if (lastEventKey == key) {
+				queuedEvents.pop();
+			} else {
+				lastEventKey = key;
+			}
+			queuedEvents.push(pair);
 		}
 		anyChanged = true;
 	}
 
-	function onClick(event: Event) {
-		send((event.target || event.srcElement) as HTMLElement);
+	function onGenericEvent(event: Event) {
+		send((event.target || event.srcElement) as HTMLElement, event.type || "click");
+	}
+
+	function handlerForEventType(onType: string) {
+		switch (onType) {
+			case "keydown":
+			case "keyup":
+			case "input":
+			case "change":
+				return onInputEvent;
+			default:
+				return onGenericEvent;
+		}
 	}
 
 	function interceptElement(element: HTMLElement) {
-		if (/^channelID\d+$/.test((element as any).name) && hasAncestor(element, form)) {
-			if (element.nodeName == "INPUT" || element.nodeName == "TEXTAREA") {
-				element.onkeydown = onKeyDown;
-			} else {
-				element.onclick = onClick;
+		if (hasAncestor(element, form)) {
+			const attributes = element.attributes;
+			for (var i = 0; i < attributes.length; i++) {
+				var match = attributes[i].name.match(/^data\-mobius\-on(.*)/);
+				if (match) {
+					var eventType = match[1];
+					(element as any as { [eventName: string] : (this: HTMLElement, ev: Event) => any })["on" + eventType] = handlerForEventType(eventType);
+				}
 			}
 		}
 	}
@@ -81,24 +106,24 @@
 		}
 	}
 
-	function send(target?: HTMLElement) {
+	function send(target?: HTMLElement, eventType?: string) {
 		var request: XMLHttpRequest = supportsNativeXHR ? new XMLHttpRequest() : new (window as any).ActiveXObject("MSXML2.XMLHTTP.3.0");
 		request.open("POST", location.href, true);
 		request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-		var body = ["postback=js"];
+		var body = queuedEvents;
+		queuedEvents = [];
+		lastEventKey = "";
+		body.unshift("postback=js");
 		for (let i = 0; i < form.length; i++) {
 			const element = form[i];
-			if (element.name != "postback") {
-				if (element.nodeName != "BUTTON") {
-					if (element.type == "hidden" || element.changed) {
-						delete element.changed;
-						body.push(element.name + "=" + encodeURIComponent(element.value));
-					}
+			if (element.type == "hidden") {
+				if (element.name != "postback" && element.name != "hasServerChannels") {
+					body.push(element.name + "=" + encodeURIComponent(element.value));
 				}
 			}
 		}
 		if (target) {
-			const name = (target as HTMLInputElement).name || target.getAttribute("name");
+			const name = target.getAttribute(`data-mobius-on${eventType}`) || (target as HTMLInputElement).name || target.getAttribute("name");
 			if (name) {
 				body.push(name + "=");
 			}

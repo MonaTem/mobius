@@ -14,7 +14,6 @@ preactOptions.nodeRemoved = (node: PreactNode) => {
 	if (c) {
 		for (let name in c) {
 			if (Object.hasOwnProperty.call(c, name)) {
-				node.removeAttribute("name");
 				c[name][0].close();
 				delete c[name];
 			}
@@ -38,13 +37,36 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 				const channel = createClientChannel(function() {
 					return tuple[1].apply(null, arguments);
 				});
-				node.setAttribute("name", "channelID" + channel.channelId);
+				if (node.nodeName == "INPUT" || node.nodeName == "TEXTAREA") {
+					switch (name) {
+						case "keydown":
+						case "keyup":
+						case "input":
+						case "change":
+							node.setAttribute("name", `channelID${channel.channelId}`);
+							break;
+					}
+				} else {
+					switch (name) {
+						case "click":
+							node.setAttribute("name", `channelID${channel.channelId}`);
+							break;
+					}
+				}
+				node.setAttribute(`data-mobius-on${name}`, `channelID${channel.channelId}`);
 				tuple = c[name] = [channel, listener];
 			}
 			listeners[name] = ignoreEvent;
 		} else if (Object.hasOwnProperty.call(c, name)) {
-			node.removeAttribute("name");
-			c[name][0].close();
+			const channel = c[name][0];
+			if (node.getAttribute("name") == `channelID${channel.channelId}`) {
+				// Only remove click channels for now, because input-related channels are merged
+				if (name == "click") {
+					node.removeAttribute("name");
+				}
+			}
+			node.removeAttribute(`data-mobius-on${name}`);
+			channel.close();
 			delete c[name];
 		}
 	}
