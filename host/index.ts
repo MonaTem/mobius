@@ -628,7 +628,7 @@ class Session {
 		};
 		this.request = request;
 		const globalProperties: MobiusGlobalProperties & Partial<FakedGlobals> = {
-			document: this.host.document,
+			document: Object.create(this.host.document, { body: { value: this.pageRenderer.body } }),
 			request: this.request
 		};
 		this.globalProperties = interceptGlobals(globalProperties, () => this.insideCallback, this.coordinateValue, createServerChannel);
