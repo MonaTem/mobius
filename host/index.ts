@@ -4,8 +4,6 @@ import * as rimrafAsync from "rimraf";
 import * as util from "util";
 const Module = require("module");
 
-import * as vm from "vm";
-
 import * as express from "express";
 import * as bodyParser from "body-parser";
 const expressWs = require("express-ws");
@@ -14,6 +12,7 @@ import * as uuid from "uuid";
 import { JSDOM } from "jsdom";
 
 import { JsonValue, JsonMap, Channel } from "mobius-types";
+import { loadModule, SandboxModule } from "./sandbox";
 import { interceptGlobals, roundTrip, FakedGlobals } from "../common/determinism";
 import { logOrdering, eventForValue, eventForException, parseValueEvent, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "../common/_internal";
 
@@ -28,18 +27,6 @@ const unlink = util.promisify(fs.unlink);
 const stat = util.promisify(fs.stat);
 const exists = (path: string) => new Promise<boolean>(resolve => fs.exists(path, resolve));
 const rimraf = util.promisify(rimrafAsync);
-
-function memoize<I, O>(func: (input: I) => O) {
-	const values = new Map<I, O>();
-	return (input: I) => {
-		if (values.has(input)) {
-			return values.get(input) as O;
-		}
-		const result = func(input);
-		values.set(input, result);
-		return result;
-	}
-}
 
 server.disable("x-powered-by");
 server.disable("etag");
@@ -91,68 +78,6 @@ function patchJSDOM(document: Document) {
 		}
 		Object.defineProperty(HTMLInputElementPrototype, "value", descriptor);
 	}
-}
-
-const enum SandboxMode {
-	Simple = 0,
-	Full = 1,
-};
-
-const sandboxMode = SandboxMode.Simple as SandboxMode;
-
-interface SandboxModule {
-	exports: any,
-	paths: string[]
-}
-
-interface SandboxGlobal {
-	self: this,
-	global: this | NodeJS.Global,
-	require: (name: string) => any,
-	module: SandboxModule,
-	exports: any,
-};
-
-const sandboxScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: string) => {
-	const scriptContents = fs.readFileSync(scriptPath).toString();
-	if (sandboxMode == SandboxMode.Full) {
-		// Full sandboxing, creating a new global context each time
-		const vmScript = new vm.Script(scriptContents, {
-			filename: scriptPath,
-			lineOffset: 0,
-			displayErrors: true
-		});
-		return vmScript.runInNewContext.bind(vmScript) as (global: T) => void;
-	} else {
-		// Simple sandboxing, relying on function scope
-		const context = {
-			app: (global: T) => {
-			},
-		};
-		vm.runInNewContext("function app(self){with(self){return(function(self,global,require,document,request){" + scriptContents + "\n})(self,self.global,self.require,self.document,self.request)}}", context, {
-			filename: scriptPath,
-			lineOffset: 0,
-			displayErrors: true
-		});
-		const result = context.app;
-		delete context.app;
-		return result;
-	}
-});
-
-function loadModule<T>(path: string, module: SandboxModule, globalProperties: T, require: (name: string) => any) {
-	const moduleGlobal: SandboxGlobal & T = Object.create(global);
-	for (let key in globalProperties) {
-		if (Object.hasOwnProperty.call(globalProperties, key)) {
-			moduleGlobal[key as keyof T] = globalProperties[key];
-		}
-	}
-	moduleGlobal.self = moduleGlobal;
-	moduleGlobal.global = global;
-	moduleGlobal.require = require;
-	moduleGlobal.module = module;
-	moduleGlobal.exports = module.exports;
-	sandboxScriptAtPath(path)(moduleGlobal);
 }
 
 interface MobiusGlobalProperties {
