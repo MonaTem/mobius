@@ -13,7 +13,7 @@ const expressWs = require("express-ws");
 import * as uuid from "uuid";
 import { JSDOM } from "jsdom";
 
-import { interceptGlobals, FakedGlobals } from "../common/determinism";
+import { interceptGlobals, roundTrip, FakedGlobals } from "../common/determinism";
 import { JsonValue, JsonMap, Channel } from "mobius-types";
 
 const server = express();
@@ -79,17 +79,6 @@ function emptyFunction() {
 
 function compatibleStringify(value: any): string {
 	return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\/script/g, "<\\/script");
-}
-
-const validateRoundTrips = true;
-
-function roundTrip<T extends JsonValue | void>(obj: T) : T {
-	if (validateRoundTrips) {
-		// Round-trip values through JSON so that the server receives exactly the same type of values as the client
-		return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify(obj)) as T;
-	} else {
-		return obj;
-	}
 }
 
 function eventForValue(channelId: number, value: JsonValue | void) : Event {

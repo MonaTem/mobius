@@ -1,5 +1,5 @@
 import { Channel, JsonValue } from "mobius-types";
-import { interceptGlobals } from "determinism";
+import { interceptGlobals, roundTrip } from "determinism";
 /**
  * @license THE MIT License (MIT)
  * 
@@ -186,11 +186,6 @@ function uuid() : string {
 		const r = Math.random() * 16 | 0;
 		return (c == "x" ? r : (r & 3 | 8)).toString(16);
 	});
-}
-
-function roundTrip<T extends JsonValue | void>(obj: T) : T {
-	// Round-trip values through JSON so that the client receives exactly the same type of values as the server
-	return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify(obj)) as T;
 }
 
 interface BootstrapData {

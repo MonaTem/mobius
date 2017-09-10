@@ -1,5 +1,10 @@
 import { JsonValue } from "mobius-types";
 
+export function roundTrip<T extends JsonValue | void>(obj: T) : T {
+	// Round-trip values through JSON so that the client receives exactly the same type of values as the server
+	return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify(obj)) as T;
+}
+
 export interface FakedGlobals {
 	Math: typeof Math;
 	Date: typeof Date,
