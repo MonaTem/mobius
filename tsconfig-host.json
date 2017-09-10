@@ -1,11 +1,10 @@
 {
 	"include": [
-		"api/concurrence.d.ts",
-		"host/index.ts"
+		"host/*.tsx",
+		"host/*.ts"
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
-		"outDir": "build/",
 		"allowJs": true,
 		"strict": true,
 		"strictNullChecks": true,
@@ -13,6 +12,7 @@
 		"noImplicitThis": true,
 		"skipLibCheck": true,
 		"module": "commonjs",
+		"moduleResolution": "node",
 		"target": "es2017",
 		"downlevelIteration": false,
 		"lib": [
@@ -22,6 +22,12 @@
 		],
 		"types": [
 			"node"
-		]
+		],
+		"paths": {
+			"*": [
+				"host/*",
+				"types/*"
+			]
+		}
 	}
 }

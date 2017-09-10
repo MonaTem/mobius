@@ -2,6 +2,7 @@ import * as path from "path";
 import * as fs from "fs";
 import * as rimrafAsync from "rimraf";
 import * as util from "util";
+const Module = require("module");
 
 import * as vm from "vm";
 
@@ -11,6 +12,9 @@ const expressWs = require("express-ws");
 
 import * as uuid from "uuid";
 import { JSDOM } from "jsdom";
+
+import * as faker from "./faker";
+import { ConcurrenceJsonValue, ConcurrenceJsonMap, ConcurrenceChannel } from "concurrence-types";
 
 const server = express();
 
@@ -151,7 +155,8 @@ const enum ConcurrenceSandboxMode {
 const sandboxMode = ConcurrenceSandboxMode.Simple as ConcurrenceSandboxMode;
 
 interface SandboxModule {
-	exports?: any
+	exports: any,
+	paths: string[]
 }
 
 interface SandboxGlobal {
@@ -159,6 +164,7 @@ interface SandboxGlobal {
 	global: this | NodeJS.Global,
 	require: (name: string) => any,
 	module: SandboxModule,
+	exports: any,
 };
 
 const sandboxScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: string) => {
@@ -177,7 +183,7 @@ const sandboxScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: string
 			app: (global: T) => {
 			},
 		};
-		vm.runInNewContext("function app(self){with(self){return(function(self,global,require,document,request,concurrence){" + scriptContents + "\n})(self,self.global,self.require,self.document,self.request,self.concurrence)}}", context, {
+		vm.runInNewContext("function app(self){with(self){return(function(self,global,require,document,request){" + scriptContents + "\n})(self,self.global,self.require,self.document,self.request)}}", context, {
 			filename: scriptPath,
 			lineOffset: 0,
 			displayErrors: true
@@ -198,30 +204,32 @@ function loadModule<T>(path: string, module: SandboxModule, globalProperties: T,
 	moduleGlobal.self = moduleGlobal;
 	moduleGlobal.global = global;
 	moduleGlobal.require = require;
-	// moduleGlobal.module = module;
+	moduleGlobal.module = module;
+	moduleGlobal.exports = module.exports;
 	sandboxScriptAtPath(path)(moduleGlobal);
 }
 
 interface ConcurrenceGlobalProperties {
 	document: Document,
 	request: express.Request,
-	concurrence: any
 }
 
 class ConcurrenceHost {
 	sessions = new Map<string, ConcurrenceSession>();
 	scriptPath: string;
+	modulePaths: string[];
 	htmlSource: string;
 	dom: JSDOM;
 	document: Document;
 	staleSessionTimeout: any;
 	secrets: ConcurrenceJsonValue;
 	renderingMode: ConcurrenceRenderingMode = ConcurrenceRenderingMode.Prerendering;
-	constructor(scriptPath: string, htmlPath: string, htmlContents: string, secrets: ConcurrenceJsonValue) {
+	constructor(scriptPath: string, modulePaths: string[], htmlPath: string, htmlContents: string, secrets: ConcurrenceJsonValue) {
 		this.secrets = secrets;
 		this.dom = new JSDOM(htmlContents);
 		this.document = (this.dom.window as Window).document as Document;
 		this.scriptPath = scriptPath;
+		this.modulePaths = modulePaths;
 		patchJSDOM(this.document);
 		this.staleSessionTimeout = setInterval(() => {
 			const now = Date.now();
@@ -692,8 +700,6 @@ const enum ArchiveStatus {
 	Full
 };
 
-const apiPath = path.resolve(__dirname, "../api") + "/";
-
 class ConcurrenceSession {
 	host: ConcurrenceHost;
 	sessionID: string;
@@ -701,10 +707,12 @@ class ConcurrenceSession {
 	sendWhenDisconnected: () => void | undefined;
 	// Script context
 	modules = new Map<string, SandboxModule>();
-	concurrence: any;
+	concurrence: faker.ConcurrenceServer;
 	request: express.Request;
 	hasRun: boolean = false;
 	pageRenderer: ConcurrencePageRenderer;
+	globalProperties: ConcurrenceGlobalProperties & faker.FakedGlobals;
+	Math: typeof Math;
 	clients = new Map<number, ConcurrenceClient>();
 	currentClientID: number = 0;
 	lastMessageTime: number = Date.now();
@@ -741,18 +749,24 @@ class ConcurrenceSession {
 			get insideCallback() {
 				return session.insideCallback;
 			},
-			secrets: host.secrets,
+			secrets: host.secrets as ConcurrenceJsonMap,
 			dead: false,
 			createClientPromise: this.createClientPromise.bind(this),
 			createServerPromise: this.createServerPromise.bind(this),
 			createClientChannel: this.createClientChannel.bind(this),
 			createServerChannel: this.createServerChannel.bind(this),
-			coordinateValue: this.coordinateValue.bind(this),
+			coordinateValue: this.coordinateValue,
 			synchronize: () => this.createServerPromise(() => undefined),
+			flush: this.scheduleSynchronize.bind(this),
 			shareSession: this.shareSession,
 			showDeterminismWarning: showDeterminismWarning
 		};
 		this.request = request;
+		const globalProperties: ConcurrenceGlobalProperties & Partial<faker.FakedGlobals> = {
+			document: this.host.document,
+			request: this.request
+		};
+		this.globalProperties = faker.apply(globalProperties, this.concurrence);
 		if (allowMultipleClientsPerSession) {
 			this.recentEvents = [];
 		}
@@ -770,27 +784,24 @@ class ConcurrenceSession {
 	}
 
 	loadModule(path: string, newModule: SandboxModule) {
-		const globalProperties: ConcurrenceGlobalProperties = {
-			document: this.host.document,
-			request: this.request,
-			concurrence: this.concurrence
-		};
-		loadModule(path, newModule, globalProperties, (name: string) => {
-			// if (name == "concurrence") {
-			// 	return this.concurrence;
-			// }
-			// const path = require.resolve(name);
-			// console.log(path, __dirname, apiPath);
-			// const existingModule = this.modules.get(path);
-			// if (existingModule) {
-			// 	return existingModule.exports;
-			// }
-			// if (path.substring(0, apiPath.length) == apiPath) {
-			// 	const newModule: SandboxModule = {};
-			// 	this.modules.set(path, newModule);
-			// 	this.loadModule(path, newModule);
-			// 	return newModule.exports;
-			// }
+		loadModule(path, newModule, this.globalProperties, (name: string) => {
+			if (name == "concurrence") {
+				return this.concurrence;
+			}
+			const modulePath = Module._findPath(name, newModule.paths, false);
+			if (modulePath) {
+				const existingModule = this.modules.get(modulePath);
+				if (existingModule) {
+					return existingModule.exports;
+				}
+				const subModule: SandboxModule = {
+					exports: {},
+					paths: newModule.paths
+				};
+				this.modules.set(modulePath, subModule);
+				this.loadModule(modulePath, subModule);
+				return subModule.exports;
+			}
 			return require(name);
 		});
 		return newModule;
@@ -801,7 +812,10 @@ class ConcurrenceSession {
 		if (!this.hasRun) {
 			this.hasRun = true;
 			this.enteringCallback();
-			this.loadModule(this.host.scriptPath, {});
+			this.loadModule(this.host.scriptPath, {
+				exports: {},
+				paths: this.host.modulePaths
+			});
 		}
 	}
 
@@ -1157,7 +1171,7 @@ class ConcurrenceSession {
 		}
 	}
 
-	coordinateValue<T extends ConcurrenceJsonValue>(generator: () => T) : T {
+	coordinateValue = <T extends ConcurrenceJsonValue>(generator: () => T) => {
 		if (!this.insideCallback) {
 			return generator();
 		}
@@ -1210,7 +1224,7 @@ class ConcurrenceSession {
 				throw e;
 			}
 		}
-		return roundTrip(value);
+		return roundTrip(value) as T;
 	}
 
 	shareSession = async () => {
@@ -1398,7 +1412,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 }
 
 (async () => {
-	const serverJSPath = relativePath("server.js");
+	const serverJSPath = relativePath("src/app.js");
 
 	const htmlPath = relativePath("../public/index.html");
 	const htmlContents = readFile(htmlPath);
@@ -1419,7 +1433,13 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 		await unlink("sessions/.graceful");
 	}
 
-	const host = new ConcurrenceHost(serverJSPath, htmlPath, (await htmlContents).toString(), JSON.parse((await secrets).toString()));
+	//(global.module as any).paths as string[]
+	const modulePaths = [relativePath("server"), relativePath("common"), relativePath("../preact/dist")];
+
+	const host = new ConcurrenceHost(serverJSPath, modulePaths, htmlPath, (await htmlContents).toString(), JSON.parse((await secrets).toString()));
+	// host.newClient({
+	// 	headers: []
+	// } as any as express.Request).then(client => client.session.run());
 
 	function messageFromBody(body: { [key: string]: any }) : ConcurrenceClientMessage {
 		const message: ConcurrenceClientMessage = {

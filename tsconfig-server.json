@@ -1,43 +1,47 @@
 {
 	"include": [
-		"node_modules/preact/dist/preact.js",
-		"api/concurrence-server.ts",
-		"api/**/*-server.ts",
-		"api/**/*-server.js",
-		"api/**/*.ts",
-		"api/**/*.js",
-		"api/**/*.tsx",
-		"api/**/*.jsx",
-		"src/**/*.ts",
-		"src/**/*.js",
-		"src/**/*.tsx",
-		"src/**/*.jsx"
-	],
-	"exclude": [
-		"api/**/*-client.ts",
-		"api/**/*-client.js",
-		"api/**/*-client.tsx",
-		"api/**/*-client.jsx"
+		"types/reduced-dom.d.ts",
+		"server/ambients.d.ts",
+		"server/*.ts",
+		"server/*.tsx",
+		"common/*.ts",
+		"common/*.tsx",
+		"src/*.ts",
+		"src/*.tsx"
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
-		"outFile": "build/server.js",
-		"allowJs": true,
+		"outDir": "host",
+		"allowJs": false,
+		"declaration": true,
+		"declarationDir": "types",
 		"jsx": "react",
-		"jsxFactory": "preact.h",
+		"jsxFactory": "dom.h",
 		"strict": true,
 		"strictNullChecks": true,
 		"noUnusedLocals": true,
 		"noImplicitThis": true,
-		"module": "none",
+		"module": "commonjs",
+		"moduleResolution": "node",
 		"target": "es2017",
 		"downlevelIteration": false,
+		"types": [
+			"node"
+		],
+		"typeRoots": [
+			"types",
+			"node_modules"
+		],
 		"lib": [
 			"es6",
 			"es2015.promise"
 		],
-		"types": [
-			"node"
-		]
+		"paths": {
+			"*": [
+				"server/*",
+				"common/*",
+				"types/*"
+			]
+		}
 	}
 }

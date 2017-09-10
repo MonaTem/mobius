@@ -1,9 +1,15 @@
-class ShowHideWidget extends preact.Component<{}, { visible: boolean }> {
+import { ConcurrenceChannel, ConcurrenceJsonMap } from "concurrence-types";
+import * as dom from "dom";
+import { receive, send } from "broadcast";
+import * as sql from "sql";
+import { shareSession } from "concurrence";
+
+class ShowHideWidget extends dom.Component<{}, { visible: boolean }> {
 	constructor(props: any, context: any) {
 		super(props, context);
 		this.state = { visible: false };
 	}
-	render(props: preact.ComponentProps<this>) {
+	render(props: dom.ComponentProps<this>) {
 		if (this.state.visible) {
 			return <div><button onClick={this.hide}>Hide</button><div>{props.children}</div></div>
 		} else {
@@ -15,7 +21,7 @@ class ShowHideWidget extends preact.Component<{}, { visible: boolean }> {
 }
 
 
-class RandomWidget extends preact.Component<{}, { value: string }> {
+class RandomWidget extends dom.Component<{}, { value: string }> {
 	constructor(props: any, context: any) {
 		super(props, context);
 		console.log("Generating random numbers");
@@ -38,7 +44,7 @@ class RandomWidget extends preact.Component<{}, { value: string }> {
 }
 
 
-class TextField extends preact.Component<{ value: string, onChange: (value: string) => void }, { value: string }> {
+class TextField extends dom.Component<{ value: string, onChange: (value: string) => void }, { value: string }> {
 	onChange = (event: any) => {
 		this.props.onChange(event.value as string);
 	}
@@ -48,13 +54,13 @@ class TextField extends preact.Component<{ value: string, onChange: (value: stri
 }
 
 
-class ReceiveWidget extends preact.Component<{}, { messages: string[] }> {
+class ReceiveWidget extends dom.Component<{}, { messages: string[] }> {
 	constructor(props: any, context: any) {
 		super(props, context);
 		console.log("Receiving messages");
 		this.state = { messages: [] };
 	}
-	receiveChannel: ConcurrenceChannel = concurrence.receive("messages", value => {
+	receiveChannel: ConcurrenceChannel = receive("messages", value => {
 		console.log("Received: " + value);
 		this.setState({ messages: [value as string].concat(this.state.messages) });
 	});
@@ -68,7 +74,7 @@ class ReceiveWidget extends preact.Component<{}, { messages: string[] }> {
 	}
 }
 
-class BroadcastWidget extends preact.Component<{}, { value: string }> {
+class BroadcastWidget extends dom.Component<{}, { value: string }> {
 	constructor(props: any, context: any) {
 		super(props, context);
 		this.state = { value: "" };
@@ -83,7 +89,7 @@ class BroadcastWidget extends preact.Component<{}, { value: string }> {
 	}
 	updateValue = (value: string) => this.setState({ value })
 	send = () => {
-		concurrence.broadcast("messages", this.state.value);
+		send("messages", this.state.value);
 	}
 }
 
@@ -118,7 +124,7 @@ function updatedRecordsFromChange<T extends DbRecord>(items: T[], message: DbRec
 
 type Item = DbRecord & { text: string };
 
-class NewItemWidget extends preact.Component<{}, { value: string }> {
+class NewItemWidget extends dom.Component<{}, { value: string }> {
 	constructor(props: any, context: any) {
 		super(props, context);
 		this.state = { value: "" };
@@ -133,18 +139,18 @@ class NewItemWidget extends preact.Component<{}, { value: string }> {
 	}
 	onChange = (value: string) => this.setState({ value })
 	send = () => {
-		concurrence.mysql.modify("localhost", "INSERT INTO concurrence_todo.items (text) VALUES (?)", this.state.value).then(result => {
+		sql.modify("localhost", "INSERT INTO concurrence_todo.items (text) VALUES (?)", this.state.value).then(result => {
 			const message: DbRecordChange<Item> = {
 				operation: "create",
 				record: { id: result.insertId as number, text: this.state.value }
 			};
-			concurrence.broadcast("item-changes", message);
+			send("item-changes", message);
 			this.setState({ value: "" });
 		}).catch(e => console.log(e));
 	}
 }
 
-class ItemWidget extends preact.Component<{ item: Item }, { pendingText: string | undefined, inProgress: boolean }> {
+class ItemWidget extends dom.Component<{ item: Item }, { pendingText: string | undefined, inProgress: boolean }> {
 	constructor(props: any, context: any) {
 		super(props, context);
 		this.state = { pendingText: undefined, inProgress: false };
@@ -168,8 +174,8 @@ class ItemWidget extends preact.Component<{ item: Item }, { pendingText: string 
 				record: { id: this.props.item.id, text: this.state.pendingText }
 			};
 			this.setState({ inProgress: true });
-			concurrence.mysql.modify("localhost", "UPDATE concurrence_todo.items SET text = ? WHERE id = ?", this.state.pendingText, this.props.item.id).then(result => {
-				concurrence.broadcast("item-changes", message);
+			sql.modify("localhost", "UPDATE concurrence_todo.items SET text = ? WHERE id = ?", this.state.pendingText, this.props.item.id).then(result => {
+				send("item-changes", message);
 				this.setState({ pendingText: undefined, inProgress: false });
 			}).catch(e => console.log(e));
 		}
@@ -180,18 +186,18 @@ class ItemWidget extends preact.Component<{ item: Item }, { pendingText: string 
 			operation: "delete",
 			record: this.props.item
 		};
-		concurrence.mysql.modify("localhost", "DELETE FROM concurrence_todo.items WHERE id = ?", this.props.item.id).then(result => {
-			concurrence.broadcast("item-changes", message);
+		sql.modify("localhost", "DELETE FROM concurrence_todo.items WHERE id = ?", this.props.item.id).then(result => {
+			send("item-changes", message);
 			this.setState({ inProgress: false });
 		});
 	}
 }
 
-class ListWidget<T extends DbRecord> extends preact.Component<{ fetch: () => PromiseLike<T[]> | T[], topic: string, render: (record: T) => JSX.Element | null }, { records: T[], message: string | undefined }> {
+class ListWidget<T extends DbRecord> extends dom.Component<{ fetch: () => PromiseLike<T[]> | T[], topic: string, render: (record: T) => JSX.Element | null }, { records: T[], message: string | undefined }> {
 	constructor(props: any, context: any) {
 		super(props, context);
 		this.state = { records: [], message: "Loading..." };
-		this.receiveChannel = concurrence.receive(this.props.topic, (change: DbRecordChange<T>) => {
+		this.receiveChannel = receive(this.props.topic, (change: DbRecordChange<T>) => {
 			this.setState({ records: updatedRecordsFromChange(this.state.records, change) });
 		});
 		Promise.resolve(this.props.fetch()).then(records => this.setState({ records, message: undefined })).catch(e => this.setState({ message: e.toString() }));
@@ -205,12 +211,12 @@ class ListWidget<T extends DbRecord> extends preact.Component<{ fetch: () => Pro
 	}
 }
 
-const ItemsWidget = () => <ListWidget fetch={() => concurrence.mysql.query("localhost", "SELECT id, text FROM concurrence_todo.items ORDER BY id DESC")} render={(item: Item) => <ItemWidget item={item} key={item.id}/>} topic="item-changes" />;
+const ItemsWidget = () => <ListWidget fetch={() => sql.query("localhost", "SELECT id, text FROM concurrence_todo.items ORDER BY id DESC")} render={(item: Item) => <ItemWidget item={item} key={item.id}/>} topic="item-changes" />;
 
-class SharingWidget extends preact.Component<{}, { url?: string }> {
+class SharingWidget extends dom.Component<{}, { url?: string }> {
 	constructor(props: any, context: any) {
 		super(props, context);
-		concurrence.shareSession().then(url => this.setState({ url }));
+		shareSession().then(url => this.setState({ url }));
 	}
 	render() {
 		const url = this.state.url;
@@ -221,7 +227,7 @@ class SharingWidget extends preact.Component<{}, { url?: string }> {
 	}
 }
 
-concurrence.host((
+dom.host((
 	<div>
 		<strong>Random numbers:</strong>
 		<ShowHideWidget>
@@ -251,3 +257,4 @@ concurrence.host((
 console.log("Date.now()", Date.now());
 console.log("new Date()", new Date().toString());
 console.log("Math.random", Math.random());
+

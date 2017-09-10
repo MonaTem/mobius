@@ -1,21 +1,22 @@
-.PHONY: all run clean cleaner minify
+.PHONY: all run clean cleaner minify client server host app fallback
 
 rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
+scripts=$(call rwildcard, $1/, *.tsx) $(call rwildcard, $1/, *.ts)
 
-API_FILES = $(call rwildcard, api/, *.ts) $(call rwildcard, api/, *.js) $(call rwildcard, api/, *.tsx) $(call rwildcard, api/, *.jsx) $(call rwildcard, src/, *.ts) $(call rwildcard, src/, *.js) $(call rwildcard, src/, *.tsx) $(call rwildcard, src/, *.jsx)
-CLIENT_FILES = $(filter-out $(call rwildcard, api/, *-server.ts) $(call rwildcard, api/, *-server.js) $(call rwildcard, api/, *-server.tsx) $(call rwildcard, api/, *-server.jsx), $(API_FILES))
-SERVER_FILES = $(filter-out $(call rwildcard, api/, *-client.ts) $(call rwildcard, api/, *-client.js) $(call rwildcard, api/, *-client.tsx) $(call rwildcard, api/, *-client.jsx), $(API_FILES))
-HOST_FILES = $(call rwildcard, host/, *.ts) $(call rwildcard, host/, *.js)
+COMMON_FILES = $(call scripts, common)
+CLIENT_FILES = $(call scripts, client)
+SERVER_FILES = $(call scripts, server)
+HOST_FILES = $(call scripts, host)
+SRC_FILES = $(call scripts, src)
 
-
-all: public/client.js public/fallback.js build/server.js build/index.js
-minify: public/client.min.js public/fallback.min.js build/server.js build/index.js
+all: host server client fallback app
+minify: public/client.min.js public/fallback.min.js all
 
 run: all
-	node --trace-warnings --inspect build/index.js
+	node --trace-warnings --inspect host/index.js
 
 clean:
-	rm -rf public/client{,.min}.js public/fallback{,.min}.js build/
+	rm -rf public/{client,fallback,app}{,.min}.js api/ {common,host,client,src}/*.js host/{common,server,src}
 
 cleaner: clean
 	rm -rf node_modules
@@ -40,18 +41,41 @@ node_modules/preact: node_modules/typescript/bin/tsc preact/dist/preact.js
 	pushd node_modules && ln -sf ../preact/ preact
 
 
-public/client.js: $(CLIENT_FILES) tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
-	node_modules/typescript/bin/tsc -p tsconfig-client.json
+api/:
+	mkdir -p api
 
-public/fallback.js: concurrence-fallback.ts tsconfig-fallback.json node_modules/typescript/bin/tsc
-	node_modules/typescript/bin/tsc -p tsconfig-fallback.json
 
-build/server.js: $(SERVER_FILES) tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
-	node_modules/typescript/bin/tsc -p tsconfig-server.json
+host: host/index.js
 
-build/index.js: $(HOST_FILES) api/concurrence.d.ts tsconfig-host.json node_modules/typescript/bin/tsc
+host/index.js: $(HOST_FILES) types/concurrence-types.d.ts tsconfig-host.json node_modules/typescript/bin/tsc
 	node_modules/typescript/bin/tsc -p tsconfig-host.json
 
 
+server: host/src/app.js
+
+host/src/app.js: $(SERVER_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
+	node_modules/typescript/bin/tsc -p tsconfig-server.json
+
+
+client: public/client.js
+
+api/concurrence.d.ts: $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
+	node_modules/typescript/bin/tsc -p tsconfig-client.json
+
+public/client.js: api/concurrence.d.ts src/app.js
+	rollup -c
+
+fallback: public/fallback.js
+
+public/fallback.js: concurrence-fallback.ts types/*.d.ts tsconfig-fallback.json node_modules/typescript/bin/tsc
+	node_modules/typescript/bin/tsc -p tsconfig-fallback.json
+
+
+app: src/app.js
+
+src/app.js: $(SRC_FILES) api/concurrence.d.ts types/*.d.ts tsconfig-app.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
+	node_modules/typescript/bin/tsc -p tsconfig-app.json
+
+
 %.min.js: %.js
-	node ./node_modules/google-closure-compiler-js/cmd.js --languageIn ES5 --languageOut ES3 --assumeFunctionWrapper true $< > $@
+	node ./node_modules/google-closure-compiler-js/cmd.js --languageIn ES6 --languageOut ES3 --assumeFunctionWrapper true $< > $@

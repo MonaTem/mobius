@@ -1,15 +1,13 @@
 {
 	"include": [
-		"client/*.ts",
-		"client/*.tsx",
-		"common/**/*.ts",
-		"common/**/*.tsx"
+		"types/reduced-dom.d.ts",
+		"types/ambient.d.ts",
+		"src/*.tsx",
+		"src/*.ts"
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
 		"allowJs": false,
-		"declaration": true,
-		"declarationDir": "types",
 		"jsx": "react",
 		"jsxFactory": "dom.h",
 		"strict": true,
@@ -23,14 +21,13 @@
 		"types": [],
 		"lib": [
 			"es5",
-			"dom",
 			"es2015.promise"
 		],
 		"paths": {
 			"*": [
-				"client/*",
-				"common/*",
-				"types/*"
+				"src/*",
+				"types/*",
+				"api/*"
 			]
 		}
 	}
