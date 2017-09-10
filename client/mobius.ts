@@ -1,6 +1,6 @@
 import { Channel, JsonValue } from "mobius-types";
 import { interceptGlobals, roundTrip } from "determinism";
-import { logOrdering, eventForValue, eventForException, parseValueEvent, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "_internal";
+import { logOrdering, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "_internal";
 /**
  * @license THE MIT License (MIT)
  * 
@@ -351,7 +351,7 @@ export function disconnect() {
 		// Send a "destroy" message so that the server can clean up the session
 		const message = produceMessage();
 		message.destroy = true;
-		const body = messageAsQueryString(message);
+		const body = serializeMessageAsQueryString(message);
 		sessionID = undefined;
 		if (navigator.sendBeacon) {
 			navigator.sendBeacon(serverURL, body);
@@ -455,28 +455,11 @@ function processMessage(message: ServerMessage) : PromiseLike<void> {
 	return promise.then(escaping(synchronizeChannels));
 }
 
-function deserializeMessage(messageText: string, defaultMessageID: number) : ServerMessage {
-	const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as ServerMessage;
-	result.messageID = result.messageID | defaultMessageID;
-	if (!result.events) {
-		result.events = [];
-	}
-	return result;
-}
-
-function messageAsSocketText(message: Partial<ClientMessage>) : string {
-	if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message) && !("clientID" in message)) {
-		// Only send events, if that's all we have to send
-		return JSON.stringify(message.events).slice(1, -1);
-	}
-	return JSON.stringify(message);
-}
-
 function cheesyEncodeURIComponent(text: string) {
 	return encodeURIComponent(text).replace(/%5B/g, "[").replace(/%5D/g, "]").replace(/%2C/g, ",").replace(/%20/g, "+");
 }
 
-function messageAsQueryString(message: Partial<ClientMessage>) : string {
+function serializeMessageAsQueryString(message: Partial<ClientMessage>) : string {
 	let result = "sessionID=" + sessionID;
 	if (clientID) {
 		result += "&clientID=" + clientID;
@@ -503,13 +486,13 @@ function sendFormMessage(message: Partial<ClientMessage>) {
 		if (request.readyState == 4) {
 			activeConnectionCount--;
 			if (request.status == 200) {
-				processMessage(deserializeMessage(request.responseText, 0));
+				processMessage(deserializeMessageFromText<ServerMessage>(request.responseText, 0));
 			} else {
 				disconnect();
 			}
 		}
 	}
-	request.send(messageAsQueryString(message));
+	request.send(serializeMessageAsQueryString(message));
 }
 
 let lastWebSocketMessageId = 0;
@@ -533,14 +516,14 @@ function sendMessages(attemptWebSockets?: boolean) {
 		lastWebSocketMessageId = outgoingMessageId;
 		if (existingSocket.readyState == 1) {
 			// Send on open socket
-			existingSocket.send(messageAsSocketText(message));
+			existingSocket.send(serializeMessageAsText(message));
 		} else {
 			// Coordinate with existing WebSocket that's in the process of being opened,
 			// falling back to a form POST if necessary
 			const existingSocketOpened = () => {
 				removeEventListener(existingSocket, "open", existingSocketOpened);
 				removeEventListener(existingSocket, "error", existingSocketErrored);
-				existingSocket.send(messageAsSocketText(message));
+				existingSocket.send(serializeMessageAsText(message));
 			}
 			const existingSocketErrored = () => {
 				removeEventListener(existingSocket, "open", existingSocketOpened);
@@ -557,7 +540,7 @@ function sendMessages(attemptWebSockets?: boolean) {
 	lastWebSocketMessageId = outgoingMessageId;
 	if (attemptWebSockets && WebSocketClass) {
 		try {
-			const newSocket = new WebSocketClass(socketURL + messageAsQueryString(message));
+			const newSocket = new WebSocketClass(socketURL + serializeMessageAsQueryString(message));
 			// Attempt to open a WebSocket for channels, but not heartbeats
 			const newSocketOpened = () => {
 				removeEventListener(newSocket, "open", newSocketOpened);
@@ -574,7 +557,7 @@ function sendMessages(attemptWebSockets?: boolean) {
 			addEventListener(newSocket, "error", newSocketErrored);
 			let lastWebSocketMessageId = -1;
 			addEventListener(newSocket, "message", (event: any) => {
-				const message = deserializeMessage(event.data, lastWebSocketMessageId + 1);
+				const message = deserializeMessageFromText<ServerMessage>(event.data, lastWebSocketMessageId + 1);
 				lastWebSocketMessageId = message.messageID;
 				const promise = processMessage(message)
 				if (message.close) {

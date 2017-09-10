@@ -83,3 +83,20 @@ export function parseValueEvent<T>(event: Event | undefined, resolve: (value: Js
 	}
 	return reject(value);
 }
+
+export function deserializeMessageFromText<T extends ServerMessage>(messageText: string, defaultMessageID: number) : T {
+	const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as T;
+	result.messageID = result.messageID | defaultMessageID;
+	if (!result.events) {
+		result.events = [];
+	}
+	return result;
+}
+
+export function serializeMessageAsText(message: Partial<ServerMessage | ClientMessage>) : string {
+	if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message) && !("clientID" in message)) {
+		// Only send events, if that's all we have to send
+		return JSON.stringify(message.events).slice(1, -1);
+	}
+	return JSON.stringify(message);
+}

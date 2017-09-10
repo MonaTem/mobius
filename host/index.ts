@@ -14,7 +14,7 @@ import { JSDOM } from "jsdom";
 import { JsonValue, JsonMap, Channel } from "mobius-types";
 import { loadModule, SandboxModule } from "./sandbox";
 import { interceptGlobals, roundTrip, FakedGlobals } from "../common/determinism";
-import { logOrdering, eventForValue, eventForException, parseValueEvent, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "../common/_internal";
+import { logOrdering, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "../common/_internal";
 
 const server = express();
 
@@ -1322,23 +1322,6 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 		return message;
 	}
 
-	function messageFromSocket(messageText: string, defaultMessageID: number) : ClientMessage {
-		const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as ClientMessage;
-		result.messageID = result.messageID | defaultMessageID;
-		if (!result.events) {
-			result.events = [];
-		}
-		return result;
-	}
-
-	function serializeMessage(message: Partial<ServerMessage>) : string {
-		if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message)) {
-			// Only send events, if that's all we have to send
-			return JSON.stringify(message.events).slice(1, -1);
-		}
-		return JSON.stringify(message);
-	}
-
 	server.use(bodyParser.urlencoded({
 		extended: true,
 		type: () => true // Accept all MIME types
@@ -1454,7 +1437,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			// Wait for events to be ready
 			await client.dequeueEvents();
 			// Send the serialized response message back to the client
-			const responseMessage = serializeMessage(client.produceMessage());
+			const responseMessage = serializeMessageAsText(client.produceMessage());
 			res.set("Content-Type", "text/plain");
 			res.send(responseMessage);
 		})().catch(e => {
@@ -1512,13 +1495,13 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 							message.close = true;
 							closed = true;
 						}
-						ws.send(serializeMessage(message));
+						ws.send(serializeMessageAsText(message));
 					}
 				}
 			}
 			// Process incoming messages
 			ws.on("message", (msg: string) => {
-				const message = messageFromSocket(msg, lastIncomingMessageId + 1);
+				const message = deserializeMessageFromText<ClientMessage>(msg, lastIncomingMessageId + 1);
 				lastIncomingMessageId = message.messageID;
 				processSocketMessage(message);
 			});
