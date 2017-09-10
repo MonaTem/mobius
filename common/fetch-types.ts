@@ -1,4 +1,4 @@
-import { ConcurrenceJsonMap } from "concurrence-types";
+import { JsonMap } from "mobius-types";
 
 export interface FetchOptions {
 	method?: string;
@@ -7,7 +7,7 @@ export interface FetchOptions {
 	redirect?: "follow" | "error" | "manual";
 	from?: "server" | "client";
 }
-export interface FetchResponse extends ConcurrenceJsonMap {
+export interface FetchResponse extends JsonMap {
 	type: "basic" | "cors" | "default" | "error" | "opaque" | "opaqueredirect";
 	url: string;
 	status: number;

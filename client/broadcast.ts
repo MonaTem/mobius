@@ -1,7 +1,7 @@
-import { flush, createServerChannel } from "concurrence";
-import { ConcurrenceJsonValue, ConcurrenceChannel } from "concurrence-types";
+import { flush, createServerChannel } from "mobius";
+import { JsonValue, Channel } from "mobius-types";
 
-export const send: (topic: string, message: ConcurrenceJsonValue) => void = flush;
-export function receive(topic: string, callback: (message: ConcurrenceJsonValue) => void, onAbort?: () => void) : ConcurrenceChannel {
+export const send: (topic: string, message: JsonValue) => void = flush;
+export function receive(topic: string, callback: (message: JsonValue) => void, onAbort?: () => void) : Channel {
 	return createServerChannel(callback, onAbort);
 }

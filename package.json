@@ -1,8 +1,8 @@
 {
-  "name": "concurrence",
+  "name": "mobius",
   "version": "0.1.0",
   "description": "Experiment for simpler web apps",
-  "main": "index.js",
+  "main": "build/host/index.js",
   "scripts": {
     "build": "make -j4",
     "clean": "make clean",

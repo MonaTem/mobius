@@ -1,4 +1,4 @@
-import { createServerPromise, createClientPromise } from "concurrence";
+import { createServerPromise, createClientPromise } from "mobius";
 import { FetchOptions, FetchResponse } from "fetch-types";
 
 export function fetch(url: string, options?: FetchOptions) : PromiseLike<FetchResponse> {

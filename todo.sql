@@ -1,5 +1,5 @@
-CREATE DATABASE IF NOT EXISTS concurrence_todo;
-CREATE TABLE IF NOT EXISTS concurrence_todo.items(
+CREATE DATABASE IF NOT EXISTS mobius_todo;
+CREATE TABLE IF NOT EXISTS mobius_todo.items(
     id INT NOT NULL AUTO_INCREMENT,
     text TEXT NOT NULL,
     PRIMARY KEY (id)

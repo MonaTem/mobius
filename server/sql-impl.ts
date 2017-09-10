@@ -1,5 +1,5 @@
-import { createServerPromise, secrets } from "concurrence";
-import { ConcurrenceJsonMap } from "concurrence-types";
+import { createServerPromise, secrets } from "mobius";
+import { JsonMap } from "mobius-types";
 import { ExecuteResult } from "sql";
 
 declare global {
@@ -28,7 +28,7 @@ function getPool(host: string) {
 }
 
 export function execute(host: string, sql: string, params?: any[]) : Promise<ExecuteResult> {
-	return createServerPromise(() => new Promise<ExecuteResult & ConcurrenceJsonMap>((resolve, reject) => {
+	return createServerPromise(() => new Promise<ExecuteResult & JsonMap>((resolve, reject) => {
 		getPool(host).query({
 			sql: sql,
 			values: params || []
@@ -36,7 +36,7 @@ export function execute(host: string, sql: string, params?: any[]) : Promise<Exe
 			if (error) {
 				reject(error);
 			} else {
-				let wrappedResult : ExecuteResult & ConcurrenceJsonMap = {};
+				let wrappedResult : ExecuteResult & JsonMap = {};
 				if (result instanceof Array) {
 					wrappedResult.records = result;
 				} else {

@@ -1,4 +1,4 @@
-import { ConcurrenceJsonValue } from "concurrence-types";
+import { JsonValue } from "mobius-types";
 
 export interface FakedGlobals {
 	Math: typeof Math;
@@ -27,7 +27,7 @@ const setPrototypeOf = (Object as any).setProtoTypeOf || ((obj: any, proto: any)
 export function interceptGlobals<T extends Partial<FakedGlobals>>(
 	globals: T,
 	insideCallback: () => boolean,
-	coordinateValue: <T extends ConcurrenceJsonValue>(generator: () => T) => T,
+	coordinateValue: <T extends JsonValue>(generator: () => T) => T,
 	coordinateChannel: <T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender?: boolean) => Closeable
 ) : T & FakedGlobals {
 	// Override the Math object with one that returns a common stream of random numbers

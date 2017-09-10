@@ -32,7 +32,7 @@
 	let isSending = 0;
 	let anyChanged = false;
 
-	const form = document.forms["concurrence-form" as any as number] as HTMLFormElement;
+	const form = document.forms["mobius-form" as any as number] as HTMLFormElement;
 	form.onsubmit = function() {
 		return false;
 	}

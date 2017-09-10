@@ -47,7 +47,7 @@ api/:
 
 host: build/index.js
 
-build/index.js: $(HOST_FILES) $(COMMON_FILES) types/concurrence-types.d.ts tsconfig-host.json node_modules/typescript/bin/tsc
+build/index.js: $(HOST_FILES) $(COMMON_FILES) types/*.d.ts tsconfig-host.json node_modules/typescript/bin/tsc
 	node_modules/typescript/bin/tsc -p tsconfig-host.json
 
 
@@ -59,21 +59,21 @@ build/src/app.js: $(SERVER_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d
 
 client: public/client.js
 
-api/concurrence.d.ts: $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
+api/mobius.d.ts: $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/typescript/bin/tsc -p tsconfig-client.json
 
-public/client.js: api/concurrence.d.ts src/app.js
+public/client.js: api/mobius.d.ts src/app.js
 	rollup -c
 
 fallback: public/fallback.js
 
-public/fallback.js: concurrence-fallback.ts types/*.d.ts tsconfig-fallback.json node_modules/typescript/bin/tsc
+public/fallback.js: mobius-fallback.ts types/*.d.ts tsconfig-fallback.json node_modules/typescript/bin/tsc
 	node_modules/typescript/bin/tsc -p tsconfig-fallback.json
 
 
 app: src/app.js
 
-src/app.js: $(SRC_FILES) api/concurrence.d.ts types/*.d.ts tsconfig-app.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
+src/app.js: $(SRC_FILES) api/mobius.d.ts types/*.d.ts tsconfig-app.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/typescript/bin/tsc -p tsconfig-app.json
 
 

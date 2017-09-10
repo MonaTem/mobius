@@ -1,8 +1,8 @@
-import { ConcurrenceChannel, ConcurrenceJsonMap } from "concurrence-types";
+import { Channel, JsonMap } from "mobius-types";
 import * as dom from "dom";
 import { receive, send } from "broadcast";
 import * as sql from "sql";
-import { shareSession } from "concurrence";
+import { shareSession } from "mobius";
 
 class CollapsibleSection extends dom.Component<{ title: string }, { visible: boolean }> {
 	constructor(props: any, context: any) {
@@ -60,7 +60,7 @@ class ReceiveWidget extends dom.Component<{}, { messages: string[] }> {
 		console.log("Receiving messages");
 		this.state = { messages: [] };
 	}
-	receiveChannel: ConcurrenceChannel = receive("messages", value => {
+	receiveChannel: Channel = receive("messages", value => {
 		console.log("Received: " + value);
 		this.setState({ messages: [value as string].concat(this.state.messages) });
 	});
@@ -94,7 +94,7 @@ class BroadcastWidget extends dom.Component<{}, { value: string }> {
 }
 
 type DbRecord = { id: number };
-type DbRecordChange<T extends DbRecord> = ConcurrenceJsonMap & {
+type DbRecordChange<T extends DbRecord> = JsonMap & {
 	operation: "create" | "modify" | "delete";
 	record: T;
 };
@@ -139,7 +139,7 @@ class NewItemWidget extends dom.Component<{}, { value: string }> {
 	}
 	onChange = (value: string) => this.setState({ value })
 	send = () => {
-		sql.modify("localhost", "INSERT INTO concurrence_todo.items (text) VALUES (?)", [this.state.value]).then(result => {
+		sql.modify("localhost", "INSERT INTO mobius_todo.items (text) VALUES (?)", [this.state.value]).then(result => {
 			const message: DbRecordChange<Item> = {
 				operation: "create",
 				record: { id: result.insertId as number, text: this.state.value }
@@ -174,7 +174,7 @@ class ItemWidget extends dom.Component<{ item: Item }, { pendingText: string | u
 				record: { id: this.props.item.id, text: this.state.pendingText }
 			};
 			this.setState({ inProgress: true });
-			sql.modify("localhost", "UPDATE concurrence_todo.items SET text = ? WHERE id = ?", [this.state.pendingText, this.props.item.id]).then(result => {
+			sql.modify("localhost", "UPDATE mobius_todo.items SET text = ? WHERE id = ?", [this.state.pendingText, this.props.item.id]).then(result => {
 				send("item-changes", message);
 				this.setState({ pendingText: undefined, inProgress: false });
 			}).catch(e => console.log(e));
@@ -186,7 +186,7 @@ class ItemWidget extends dom.Component<{ item: Item }, { pendingText: string | u
 			operation: "delete",
 			record: this.props.item
 		};
-		sql.modify("localhost", "DELETE FROM concurrence_todo.items WHERE id = ?", [this.props.item.id]).then(result => {
+		sql.modify("localhost", "DELETE FROM mobius_todo.items WHERE id = ?", [this.props.item.id]).then(result => {
 			send("item-changes", message);
 			this.setState({ inProgress: false });
 		});
@@ -205,13 +205,13 @@ class ListWidget<T extends DbRecord> extends dom.Component<{ fetch: () => Promis
 	render() {
 		return <div>{typeof this.state.message != "undefined" ? this.state.message : this.state.records.map(this.props.render)}</div>;
 	}
-	receiveChannel: ConcurrenceChannel;
+	receiveChannel: Channel;
 	componentWillUnmount() {
 		this.receiveChannel.close();
 	}
 }
 
-const ItemsWidget = () => <ListWidget fetch={() => sql.query("localhost", "SELECT id, text FROM concurrence_todo.items ORDER BY id DESC")} render={(item: Item) => <ItemWidget item={item} key={item.id}/>} topic="item-changes" />;
+const ItemsWidget = () => <ListWidget fetch={() => sql.query("localhost", "SELECT id, text FROM mobius_todo.items ORDER BY id DESC")} render={(item: Item) => <ItemWidget item={item} key={item.id}/>} topic="item-changes" />;
 
 class SharingWidget extends dom.Component<{}, { url?: string }> {
 	constructor(props: any, context: any) {

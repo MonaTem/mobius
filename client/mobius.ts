@@ -1,4 +1,4 @@
-import { ConcurrenceChannel, ConcurrenceJsonValue } from "concurrence-types";
+import { Channel, JsonValue } from "mobius-types";
 import { interceptGlobals } from "determinism";
 /**
  * @license THE MIT License (MIT)
@@ -59,12 +59,12 @@ const { scheduleFlushTasks, setImmediate } = (() => {
 		let isAsynchronous = true;
 		const synchronousTest = () => isAsynchronous = false;
 		addEventListener(window, "message", synchronousTest);
-		window.postMessage("__concurrence_test", "*");
+		window.postMessage("__mobius_test", "*");
 		removeEventListener(window, "message", synchronousTest);
 		if (isAsynchronous) {
 			addEventListener(window, "message", flushTasks);
 			scheduleFlushTasks = () => {
-				window.postMessage("__concurrence_flush", "*")
+				window.postMessage("__mobius_flush", "*")
 			};
 		}
 	}
@@ -162,15 +162,15 @@ function emptyFunction() {
 
 const slice = Array.prototype.slice;
 
-type ConcurrenceEvent = [number] | [number, any] | [number, any, any];
+type Event = [number] | [number, any] | [number, any, any];
 
-interface ConcurrenceServerMessage {
-	events: ConcurrenceEvent[];
+interface ServerMessage {
+	events: Event[];
 	messageID: number;
 	close?: boolean;
 }
 
-interface ConcurrenceClientMessage extends ConcurrenceServerMessage {
+interface ClientMessage extends ServerMessage {
 	sessionID?: string;
 	clientID?: number;
 	destroy?: true;
@@ -188,7 +188,7 @@ function uuid() : string {
 	});
 }
 
-function roundTrip<T extends ConcurrenceJsonValue | void>(obj: T) : T {
+function roundTrip<T extends JsonValue | void>(obj: T) : T {
 	// Round-trip values through JSON so that the client receives exactly the same type of values as the server
 	return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify(obj)) as T;
 }
@@ -196,16 +196,16 @@ function roundTrip<T extends ConcurrenceJsonValue | void>(obj: T) : T {
 interface BootstrapData {
 	sessionID: string;
 	clientID?: number;
-	events?: (ConcurrenceEvent | boolean)[];
+	events?: (Event | boolean)[];
 	channels?: number[];
 }
 
 // Message ordering
 let outgoingMessageId = 0;
 let incomingMessageId = 0;
-const reorderedMessages : { [messageId: number]: ConcurrenceServerMessage } = {};
+const reorderedMessages : { [messageId: number]: ServerMessage } = {};
 let willSynchronizeChannels : boolean = false;
-let currentEvents: (ConcurrenceEvent | boolean)[] | undefined;
+let currentEvents: (Event | boolean)[] | undefined;
 let bootstrappingChannels: number[] | undefined;
 function shouldImplementLocalChannel(channelId: number) {
 	return !bootstrappingChannels || (bootstrappingChannels.indexOf(channelId) != -1);
@@ -248,7 +248,7 @@ const startupScripts = document.getElementsByTagName("script");
 const bootstrapData = (elements => {
 	for (let i = 0; i < startupScripts.length; i++) {
 		const element = startupScripts[i];
-		if (element.getAttribute("type") == "application/x-concurrence-bootstrap") {
+		if (element.getAttribute("type") == "application/x-mobius-bootstrap") {
 			element.parentNode!.removeChild(element);
 			return JSON.parse(element.textContent || element.innerHTML) as Partial<BootstrapData>;
 		}
@@ -264,15 +264,15 @@ export let dead = false;
 
 // Remote channels
 let remoteChannelCounter = 0;
-const pendingChannels : { [channelId: number]: (event?: ConcurrenceEvent) => void; } = {};
+const pendingChannels : { [channelId: number]: (event?: Event) => void; } = {};
 let pendingChannelCount = 0;
 let hadOpenServerChannel = false;
 
 // Local channels
 let localChannelCounter = 0;
-let queuedLocalEvents: ConcurrenceEvent[] = [];
-const fencedLocalEvents: ConcurrenceEvent[] = [];
-const pendingLocalChannels: { [channelId: number]: (event: ConcurrenceEvent) => void; } = {};
+let queuedLocalEvents: Event[] = [];
+const fencedLocalEvents: Event[] = [];
+const pendingLocalChannels: { [channelId: number]: (event: Event) => void; } = {};
 let totalBatched = 0;
 let isBatched: { [channelId: number]: true } = {};
 let pendingBatchedActions: (() => void)[] = [];
@@ -304,9 +304,9 @@ const afterLoaded = new Promise(resolve => {
 
 if (hasBootstrap) {
 	++outgoingMessageId;
-	const concurrenceForm = document.getElementById("concurrence-form") as HTMLFormElement;
-	if (concurrenceForm) {
-		concurrenceForm.onsubmit = () => false;
+	const wrapperForm = document.getElementById("mobius-form") as HTMLFormElement;
+	if (wrapperForm) {
+		wrapperForm.onsubmit = () => false;
 	}
 	const events = bootstrapData.events || [];
 	currentEvents = events;
@@ -332,8 +332,8 @@ if (hasBootstrap) {
 	afterLoaded.then(didExitCallback);
 }
 
-function produceMessage() : Partial<ConcurrenceClientMessage> {
-	const result: Partial<ConcurrenceClientMessage> = { messageID: outgoingMessageId++ };
+function produceMessage() : Partial<ClientMessage> {
+	const result: Partial<ClientMessage> = { messageID: outgoingMessageId++ };
 	if (queuedLocalEvents.length) {
 		result.events = queuedLocalEvents;
 		queuedLocalEvents = [];
@@ -402,9 +402,9 @@ export function disconnect() {
 }
 addEventListener(window, "unload", disconnect);
 
-function dispatchEvent(event: ConcurrenceEvent) : PromiseLike<void> | void {
+function dispatchEvent(event: Event) : PromiseLike<void> | void {
 	let channelId = event[0];
-	let channel: ((event: ConcurrenceEvent) => void) | undefined;
+	let channel: ((event: Event) => void) | undefined;
 	if (channelId < 0) {
 		// Fenced client-side event
 		for (let i = 0; i < fencedLocalEvents.length; i++) {
@@ -433,7 +433,7 @@ function dispatchEvent(event: ConcurrenceEvent) : PromiseLike<void> | void {
 	callChannelWithEvent(channel, event);
 }
 
-function callChannelWithEvent(channel: ((event: ConcurrenceEvent) => void) | undefined, event: ConcurrenceEvent) {
+function callChannelWithEvent(channel: ((event: Event) => void) | undefined, event: Event) {
 	if (channel) {
 		if (totalBatched) {
 			pendingBatchedActions.push(channel.bind(null, event));
@@ -443,10 +443,10 @@ function callChannelWithEvent(channel: ((event: ConcurrenceEvent) => void) | und
 	}
 }
 
-function processEvents(events: (ConcurrenceEvent | boolean)[]) {
+function processEvents(events: (Event | boolean)[]) {
 	hadOpenServerChannel = pendingChannelCount != 0;
 	currentEvents = events;
-	return events.reduce((promise: PromiseLike<any>, event: ConcurrenceEvent | boolean) => {
+	return events.reduce((promise: PromiseLike<any>, event: Event | boolean) => {
 		if (typeof event == "boolean") {
 			return promise.then(() => hadOpenServerChannel = event);
 		} else {
@@ -458,7 +458,7 @@ function processEvents(events: (ConcurrenceEvent | boolean)[]) {
 	});
 }
 
-function processMessage(message: ConcurrenceServerMessage) : PromiseLike<void> {
+function processMessage(message: ServerMessage) : PromiseLike<void> {
 	// Process messages in order
 	const messageId = message.messageID;
 	if (messageId > incomingMessageId) {
@@ -485,8 +485,8 @@ function processMessage(message: ConcurrenceServerMessage) : PromiseLike<void> {
 	return promise.then(escaping(synchronizeChannels));
 }
 
-function deserializeMessage(messageText: string, defaultMessageID: number) : ConcurrenceServerMessage {
-	const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as ConcurrenceServerMessage;
+function deserializeMessage(messageText: string, defaultMessageID: number) : ServerMessage {
+	const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as ServerMessage;
 	result.messageID = result.messageID | defaultMessageID;
 	if (!result.events) {
 		result.events = [];
@@ -494,7 +494,7 @@ function deserializeMessage(messageText: string, defaultMessageID: number) : Con
 	return result;
 }
 
-function messageAsSocketText(message: Partial<ConcurrenceClientMessage>) : string {
+function messageAsSocketText(message: Partial<ClientMessage>) : string {
 	if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message) && !("clientID" in message)) {
 		// Only send events, if that's all we have to send
 		return JSON.stringify(message.events).slice(1, -1);
@@ -506,7 +506,7 @@ function cheesyEncodeURIComponent(text: string) {
 	return encodeURIComponent(text).replace(/%5B/g, "[").replace(/%5D/g, "]").replace(/%2C/g, ",").replace(/%20/g, "+");
 }
 
-function messageAsQueryString(message: Partial<ConcurrenceClientMessage>) : string {
+function messageAsQueryString(message: Partial<ClientMessage>) : string {
 	let result = "sessionID=" + sessionID;
 	if (clientID) {
 		result += "&clientID=" + clientID;
@@ -523,7 +523,7 @@ function messageAsQueryString(message: Partial<ConcurrenceClientMessage>) : stri
 	return result;
 }
 
-function sendFormMessage(message: Partial<ConcurrenceClientMessage>) {
+function sendFormMessage(message: Partial<ClientMessage>) {
 	// Form post over XMLHttpRequest is used when WebSockets are unavailable or fail
 	activeConnectionCount++;
 	const request = new XMLHttpRequest();
@@ -644,7 +644,7 @@ function synchronizeChannels() {
 	}
 }
 
-function createRawServerChannel(callback: (event?: ConcurrenceEvent) => void) : ConcurrenceChannel {
+function createRawServerChannel(callback: (event?: Event) => void) : Channel {
 	if (!insideCallback) {
 		throw new Error("Unable to create server channel in this context!");
 	}
@@ -655,7 +655,7 @@ function createRawServerChannel(callback: (event?: ConcurrenceEvent) => void) : 
 	pendingChannelCount++;
 	let channelId = ++remoteChannelCounter;
 	logOrdering("server", "open", channelId);
-	pendingChannels[channelId] = function(event?: ConcurrenceEvent) {
+	pendingChannels[channelId] = function(event?: Event) {
 		logOrdering("server", "message", channelId);
 		willEnterCallback();
 		callback(event);
@@ -675,7 +675,7 @@ function createRawServerChannel(callback: (event?: ConcurrenceEvent) => void) : 
 	};
 }
 
-function sendEvent(event: ConcurrenceEvent, batched?: boolean, skipsFencing?: boolean) {
+function sendEvent(event: Event, batched?: boolean, skipsFencing?: boolean) {
 	const channelId = event[0];
 	if (pendingChannelCount && !skipsFencing && !dead) {
 		// Let server decide on the ordering of events since server-side channels are active
@@ -687,7 +687,7 @@ function sendEvent(event: ConcurrenceEvent, batched?: boolean, skipsFencing?: bo
 		fencedLocalEvents.push(event);
 	} else {
 		// No pending server-side channels, resolve immediately
-		const eventClone = event.slice() as ConcurrenceEvent;
+		const eventClone = event.slice() as Event;
 		eventClone[0] = -channelId;
 		dispatchEvent(eventClone);
 	}
@@ -710,11 +710,11 @@ function disconnectedError() {
 }
 
 // APIs for client/, not to be used inside src/
-export const createServerPromise: <T extends ConcurrenceJsonValue>(...args: any[]) => PromiseLike<T> = <T extends ConcurrenceJsonValue>() => new Promise<T>((resolve, reject) => {
+export const createServerPromise: <T extends JsonValue>(...args: any[]) => PromiseLike<T> = <T extends JsonValue>() => new Promise<T>((resolve, reject) => {
 	const channel = createRawServerChannel(event => {
 		channel.close();
 		if (event) {
-			parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
+			parseValueEvent(event, resolve as (value: JsonValue) => void, reject);
 		} else {
 			reject(disconnectedError());
 		}
@@ -723,7 +723,7 @@ export const createServerPromise: <T extends ConcurrenceJsonValue>(...args: any[
 
 export const synchronize = createServerPromise as () => PromiseLike<void>;
 
-export function createServerChannel<T extends Function>(callback: T, onAbort?: () => void): ConcurrenceChannel {
+export function createServerChannel<T extends Function>(callback: T, onAbort?: () => void): Channel {
 	if (!("call" in callback)) {
 		throw new TypeError("callback is not a function!");
 	}
@@ -740,11 +740,11 @@ export function createServerChannel<T extends Function>(callback: T, onAbort?: (
 	return channel;
 }
 
-function eventForValue(channelId: number, value: ConcurrenceJsonValue | void) : ConcurrenceEvent {
+function eventForValue(channelId: number, value: JsonValue | void) : Event {
 	return typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)];
 }
 
-function eventForException(channelId: number, error: any) : ConcurrenceEvent {
+function eventForException(channelId: number, error: any) : Event {
 	// Convert Error types to a representation that can be reconstituted on the server
 	let type : any = 1;
 	let serializedError: any = error;
@@ -767,7 +767,7 @@ function eventForException(channelId: number, error: any) : ConcurrenceEvent {
 	return [channelId, serializedError, type];
 }
 
-function parseValueEvent<T>(event: ConcurrenceEvent | undefined, resolve: (value: ConcurrenceJsonValue) => T, reject: (error: Error | ConcurrenceJsonValue) => T) : T {
+function parseValueEvent<T>(event: Event | undefined, resolve: (value: JsonValue) => T, reject: (error: Error | JsonValue) => T) : T {
 	if (!event) {
 		return reject(disconnectedError());
 	}
@@ -791,7 +791,7 @@ function parseValueEvent<T>(event: ConcurrenceEvent | undefined, resolve: (value
 	return reject(value);
 }
 
-export function createClientPromise<T extends ConcurrenceJsonValue | void>(ask: () => (PromiseLike<T> | T)) : PromiseLike<T> {
+export function createClientPromise<T extends JsonValue | void>(ask: () => (PromiseLike<T> | T)) : PromiseLike<T> {
 	if (!insideCallback) {
 		try {
 			return Promise.resolve(runAPIImplementation(ask));
@@ -802,7 +802,7 @@ export function createClientPromise<T extends ConcurrenceJsonValue | void>(ask: 
 	return new Promise<T>((resolve, reject) => {
 		let channelId = ++localChannelCounter;
 		logOrdering("client", "open", channelId);
-		pendingLocalChannels[channelId] = function(event: ConcurrenceEvent) {
+		pendingLocalChannels[channelId] = function(event: Event) {
 			if (event) {
 				delete pendingLocalChannels[channelId];
 				willEnterCallback();
@@ -827,7 +827,7 @@ export function createClientPromise<T extends ConcurrenceJsonValue | void>(ask: 
 	});
 };
 
-export function createClientChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, batched?: boolean, shouldFlushMicroTasks?: true) : ConcurrenceChannel {
+export function createClientChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, batched?: boolean, shouldFlushMicroTasks?: true) : Channel {
 	if (!("call" in callback)) {
 		throw new TypeError("callback is not a function!");
 	}
@@ -862,7 +862,7 @@ export function createClientChannel<T extends Function, U>(callback: T, onOpen: 
 		};
 	}
 	let channelId: number = ++localChannelCounter;
-	pendingLocalChannels[channelId] = function(event: ConcurrenceEvent) {
+	pendingLocalChannels[channelId] = function(event: Event) {
 		if (channelId >= 0) {
 			logOrdering("client", "message", channelId);
 			willEnterCallback();
@@ -909,7 +909,7 @@ export function createClientChannel<T extends Function, U>(callback: T, onOpen: 
 	};
 }
 
-export function coordinateValue<T extends ConcurrenceJsonValue>(generator: () => T) : T {
+export function coordinateValue<T extends JsonValue>(generator: () => T) : T {
 	if (!dispatchingEvent) {
 		return generator();
 	}
@@ -921,7 +921,7 @@ export function coordinateValue<T extends ConcurrenceJsonValue>(generator: () =>
 		// Peek at incoming events to find the value generated on the server
 		if (events) {
 			for (var i = 0; i < events.length; i++) {
-				var event = events[i] as ConcurrenceEvent;
+				var event = events[i] as Event;
 				if (event[0] == channelId) {
 					pendingChannels[channelId] = emptyFunction;
 					return parseValueEvent(event, value => {
@@ -945,7 +945,7 @@ export function coordinateValue<T extends ConcurrenceJsonValue>(generator: () =>
 		logOrdering("client", "open", channelId);
 		if (events) {
 			for (var i = 0; i < events.length; i++) {
-				var event = events[i] as ConcurrenceEvent;
+				var event = events[i] as Event;
 				if (event[0] == -channelId) {
 					pendingLocalChannels[channelId] = emptyFunction;
 					return parseValueEvent(event, value => {

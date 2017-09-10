@@ -14,7 +14,7 @@ import * as uuid from "uuid";
 import { JSDOM } from "jsdom";
 
 import { interceptGlobals, FakedGlobals } from "../common/determinism";
-import { ConcurrenceJsonValue, ConcurrenceJsonMap, ConcurrenceChannel } from "concurrence-types";
+import { JsonValue, JsonMap, Channel } from "mobius-types";
 
 const server = express();
 
@@ -43,7 +43,7 @@ function memoize<I, O>(func: (input: I) => O) {
 server.disable("x-powered-by");
 server.disable("etag");
 
-function logOrdering(from: "client" | "server", type: "open" | "close" | "message", channelId: number, session: ConcurrenceSession) {
+function logOrdering(from: "client" | "server", type: "open" | "close" | "message", channelId: number, session: Session) {
 	// const stack = (new Error().stack || "").toString().split(/\n\s*/).slice(2).map(s => s.replace(/^at\s*/, ""));
 	// console.log(from + " " + type + " " + channelId + " on " + session.sessionID, stack);
 }
@@ -83,7 +83,7 @@ function compatibleStringify(value: any): string {
 
 const validateRoundTrips = true;
 
-function roundTrip<T extends ConcurrenceJsonValue | void>(obj: T) : T {
+function roundTrip<T extends JsonValue | void>(obj: T) : T {
 	if (validateRoundTrips) {
 		// Round-trip values through JSON so that the server receives exactly the same type of values as the client
 		return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify(obj)) as T;
@@ -92,11 +92,11 @@ function roundTrip<T extends ConcurrenceJsonValue | void>(obj: T) : T {
 	}
 }
 
-function eventForValue(channelId: number, value: ConcurrenceJsonValue | void) : ConcurrenceEvent {
+function eventForValue(channelId: number, value: JsonValue | void) : Event {
 	return typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)];
 }
 
-function eventForException(channelId: number, error: any) : ConcurrenceEvent {
+function eventForException(channelId: number, error: any) : Event {
 	// Serialize the reject error type or string
 	let type: number | string = 1;
 	let serializedError = error;
@@ -108,7 +108,7 @@ function eventForException(channelId: number, error: any) : ConcurrenceEvent {
 	return [channelId, serializedError, type];
 }
 
-function parseValueEvent<T>(event: ConcurrenceEvent | undefined, resolve: (value: ConcurrenceJsonValue) => T, reject: (error: Error | ConcurrenceJsonValue) => T) : T {
+function parseValueEvent<T>(event: Event | undefined, resolve: (value: JsonValue) => T, reject: (error: Error | JsonValue) => T) : T {
 	if (!event) {
 		return reject(new Error("Session has been disconnected!"));
 	}
@@ -143,12 +143,12 @@ function patchJSDOM(document: Document) {
 	}
 }
 
-const enum ConcurrenceSandboxMode {
+const enum SandboxMode {
 	Simple = 0,
 	Full = 1,
 };
 
-const sandboxMode = ConcurrenceSandboxMode.Simple as ConcurrenceSandboxMode;
+const sandboxMode = SandboxMode.Simple as SandboxMode;
 
 interface SandboxModule {
 	exports: any,
@@ -165,7 +165,7 @@ interface SandboxGlobal {
 
 const sandboxScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: string) => {
 	const scriptContents = fs.readFileSync(scriptPath).toString();
-	if (sandboxMode == ConcurrenceSandboxMode.Full) {
+	if (sandboxMode == SandboxMode.Full) {
 		// Full sandboxing, creating a new global context each time
 		const vmScript = new vm.Script(scriptContents, {
 			filename: scriptPath,
@@ -205,22 +205,22 @@ function loadModule<T>(path: string, module: SandboxModule, globalProperties: T,
 	sandboxScriptAtPath(path)(moduleGlobal);
 }
 
-interface ConcurrenceGlobalProperties {
+interface MobiusGlobalProperties {
 	document: Document,
 	request: express.Request,
 }
 
-class ConcurrenceHost {
-	sessions = new Map<string, ConcurrenceSession>();
+class Host {
+	sessions = new Map<string, Session>();
 	scriptPath: string;
 	modulePaths: string[];
 	htmlSource: string;
 	dom: JSDOM;
 	document: Document;
 	staleSessionTimeout: any;
-	secrets: ConcurrenceJsonValue;
-	renderingMode: ConcurrenceRenderingMode = ConcurrenceRenderingMode.Prerendering;
-	constructor(scriptPath: string, modulePaths: string[], htmlPath: string, htmlContents: string, secrets: ConcurrenceJsonValue) {
+	secrets: JsonValue;
+	renderingMode: RenderingMode = RenderingMode.Prerendering;
+	constructor(scriptPath: string, modulePaths: string[], htmlPath: string, htmlContents: string, secrets: JsonValue) {
 		this.secrets = secrets;
 		this.dom = new JSDOM(htmlContents);
 		this.document = (this.dom.window as Window).document as Document;
@@ -252,24 +252,24 @@ class ConcurrenceHost {
 		if (allowMultipleClientsPerSession) {
 			let archive;
 			try {
-				archive = await ConcurrenceSession.readArchivedSession(this.pathForSessionId(sessionID));
+				archive = await Session.readArchivedSession(this.pathForSessionId(sessionID));
 			} catch (e) {
 			}
 			if (archive) {
-				session = new ConcurrenceSession(this, sessionID, request);
+				session = new Session(this, sessionID, request);
 				this.sessions.set(sessionID, session);
 				await session.restoreFromArchive(archive as ArchivedSession);
 				return session;
 			}
 		}
-		session = new ConcurrenceSession(this, sessionID, request);
+		session = new Session(this, sessionID, request);
 		this.sessions.set(sessionID, session);
 		return session;
 	}
 	pathForSessionId(sessionId: string) {
 		return "sessions/" + sessionId + ".json";
 	}
-	async clientFromMessage(message: ConcurrenceClientMessage, request: express.Request) {
+	async clientFromMessage(message: ClientMessage, request: express.Request) {
 		const allowCreation = message.messageID == 0;
 		const session = await this.sessionFromId(message.sessionID || "", allowCreation ? request : undefined);
 		let client = session.clients.get(message.clientID as number | 0);
@@ -295,7 +295,7 @@ class ConcurrenceHost {
 		for (;;) {
 			const sessionID = uuid();
 			if (!this.sessions.has(sessionID) && (!allowMultipleClientsPerSession || !await exists(this.pathForSessionId(sessionID)))) {
-				const session = new ConcurrenceSession(this, sessionID, request);
+				const session = new Session(this, sessionID, request);
 				this.sessions.set(sessionID, session);
 				return session.newClient(request);
 			}
@@ -321,22 +321,22 @@ class ConcurrenceHost {
 	}
 }
 
-type ConcurrenceEvent = [number] | [number, any] | [number, any, any];
+type Event = [number] | [number, any] | [number, any, any];
 
-interface ConcurrenceServerMessage {
-	events: ConcurrenceEvent[];
+interface ServerMessage {
+	events: Event[];
 	messageID: number;
 	close?: boolean;
 }
 
-interface ConcurrenceClientMessage extends ConcurrenceServerMessage {
+interface ClientMessage extends ServerMessage {
 	sessionID?: string;
 	clientID?: number;
 	destroy?: true;
 	noJavaScript?: true;
 }
 
-const enum ConcurrenceRenderingMode {
+const enum RenderingMode {
 	ClientOnly = 0,
 	Prerendering = 1,
 	FullEmulation = 2,
@@ -346,14 +346,14 @@ const enum ConcurrenceRenderingMode {
 interface BootstrapData {
 	sessionID: string;
 	clientID?: number;
-	events?: (ConcurrenceEvent | boolean)[];
+	events?: (Event | boolean)[];
 	channels?: number[];
 }
 
 const allowMultipleClientsPerSession = true;
 
-class ConcurrencePageRenderer {
-	session: ConcurrenceSession;
+class PageRenderer {
+	session: Session;
 	body: Element;
 	clientScript: HTMLScriptElement;
 	bootstrapScript?: HTMLScriptElement;
@@ -366,7 +366,7 @@ class ConcurrencePageRenderer {
 	channelCount: number = 0;
 	pageIsReady?: Promise<void>;
 	resolvePageIsReady?: () => void;
-	constructor(session: ConcurrenceSession) {
+	constructor(session: Session) {
 		this.session = session;
 		this.body = session.host.document.body.cloneNode(true) as Element;
 		const clientScript = this.body.querySelector("script[src=\"client.js\"]") as HTMLScriptElement | null;
@@ -403,7 +403,7 @@ class ConcurrencePageRenderer {
 		}
 		return resolvedPromise;
 	}
-	async generateHTML(client: ConcurrenceClient, justFormElement: boolean = false) : Promise<string> {
+	async generateHTML(client: Client, justFormElement: boolean = false) : Promise<string> {
 		const renderingMode = client.renderingMode;
 		const session = this.session;
 		const document = session.host.document;
@@ -417,11 +417,11 @@ class ConcurrencePageRenderer {
 		let hasServerChannelsInput: HTMLInputElement | undefined;
 		let siblingNode: Node | null = null;
 		// Bootstrap script for prerendering/session restoration
-		if ((renderingMode == ConcurrenceRenderingMode.Prerendering) || client.clientID) {
+		if ((renderingMode == RenderingMode.Prerendering) || client.clientID) {
 			bootstrapScript = this.bootstrapScript;
 			if (!bootstrapScript) {
 				bootstrapScript = this.bootstrapScript = document.createElement("script");
-				bootstrapScript.type = "application/x-concurrence-bootstrap";
+				bootstrapScript.type = "application/x-mobius-bootstrap";
 			}
 			const events = await session.readAllEvents();
 			const bootstrapData: BootstrapData = { sessionID: session.sessionID, channels: Array.from(session.pendingChannels.keys()) };
@@ -438,13 +438,13 @@ class ConcurrencePageRenderer {
 			this.clientScript.parentNode!.insertBefore(bootstrapScript, this.clientScript);
 		}
 		// Hidden form elements for no-script fallback
-		if (renderingMode >= ConcurrenceRenderingMode.FullEmulation) {
+		if (renderingMode >= RenderingMode.FullEmulation) {
 			formNode = this.formNode;
 			if (!formNode) {
 				formNode = this.formNode = document.createElement("form");
 				formNode.setAttribute("action", "?");
 				formNode.setAttribute("method", "POST");
-				formNode.setAttribute("id", "concurrence-form");
+				formNode.setAttribute("id", "mobius-form");
 			}
 			postbackInput = this.postbackInput;
 			if (!postbackInput) {
@@ -489,7 +489,7 @@ class ConcurrencePageRenderer {
 			migrateChildren(this.body, formNode);
 			this.body.appendChild(formNode);
 		}
-		if (renderingMode >= ConcurrenceRenderingMode.ForcedEmulation) {
+		if (renderingMode >= RenderingMode.ForcedEmulation) {
 			if (justFormElement) {
 				siblingNode = document.createTextNode("");
 				this.clientScript.parentNode!.insertBefore(siblingNode, this.clientScript);
@@ -505,7 +505,7 @@ class ConcurrencePageRenderer {
 				return session.host.serializeBody(this.body);
 			}
 		} finally {
-			if (renderingMode >= ConcurrenceRenderingMode.FullEmulation && formNode) {
+			if (renderingMode >= RenderingMode.FullEmulation && formNode) {
 				if (formNode) {
 					if (postbackInput) {
 						formNode.removeChild(postbackInput);
@@ -526,7 +526,7 @@ class ConcurrencePageRenderer {
 					this.body.removeChild(formNode);
 				}
 			}
-			if ((renderingMode == ConcurrenceRenderingMode.Prerendering) || client.clientID) {
+			if ((renderingMode == RenderingMode.Prerendering) || client.clientID) {
 				if (bootstrapScript) {
 					const parentElement = bootstrapScript.parentElement;
 					if (parentElement) {
@@ -537,7 +537,7 @@ class ConcurrencePageRenderer {
 					}
 				}
 			}
-			if (client.renderingMode >= ConcurrenceRenderingMode.ForcedEmulation) {
+			if (client.renderingMode >= RenderingMode.ForcedEmulation) {
 				if (siblingNode) {
 					siblingNode.parentNode!.insertBefore(this.clientScript, siblingNode);
 					siblingNode.parentNode!.removeChild(siblingNode);
@@ -549,19 +549,19 @@ class ConcurrencePageRenderer {
 	}
 }
 
-class ConcurrenceClient {
-	session: ConcurrenceSession;
+class Client {
+	session: Session;
 	clientID: number;
-	renderingMode: ConcurrenceRenderingMode;
+	renderingMode: RenderingMode;
 	incomingMessageId: number = 0;
 	outgoingMessageId: number = 0;
-	reorderedMessages: { [messageId: number]: ConcurrenceClientMessage } = {};
-	queuedLocalEvents: ConcurrenceEvent[] | undefined;
+	reorderedMessages: { [messageId: number]: ClientMessage } = {};
+	queuedLocalEvents: Event[] | undefined;
 	queuedLocalEventsResolve: ((shouldContinue: true | void) => void) | undefined;
 	localResolveTimeout: NodeJS.Timer | undefined;
 	willSynchronizeChannels = false;
 
-	constructor(session: ConcurrenceSession, clientID: number, renderingMode: ConcurrenceRenderingMode) {
+	constructor(session: Session, clientID: number, renderingMode: RenderingMode) {
 		this.session = session;
 		this.clientID = clientID;
 		this.renderingMode = renderingMode;
@@ -584,7 +584,7 @@ class ConcurrenceClient {
 		}
 	}
 
-	async processMessage(message: ConcurrenceClientMessage) : Promise<void> {
+	async processMessage(message: ClientMessage) : Promise<void> {
 		// Process messages in order
 		const messageId = message.messageID;
 		if (messageId > this.incomingMessageId) {
@@ -610,13 +610,13 @@ class ConcurrenceClient {
 		}
 	}
 
-	receiveMessage(message: ConcurrenceClientMessage) : Promise<void> {
+	receiveMessage(message: ClientMessage) : Promise<void> {
 		this.session.lastMessageTime = Date.now();
 		return this.processMessage(message);
 	}
 
-	produceMessage() : Partial<ConcurrenceServerMessage> {
-		const result: Partial<ConcurrenceServerMessage> = { messageID: this.outgoingMessageId++ };
+	produceMessage() : Partial<ServerMessage> {
+		const result: Partial<ServerMessage> = { messageID: this.outgoingMessageId++ };
 		if (this.queuedLocalEvents) {
 			result.events = this.queuedLocalEvents;
 			this.queuedLocalEvents = undefined;
@@ -652,7 +652,7 @@ class ConcurrenceClient {
 		});
 	}
 
-	sendEvent(event: ConcurrenceEvent) {
+	sendEvent(event: Event) {
 		// Queue an event
 		const queuedLocalEvents = this.queuedLocalEvents;
 		if (queuedLocalEvents) {
@@ -686,7 +686,7 @@ class ConcurrenceClient {
 }
 
 interface ArchivedSession {
-	events: (ConcurrenceEvent | boolean)[];
+	events: (Event | boolean)[];
 	channels: number[];
 }
 
@@ -696,73 +696,73 @@ const enum ArchiveStatus {
 	Full
 };
 
-interface ConcurrenceModuleExports {
+interface MobiusModuleExports {
 	insideCallback: boolean;
 	dead: boolean;
 	whenDisconnected: PromiseLike<void>;
 	disconnect(): void;
 	flush() : void;
 	synchronize() : PromiseLike<void>;
-	createClientPromise<T extends ConcurrenceJsonValue | void>(...args: any[]): Promise<T>;
-	createServerPromise<T extends ConcurrenceJsonValue | void>(ask: () => (Promise<T> | T), includedInPrerender?: boolean): Promise<T>;
-	createClientChannel<T extends Function>(callback: T): ConcurrenceChannel;
-	createServerChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender?: boolean): ConcurrenceChannel;
-	coordinateValue<T extends ConcurrenceJsonValue>(generator: () => T) : T;
+	createClientPromise<T extends JsonValue | void>(...args: any[]): Promise<T>;
+	createServerPromise<T extends JsonValue | void>(ask: () => (Promise<T> | T), includedInPrerender?: boolean): Promise<T>;
+	createClientChannel<T extends Function>(callback: T): Channel;
+	createServerChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender?: boolean): Channel;
+	coordinateValue<T extends JsonValue>(generator: () => T) : T;
 	shareSession() : PromiseLike<string>;
 	secrets: { [key: string]: any };
 }
 
-class ConcurrenceSession {
-	host: ConcurrenceHost;
+class Session {
+	host: Host;
 	sessionID: string;
 	dead: boolean = false;
 	sendWhenDisconnected: () => void | undefined;
 	// Script context
 	modules = new Map<string, SandboxModule>();
-	concurrence: ConcurrenceModuleExports;
+	mobius: MobiusModuleExports;
 	request: express.Request;
 	hasRun: boolean = false;
-	pageRenderer: ConcurrencePageRenderer;
-	globalProperties: ConcurrenceGlobalProperties & FakedGlobals;
+	pageRenderer: PageRenderer;
+	globalProperties: MobiusGlobalProperties & FakedGlobals;
 	Math: typeof Math;
-	clients = new Map<number, ConcurrenceClient>();
+	clients = new Map<number, Client>();
 	currentClientID: number = 0;
 	lastMessageTime: number = Date.now();
 	// Local channels
 	localChannelCounter: number = 0;
-	localChannels = new Map<number, (event?: ConcurrenceEvent) => void>();
+	localChannels = new Map<number, (event?: Event) => void>();
 	localChannelCount: number = 0;
 	dispatchingAPIImplementation: number = 0;
 	// Remote channels
 	remoteChannelCounter: number = 0;
-	pendingChannels = new Map<number, (event?: ConcurrenceEvent) => void>();
+	pendingChannels = new Map<number, (event?: Event) => void>();
 	pendingChannelCount: number = 0;
 	dispatchingEvent: number = 0;
 	// Incoming Events
-	currentEvents: (ConcurrenceEvent | boolean)[] | undefined;
+	currentEvents: (Event | boolean)[] | undefined;
 	hadOpenServerChannel: boolean = false;
 	// Archival
-	recentEvents?: (ConcurrenceEvent | boolean)[];
+	recentEvents?: (Event | boolean)[];
 	archivingEvents?: PromiseLike<void>;
 	archiveStatus: ArchiveStatus = ArchiveStatus.None;
 	bootstrappingChannels?: Set<number>;
 	bootstrappingPromise?: Promise<void>;
 	// Session sharing
 	sharingEnabled?: true;
-	constructor(host: ConcurrenceHost, sessionID: string, request: express.Request) {
+	constructor(host: Host, sessionID: string, request: express.Request) {
 		this.host = host;
 		this.sessionID = sessionID;
-		this.pageRenderer = new ConcurrencePageRenderer(this);
+		this.pageRenderer = new PageRenderer(this);
 		// Server-side version of the API
 		const session = this;
 		const createServerChannel = this.createServerChannel.bind(this);
-		this.concurrence = {
+		this.mobius = {
 			disconnect: () => this.destroy().catch(escape),
 			whenDisconnected: new Promise(resolve => this.sendWhenDisconnected = resolve),
 			get insideCallback() {
 				return session.insideCallback;
 			},
-			secrets: host.secrets as ConcurrenceJsonMap,
+			secrets: host.secrets as JsonMap,
 			dead: false,
 			createClientPromise: this.createClientPromise.bind(this),
 			createServerPromise: this.createServerPromise.bind(this),
@@ -774,7 +774,7 @@ class ConcurrenceSession {
 			shareSession: this.shareSession
 		};
 		this.request = request;
-		const globalProperties: ConcurrenceGlobalProperties & Partial<FakedGlobals> = {
+		const globalProperties: MobiusGlobalProperties & Partial<FakedGlobals> = {
 			document: this.host.document,
 			request: this.request
 		};
@@ -787,8 +787,8 @@ class ConcurrenceSession {
 	newClient(request: express.Request) {
 		const newClientId = this.currentClientID++;
 		if (this.sharingEnabled || (newClientId == 0)) {
-			const renderingMode = ConcurrenceClient.requestRequiresForcedEmulation(request) ? ConcurrenceRenderingMode.ForcedEmulation : this.host.renderingMode;
-			const result = new ConcurrenceClient(this, newClientId, renderingMode);
+			const renderingMode = Client.requestRequiresForcedEmulation(request) ? RenderingMode.ForcedEmulation : this.host.renderingMode;
+			const result = new Client(this, newClientId, renderingMode);
 			this.clients.set(newClientId, result);
 			return result;
 		}
@@ -797,8 +797,8 @@ class ConcurrenceSession {
 
 	loadModule(path: string, newModule: SandboxModule) {
 		loadModule(path, newModule, this.globalProperties, (name: string) => {
-			if (name == "concurrence") {
-				return this.concurrence;
+			if (name == "mobius") {
+				return this.mobius;
 			}
 			const modulePath = Module._findPath(name, newModule.paths, false);
 			if (modulePath) {
@@ -831,7 +831,7 @@ class ConcurrenceSession {
 		}
 	}
 
-	sendEvent(event: ConcurrenceEvent) {
+	sendEvent(event: Event) {
 		if (this.recentEvents) {
 			this.recentEvents.push(event);
 		}
@@ -840,7 +840,7 @@ class ConcurrenceSession {
 		}
 	}
 
-	dispatchClientEvent(event: ConcurrenceEvent) {
+	dispatchClientEvent(event: Event) {
 		let channelId = event[0];
 		if (channelId < 0) {
 			// Server decided the ordering on "fenced" events
@@ -856,7 +856,7 @@ class ConcurrenceSession {
 		const channel = this.pendingChannels.get(channelId);
 		if (channel) {
 			logOrdering("client", "message", channelId, this);
-			channel(event.slice() as ConcurrenceEvent);
+			channel(event.slice() as Event);
 		} else {
 			// Client-side event source was destroyed on the server between the time it generated an event and the time the server received it
 			// This event will be silently dropped--dispatching would cause split brain!
@@ -872,7 +872,7 @@ class ConcurrenceSession {
 		}
 	}
 
-	async processEvents(events: ConcurrenceEvent[], noJavaScript?: boolean) : Promise<void> {
+	async processEvents(events: Event[], noJavaScript?: boolean) : Promise<void> {
 		// Read each event and dispatch the appropriate event in order
 		this.updateOpenServerChannelStatus(noJavaScript ? true : (this.localChannelCount != 0));
 		this.currentEvents = events;
@@ -915,7 +915,7 @@ class ConcurrenceSession {
 		await defer();
 		this.dispatchingEvent--;
 	}
-	createServerPromise<T extends ConcurrenceJsonValue | void>(ask: () => (PromiseLike<T> | T), includedInPrerender: boolean = true): PromiseLike<T> {
+	createServerPromise<T extends JsonValue | void>(ask: () => (PromiseLike<T> | T), includedInPrerender: boolean = true): PromiseLike<T> {
 		if (!this.insideCallback) {
 			return new Promise(resolve => resolve(ask()));
 		}
@@ -931,14 +931,14 @@ class ConcurrenceSession {
 		return new Promise<T>((resolve, reject) => {
 			logOrdering("server", "open", channelId, this);
 			this.enterLocalChannel(includedInPrerender);
-			this.localChannels.set(channelId, (event?: ConcurrenceEvent) => {
+			this.localChannels.set(channelId, (event?: Event) => {
 				if (channelId >= 0) {
 					if (event) {
 						logOrdering("server", "message", channelId, this);
 						logOrdering("server", "close", channelId, this);
 						resolvedPromise.then(exit);
 						this.enteringCallback();
-						parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
+						parseValueEvent(event, resolve as (value: JsonValue) => void, reject);
 					} else {
 						logOrdering("server", "close", channelId, this);
 						exit();
@@ -995,7 +995,7 @@ class ConcurrenceSession {
 			});
 		});
 	}
-	createServerChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender: boolean = true): ConcurrenceChannel {
+	createServerChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender: boolean = true): Channel {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
@@ -1053,7 +1053,7 @@ class ConcurrenceSession {
 				}
 			}
 		};
-		session.localChannels.set(channelId, (event?: ConcurrenceEvent) => {
+		session.localChannels.set(channelId, (event?: Event) => {
 			if (event) {
 				logOrdering("server", "message", channelId, this);
 				session.enteringCallback();
@@ -1077,7 +1077,7 @@ class ConcurrenceSession {
 							}
 							try {
 								session.updateOpenServerChannelStatus(true);
-								session.sendEvent([channelId, ...roundTrip(args)] as ConcurrenceEvent);
+								session.sendEvent([channelId, ...roundTrip(args)] as Event);
 							} catch (e) {
 								escape(e);
 							}
@@ -1105,7 +1105,7 @@ class ConcurrenceSession {
 		};
 	}
 
-	createRawClientChannel(callback: (event: ConcurrenceEvent | undefined) => void) : ConcurrenceChannel {
+	createRawClientChannel(callback: (event: Event | undefined) => void) : Channel {
 		const session = this;
 		session.pendingChannelCount++;
 		let channelId = ++session.remoteChannelCounter;
@@ -1126,7 +1126,7 @@ class ConcurrenceSession {
 			}
 		};
 	}
-	createClientPromise<T extends ConcurrenceJsonValue>() {
+	createClientPromise<T extends JsonValue | void>() {
 		return new Promise<T>((resolve, reject) => {
 			if (!this.insideCallback) {
 				return reject(new Error("Unable to create client promise in this context!"));
@@ -1138,14 +1138,14 @@ class ConcurrenceSession {
 				channel.close();
 				this.enteringCallback();
 				if (event) {
-					parseValueEvent(event, resolve as (value: ConcurrenceJsonValue) => void, reject);
+					parseValueEvent(event, resolve as (value: JsonValue | void) => void, reject);
 				} else {
 					reject(new Error("Session has been disconnected!"))
 				}
 			});
 		});
 	}
-	createClientChannel<T extends Function>(callback: T): ConcurrenceChannel {
+	createClientChannel<T extends Function>(callback: T): Channel {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
@@ -1164,7 +1164,7 @@ class ConcurrenceSession {
 		return channel;
 	}
 
-	findValueEvent(channelId: number) : ConcurrenceEvent | undefined {
+	findValueEvent(channelId: number) : Event | undefined {
 		let events = this.currentEvents;
 		if (events) {
 			// Events are represented differently inside currentEvents depending on whether we're processing a client message or unarchiving
@@ -1175,7 +1175,7 @@ class ConcurrenceSession {
 				}
 				channelId = -channelId;
 			}
-			for (let event of events as ConcurrenceEvent[]) {
+			for (let event of events as Event[]) {
 				if (event[0] == channelId) {
 					return event;
 				}
@@ -1183,7 +1183,7 @@ class ConcurrenceSession {
 		}
 	}
 
-	coordinateValue = <T extends ConcurrenceJsonValue>(generator: () => T) => {
+	coordinateValue = <T extends JsonValue>(generator: () => T) => {
 		if (!this.insideCallback) {
 			return generator();
 		}
@@ -1258,7 +1258,7 @@ class ConcurrenceSession {
 	async destroy() {
 		if (!this.dead) {
 			this.dead = true;
-			this.concurrence.dead = true;
+			this.mobius.dead = true;
 			await this.archiveEvents(true);
 			// await unlink(this.host.pathForSessionId(this.sessionID));
 			for (const pair of this.pendingChannels) {
@@ -1307,10 +1307,10 @@ class ConcurrenceSession {
 			const path = this.host.pathForSessionId(this.sessionID);
 			const freshFile = this.archiveStatus != ArchiveStatus.Partial || !(await exists(path));
 			// Prepare events
-			let unarchivedEvents: (ConcurrenceEvent | boolean)[] | undefined;
+			let unarchivedEvents: (Event | boolean)[] | undefined;
 			if (this.archiveStatus == ArchiveStatus.Full) {
 				try {
-					unarchivedEvents = (await ConcurrenceSession.readArchivedSession(this.host.pathForSessionId(this.sessionID))).events;
+					unarchivedEvents = (await Session.readArchivedSession(this.host.pathForSessionId(this.sessionID))).events;
 				} catch (e) {
 				}
 			}
@@ -1352,16 +1352,16 @@ class ConcurrenceSession {
 		return JSON.parse(validJSONContents) as Partial<ArchivedSession>;
 	}
 
-	async readAllEvents() : Promise<(ConcurrenceEvent | boolean)[] | undefined> {
+	async readAllEvents() : Promise<(Event | boolean)[] | undefined> {
 		if (this.archiveStatus == ArchiveStatus.None) {
 			return this.recentEvents;
 		}
-		let archivedEvents: (ConcurrenceEvent | boolean)[] | undefined;
+		let archivedEvents: (Event | boolean)[] | undefined;
 		do {
 			if (this.archivingEvents) {
 				await this.archivingEvents;
 			}
-			archivedEvents = (await ConcurrenceSession.readArchivedSession(this.host.pathForSessionId(this.sessionID))).events;
+			archivedEvents = (await Session.readArchivedSession(this.host.pathForSessionId(this.sessionID))).events;
 		} while (this.archivingEvents);
 		const recentEvents = this.recentEvents;
 		if (!recentEvents) {
@@ -1448,13 +1448,13 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 	//(global.module as any).paths as string[]
 	const modulePaths = [relativePath("../server"), relativePath("../common"), relativePath("../../preact/dist")];
 
-	const host = new ConcurrenceHost(serverJSPath, modulePaths, htmlPath, (await htmlContents).toString(), JSON.parse((await secrets).toString()));
+	const host = new Host(serverJSPath, modulePaths, htmlPath, (await htmlContents).toString(), JSON.parse((await secrets).toString()));
 	// host.newClient({
 	// 	headers: []
 	// } as any as express.Request).then(client => client.session.run());
 
-	function messageFromBody(body: { [key: string]: any }) : ConcurrenceClientMessage {
-		const message: ConcurrenceClientMessage = {
+	function messageFromBody(body: { [key: string]: any }) : ClientMessage {
+		const message: ClientMessage = {
 			sessionID: body.sessionID || "",
 			messageID: (body.messageID as number) | 0,
 			clientID: (body.clientID as number) | 0,
@@ -1469,8 +1469,8 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 		return message;
 	}
 
-	function messageFromSocket(messageText: string, defaultMessageID: number) : ConcurrenceClientMessage {
-		const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as ConcurrenceClientMessage;
+	function messageFromSocket(messageText: string, defaultMessageID: number) : ClientMessage {
+		const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as ClientMessage;
 		result.messageID = result.messageID | defaultMessageID;
 		if (!result.events) {
 			result.events = [];
@@ -1478,7 +1478,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 		return result;
 	}
 
-	function serializeMessage(message: Partial<ConcurrenceServerMessage>) : string {
+	function serializeMessage(message: Partial<ServerMessage>) : string {
 		if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message)) {
 			// Only send events, if that's all we have to send
 			return JSON.stringify(message.events).slice(1, -1);
@@ -1494,13 +1494,13 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 	server.get("/", (request, response) => {
 		(async () => {
 			const sessionID = request.query.sessionID;
-			let session: ConcurrenceSession;
-			let client: ConcurrenceClient;
+			let session: Session;
+			let client: Client;
 			if (sessionID) {
 				// Joining existing session, must render document even if prerendering is disabled
 				session = await host.sessionFromId(sessionID, request);
 				client = session.newClient(request);
-			} else if ((host.renderingMode < ConcurrenceRenderingMode.Prerendering) && !ConcurrenceClient.requestRequiresForcedEmulation(request)) {
+			} else if ((host.renderingMode < RenderingMode.Prerendering) && !Client.requestRequiresForcedEmulation(request)) {
 				// Not prerendering or joining a session, just return the original source
 				return host.htmlSource;
 			} else {
@@ -1508,14 +1508,14 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				session = client.session;
 			}
 			session.updateOpenServerChannelStatus(true);
-			if (client.renderingMode >= ConcurrenceRenderingMode.Prerendering) {
+			if (client.renderingMode >= RenderingMode.Prerendering) {
 				// Prerendering was enabled, wait for content to be ready
 				client.incomingMessageId++;
 				client.outgoingMessageId++;
 				await session.pageRenderer.render();
 			}
 			// Steal events when using forced emulation
-			if (client.renderingMode == ConcurrenceRenderingMode.ForcedEmulation) {
+			if (client.renderingMode == RenderingMode.ForcedEmulation) {
 				client.queuedLocalEvents = undefined;
 			}
 			// Render the DOM into HTML source
@@ -1546,13 +1546,13 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				return;
 			}
 			const client = await host.clientFromMessage(message, req);
-			if (client.renderingMode >= ConcurrenceRenderingMode.FullEmulation) {
+			if (client.renderingMode >= RenderingMode.FullEmulation) {
 				const postback = body["postback"];
 				if (postback) {
 					// JavaScript is disabled, emulate events from form POST
 					const session = client.session;
-					const inputEvents: ConcurrenceEvent[] = [];
-					const buttonEvents: ConcurrenceEvent[] = [];
+					const inputEvents: Event[] = [];
+					const buttonEvents: Event[] = [];
 					message.noJavaScript = true;
 					for (let key in body) {
 						if (!Object.hasOwnProperty.call(body, key)) {
@@ -1562,7 +1562,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 						if (match && Object.hasOwnProperty.call(body, key)) {
 							const element = session.pageRenderer.body.querySelector("[name=\"" + key + "\"]");
 							if (element) {
-								const event: ConcurrenceEvent = [-match[1], { value: body[key] }];
+								const event: Event = [-match[1], { value: body[key] }];
 								switch (element.nodeName) {
 									case "INPUT":
 										if ((element as HTMLInputElement).value != body[key]) {
@@ -1628,7 +1628,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			// Track what the last sent/received message IDs are so we can avoid transmitting them
 			let lastIncomingMessageId = startMessage.messageID;
 			let lastOutgoingMessageId = -1;
-			async function processSocketMessage(message: ConcurrenceClientMessage) {
+			async function processSocketMessage(message: ClientMessage) {
 				if (typeof message.close == "boolean") {
 					// Determine if client accepted our close instruction
 					if (closed = message.close) {

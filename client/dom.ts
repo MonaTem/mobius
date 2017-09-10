@@ -1,5 +1,5 @@
-import { createClientChannel } from "concurrence";
-import { ConcurrenceChannel } from "concurrence-types";
+import { createClientChannel } from "mobius";
+import { Channel } from "mobius-types";
 import * as preact from "preact";
 export { h, cloneElement, Component, AnyComponent, ComponentProps } from "preact";
 
@@ -10,7 +10,7 @@ interface WrappedEvent {
 type PreactNode = Node & {
 	_listeners?: { [ event: string ]: (event: any) => void },
 	__l?: { [ event: string ]: (event: any) => void },
-	__c?: { [ event: string ]: [(event: any) => void, (event: WrappedEvent) => void, ConcurrenceChannel] }
+	__c?: { [ event: string ]: [(event: any) => void, (event: WrappedEvent) => void, Channel] }
 };
 
 const preactOptions = preact.options as any;

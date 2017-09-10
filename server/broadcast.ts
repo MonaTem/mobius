@@ -1,15 +1,15 @@
-import { createServerChannel } from "concurrence";
-import { ConcurrenceJsonValue, ConcurrenceChannel } from "concurrence-types";
+import { createServerChannel } from "mobius";
+import { JsonValue, Channel } from "mobius-types";
 
 declare global {
 	namespace NodeJS {
 		export interface Global {
-			observers?: { [topic: string]: ((message: ConcurrenceJsonValue) => void)[] };
+			observers?: { [topic: string]: ((message: JsonValue) => void)[] };
 		}
 	}
 }
 
-export const send = (topic: string, message: ConcurrenceJsonValue) => {
+export const send = (topic: string, message: JsonValue) => {
 	const topics = global.observers;
 	if (topics && Object.hasOwnProperty.call(topics, topic)) {
 		const observers = topics[topic];
@@ -18,7 +18,7 @@ export const send = (topic: string, message: ConcurrenceJsonValue) => {
 		}
 	}
 }
-export function receive(topic: string, callback: (message: ConcurrenceJsonValue) => void, onAbort?: () => void): ConcurrenceChannel {
+export function receive(topic: string, callback: (message: JsonValue) => void, onAbort?: () => void): Channel {
 	const topics = global.observers || (global.observers = {});
 	return createServerChannel(callback, send => {
 		const observers = Object.hasOwnProperty.call(topics, topic) ? topics[topic] : (topics[topic] = []);

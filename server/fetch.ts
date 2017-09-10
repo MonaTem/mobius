@@ -1,4 +1,4 @@
-import { createServerPromise, createClientPromise } from "concurrence";
+import { createServerPromise, createClientPromise } from "mobius";
 import { FetchOptions, FetchResponse } from "fetch-types";
 import node_fetch from "node-fetch";
 
