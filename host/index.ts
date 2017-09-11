@@ -39,6 +39,12 @@ function defer(value?: any) : Promise<any> {
 	return new Promise<any>(resolve => setImmediate(resolve.bind(null, value)));
 }
 
+function delay(amount: number) {
+	return new Promise<void>(resolve => setTimeout(resolve, amount));
+}
+
+const simulatedLatency: number = 0;
+
 function escape(e: any) {
 	setImmediate(() => {
 		throw e;
@@ -1356,12 +1362,18 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			}
 			// Render the DOM into HTML source
 			return await session.pageRenderer.generateHTML(client);
-		})().then(html => {
+		})().then(async html => {
+			if (simulatedLatency) {
+				await delay(simulatedLatency);
+			}
 			// Return HTML
 			noCache(response);
 			response.set("Content-Type", "text/html");
 			response.send(html);
-		}, e => {
+		}, async e => {
+			if (simulatedLatency) {
+				await delay(simulatedLatency);
+			}
 			// Internal error of some kind
 			response.status(500);
 			response.set("Content-Type", "text/plain");
@@ -1377,6 +1389,9 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			if (message.destroy) {
 				// Destroy the client's session (this is navigator.sendBeacon)
 				await host.destroyClientById(message.sessionID || "", message.clientID as number | 0);
+				if (simulatedLatency) {
+					await delay(simulatedLatency);
+				}
 				res.set("Content-Type", "text/plain");
 				res.send("");
 				return;
@@ -1426,6 +1441,9 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 					// Render the DOM into HTML source
 					const html = await session.pageRenderer.generateHTML(client, postback == "js");
 					client.queuedLocalEvents = undefined;
+					if (simulatedLatency) {
+						await delay(simulatedLatency);
+					}
 					// Return HTML
 					res.set("Content-Type", postback == "js" ? "text/plain" : "text/html");
 					res.send(html);
@@ -1438,9 +1456,15 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			await client.dequeueEvents();
 			// Send the serialized response message back to the client
 			const responseMessage = serializeMessageAsText(client.produceMessage());
+			if (simulatedLatency) {
+				await delay(simulatedLatency);
+			}
 			res.set("Content-Type", "text/plain");
 			res.send(responseMessage);
-		})().catch(e => {
+		})().catch(async e => {
+			if (simulatedLatency) {
+				await delay(simulatedLatency);
+			}
 			res.status(500);
 			res.set("Content-Type", "text/plain");
 			res.send(util.inspect(e));
@@ -1495,7 +1519,11 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 							message.close = true;
 							closed = true;
 						}
-						ws.send(serializeMessageAsText(message));
+						const serialized = serializeMessageAsText(message);
+						if (simulatedLatency) {
+							await delay(simulatedLatency);
+						}
+						ws.send(serialized);
 					}
 				}
 			}
