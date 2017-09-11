@@ -63,7 +63,7 @@ api/mobius.d.ts: $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-clie
 	node_modules/typescript/bin/tsc -p tsconfig-client.json
 
 public/client.js: api/mobius.d.ts src/app.js
-	rollup -c
+	./preact/node_modules/rollup/bin/rollup -c
 
 fallback: public/fallback.js
 
