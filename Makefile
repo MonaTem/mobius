@@ -31,6 +31,8 @@ preact/package.json: .gitmodules
 	git submodule update --init --recursive preact && touch preact/package.json
 
 preact/dist/preact.js: preact/package.json
+	# Global tools that preact requires be available
+	npm install -g npm-run-all rollup babel-cli jscodeshift gzip-size-cli
 	pushd preact && npm install
 
 node_modules/preact/dist/preact.d.ts: preact/src/preact.d.ts preact/dist/preact.js
