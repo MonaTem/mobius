@@ -9,6 +9,7 @@ type PreactNode = Element & {
 };
 
 const preactOptions = preact.options as any;
+preactOptions.keyAttribute = "data-key";
 preactOptions.nodeRemoved = (node: PreactNode) => {
 	const c = node.__c;
 	if (c) {
