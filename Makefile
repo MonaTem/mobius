@@ -31,6 +31,8 @@ preact/package.json: .gitmodules
 	git submodule update --init --recursive preact && touch preact/package.json
 
 preact/dist/preact.js: preact/package.json
+	# Global tools that preact requires be available
+	npm install -g npm-run-all rollup babel-cli jscodeshift gzip-size-cli
 	pushd preact && npm install
 
 node_modules/preact/dist/preact.d.ts: preact/src/preact.d.ts preact/dist/preact.js
@@ -63,7 +65,7 @@ api/mobius.d.ts: $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-clie
 	node_modules/typescript/bin/tsc -p tsconfig-client.json
 
 public/client.js: api/mobius.d.ts src/app.js
-	rollup -c
+	./preact/node_modules/rollup/bin/rollup -c
 
 fallback: public/fallback.js
 
