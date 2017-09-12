@@ -100,10 +100,11 @@ class Host {
 	document: Document;
 	staleSessionTimeout: any;
 	secrets: JsonValue;
-	renderingMode: RenderingMode = RenderingMode.Prerendering;
-	constructor(scriptPath: string, modulePaths: string[], htmlPath: string, htmlContents: string, secrets: JsonValue) {
+	renderingMode: RenderingMode = RenderingMode.ClientOnly;
+	constructor(scriptPath: string, modulePaths: string[], htmlPath: string, htmlSource: string, secrets: JsonValue) {
 		this.secrets = secrets;
-		this.dom = new JSDOM(htmlContents);
+		this.htmlSource = htmlSource;
+		this.dom = new JSDOM(htmlSource);
 		this.document = (this.dom.window as Window).document as Document;
 		this.scriptPath = scriptPath;
 		this.modulePaths = modulePaths;
