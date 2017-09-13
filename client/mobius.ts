@@ -25,6 +25,13 @@ import { logOrdering, eventForValue, eventForException, parseValueEvent, seriali
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+if (/\bMSIE [1-8]\b/.test(navigator.userAgent) || !("addEventListener" in window) || typeof JSON == "undefined") {
+	const fallbackScript = document.createElement("script");
+	fallbackScript.src = "fallback.js";
+	document.head.appendChild(fallbackScript);
+	throw "Insufficient browser support. Falling back to server-side rendering...";
+}
+
 const setTimeout = window.setTimeout;
 const clearTimeout = window.clearTimeout;
 
@@ -36,22 +43,6 @@ function isPromiseLike<T>(value: T | PromiseLike<T> | undefined) : value is Prom
 const microTaskQueue : Task[] = [];
 const taskQueue : Task[] = [];
 
-function addEventListener(target: EventTarget, name: string, eventListener: EventListener) {
-	if (target.addEventListener) {
-		target.addEventListener(name, eventListener, false);
-	} else if ((target as any).attachEvent) {
-		(target as any).attachEvent("on" + name, eventListener);
-	}
-}
-
-function removeEventListener(target: EventTarget, name: string, eventListener: EventListener) {
-	if (target.removeEventListener) {
-		target.removeEventListener(name, eventListener, false);
-	} else if ((target as any).detachEvent) {
-		(target as any).detachEvent("on" + name, eventListener);
-	}
-}
-
 const { scheduleFlushTasks, setImmediate } = (() => {
 	let setImmediate: (callback: () => void) => void = window.setImmediate;
 	let scheduleFlushTasks: (() => void) | undefined;
@@ -59,11 +50,11 @@ const { scheduleFlushTasks, setImmediate } = (() => {
 	if (!setImmediate && window.postMessage) {
 		let isAsynchronous = true;
 		const synchronousTest = () => isAsynchronous = false;
-		addEventListener(window, "message", synchronousTest);
+		window.addEventListener("message", synchronousTest, false);
 		window.postMessage("__mobius_test", "*");
-		removeEventListener(window, "message", synchronousTest);
+		window.removeEventListener("message", synchronousTest, false);
 		if (isAsynchronous) {
-			addEventListener(window, "message", flushTasks);
+			window.addEventListener("message", flushTasks, false);
 			scheduleFlushTasks = () => {
 				window.postMessage("__mobius_flush", "*")
 			};
@@ -267,9 +258,9 @@ const afterLoaded = new Promise(resolve => {
 	}
 	const onload = () => {
 		resolve();
-		removeEventListener(eventTarget, "load", onload);
+		eventTarget.removeEventListener("load", onload, false);
 	};
-	addEventListener(eventTarget, "load", onload);
+	eventTarget.addEventListener("load", onload, false);
 }).then(defer);
 
 if (hasBootstrap) {
@@ -334,7 +325,7 @@ export function disconnect() {
 		dead = true;
 		hadOpenServerChannel = false;
 		cancelHeartbeat();
-		removeEventListener(window, "unload", disconnect);
+		window.removeEventListener("unload", disconnect, false);
 		// Forcefully tear down WebSocket
 		if (websocket) {
 			if (websocket.readyState < 2) {
@@ -370,7 +361,7 @@ export function disconnect() {
 		});
 	}
 }
-addEventListener(window, "unload", disconnect);
+window.addEventListener("unload", disconnect, false);
 
 function dispatchEvent(event: Event) : PromiseLike<void> | void {
 	let channelId = event[0];
@@ -521,17 +512,17 @@ function sendMessages(attemptWebSockets?: boolean) {
 			// Coordinate with existing WebSocket that's in the process of being opened,
 			// falling back to a form POST if necessary
 			const existingSocketOpened = () => {
-				removeEventListener(existingSocket, "open", existingSocketOpened);
-				removeEventListener(existingSocket, "error", existingSocketErrored);
+				existingSocket.removeEventListener("open", existingSocketOpened, false);
+				existingSocket.removeEventListener("error", existingSocketErrored, false);
 				existingSocket.send(serializeMessageAsText(message));
 			}
 			const existingSocketErrored = () => {
-				removeEventListener(existingSocket, "open", existingSocketOpened);
-				removeEventListener(existingSocket, "error", existingSocketErrored);
+				existingSocket.removeEventListener("open", existingSocketOpened, false);
+				existingSocket.removeEventListener("error", existingSocketErrored, false);
 				sendFormMessage(message);
 			}
-			addEventListener(existingSocket, "open", existingSocketOpened);
-			addEventListener(existingSocket, "error", existingSocketErrored);
+			existingSocket.addEventListener("open", existingSocketOpened, false);
+			existingSocket.addEventListener("error", existingSocketErrored, false);
 		}
 		return;
 	}
@@ -543,8 +534,8 @@ function sendMessages(attemptWebSockets?: boolean) {
 			const newSocket = new WebSocketClass(socketURL + serializeMessageAsQueryString(message));
 			// Attempt to open a WebSocket for channels, but not heartbeats
 			const newSocketOpened = () => {
-				removeEventListener(newSocket, "open", newSocketOpened);
-				removeEventListener(newSocket, "error", newSocketErrored);
+				newSocket.removeEventListener("open", newSocketOpened, false);
+				newSocket.removeEventListener("error", newSocketErrored, false);
 			}
 			const newSocketErrored = () => {
 				// WebSocket failed, fallback using form POSTs
@@ -553,10 +544,10 @@ function sendMessages(attemptWebSockets?: boolean) {
 				websocket = undefined;
 				sendFormMessage(message);
 			}
-			addEventListener(newSocket, "open", newSocketOpened);
-			addEventListener(newSocket, "error", newSocketErrored);
+			newSocket.addEventListener("open", newSocketOpened, false);
+			newSocket.addEventListener("error", newSocketErrored, false);
 			let lastWebSocketMessageId = -1;
-			addEventListener(newSocket, "message", (event: any) => {
+			newSocket.addEventListener("message", (event: any) => {
 				const message = deserializeMessageFromText<ServerMessage>(event.data, lastWebSocketMessageId + 1);
 				lastWebSocketMessageId = message.messageID;
 				const promise = processMessage(message)
@@ -569,7 +560,7 @@ function sendMessages(attemptWebSockets?: boolean) {
 						promise.then(escaping(synchronizeChannels));
 					}
 				}
-			});
+			}, false);
 			websocket = newSocket;
 			return;
 		} catch (e) {

@@ -100,7 +100,7 @@ class Host {
 	document: Document;
 	staleSessionTimeout: any;
 	secrets: JsonValue;
-	renderingMode: RenderingMode = RenderingMode.ClientOnly;
+	renderingMode: RenderingMode = RenderingMode.ClientPreferred;
 	constructor(scriptPath: string, modulePaths: string[], htmlPath: string, htmlSource: string, secrets: JsonValue) {
 		this.secrets = secrets;
 		this.htmlSource = htmlSource;
@@ -173,13 +173,13 @@ class Host {
 			parent.replaceChild(realBody, body);
 		}
 	}
-	async newClient(request: express.Request) {
+	async newClient(request: express.Request, renderingMode?: RenderingMode) {
 		for (;;) {
 			const sessionID = uuid();
 			if (!this.sessions.has(sessionID) && (!allowMultipleClientsPerSession || !await exists(this.pathForSessionId(sessionID)))) {
 				const session = new Session(this, sessionID, request);
 				this.sessions.set(sessionID, session);
-				return session.newClient(request);
+				return session.newClient(request, renderingMode);
 			}
 		}
 	}
@@ -204,7 +204,7 @@ class Host {
 }
 
 const enum RenderingMode {
-	ClientOnly = 0,
+	ClientPreferred = 0,
 	Prerendering = 1,
 	FullEmulation = 2,
 	ForcedEmulation = 3,
@@ -644,11 +644,10 @@ class Session {
 		}
 	}
 
-	newClient(request: express.Request) {
+	newClient(request: express.Request, renderingMode?: RenderingMode) {
 		const newClientId = this.currentClientID++;
 		if (this.sharingEnabled || (newClientId == 0)) {
-			const renderingMode = Client.requestRequiresForcedEmulation(request) ? RenderingMode.ForcedEmulation : this.host.renderingMode;
-			const result = new Client(this, newClientId, renderingMode);
+			const result = new Client(this, newClientId, typeof renderingMode != "undefined" ? renderingMode : Client.requestRequiresForcedEmulation(request) ? RenderingMode.ForcedEmulation : this.host.renderingMode);
 			this.clients.set(newClientId, result);
 			return result;
 		}
@@ -1397,7 +1396,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				res.send("");
 				return;
 			}
-			const client = await host.clientFromMessage(message, req);
+			const client = await (body.sessionID ? host.clientFromMessage(message, req) : host.newClient(req, RenderingMode.FullEmulation));
 			if (client.renderingMode >= RenderingMode.FullEmulation) {
 				const postback = body["postback"];
 				if (postback) {

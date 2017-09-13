@@ -34,7 +34,16 @@
 	let lastEventKey = "";
 	let queuedEvents: string[] = [];
 
-	const form = document.forms["mobius-form" as any as number] as HTMLFormElement;
+	let form = document.forms["mobius-form" as any as number] as HTMLFormElement;
+	if (!form) {
+		form = document.createElement("form");
+		const body = document.body;
+		while (body.childNodes.length) {
+			form.appendChild(body.childNodes[0]);
+		}
+		body.appendChild(form);
+	}
+
 	form.onsubmit = function() {
 		return false;
 	}
@@ -99,7 +108,8 @@
 		for (var i = 0; i < elements.length; i++) {
 			interceptElement(elements[i] as HTMLElement);
 		}
-		if (form["hasServerChannels"].value) {
+		const hasServerChannels = form["hasServerChannels"];
+		if (!hasServerChannels || hasServerChannels.value) {
 			if (!isSending) {
 				return send();
 			}
@@ -146,8 +156,10 @@
 		isSending++;
 		anyChanged = false;
 		request.send(body.join("&"));
-		var messageID = form["messageID"];
-		messageID.value = (messageID.value | 0) + 1;
+		const messageID = form["messageID"];
+		if (messageID) {
+			messageID.value = (messageID.value | 0) + 1;
+		}
 	}
 
 	interceptFormElements();
