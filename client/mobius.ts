@@ -654,7 +654,7 @@ export const createServerPromise: <T extends JsonValue>(...args: any[]) => Promi
 	const channel = createRawServerChannel(event => {
 		channel.close();
 		if (event) {
-			parseValueEvent(event, resolve as (value: JsonValue) => void, reject);
+			parseValueEvent(self, event, resolve as (value: JsonValue) => void, reject);
 		} else {
 			reject(disconnectedError());
 		}
@@ -696,7 +696,7 @@ export function createClientPromise<T extends JsonValue | void>(ask: () => (Prom
 			if (event) {
 				delete pendingLocalChannels[channelId];
 				willEnterCallback();
-				parseValueEvent(event, value => {
+				parseValueEvent(self, event, value => {
 					logOrdering("client", "message", channelId);
 					logOrdering("client", "close", channelId);
 					resolve(value as T);
@@ -814,7 +814,7 @@ export function coordinateValue<T extends JsonValue>(generator: () => T) : T {
 				var event = events[i] as Event;
 				if (event[0] == channelId) {
 					pendingChannels[channelId] = emptyFunction;
-					return parseValueEvent(event, value => {
+					return parseValueEvent(self, event, value => {
 						logOrdering("server", "message", channelId);
 						logOrdering("server", "close", channelId);
 						return value;
@@ -838,7 +838,7 @@ export function coordinateValue<T extends JsonValue>(generator: () => T) : T {
 				var event = events[i] as Event;
 				if (event[0] == -channelId) {
 					pendingLocalChannels[channelId] = emptyFunction;
-					return parseValueEvent(event, value => {
+					return parseValueEvent(self, event, value => {
 						logOrdering("client", "message", channelId);
 						logOrdering("client", "close", channelId);
 						return value;

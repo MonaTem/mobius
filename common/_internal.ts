@@ -60,7 +60,7 @@ export function eventForException(channelId: number, error: any) : Event {
 	return [channelId, serializedError, type];
 }
 
-export function parseValueEvent<T>(event: Event | undefined, resolve: (value: JsonValue) => T, reject: (error: Error | JsonValue) => T) : T {
+export function parseValueEvent<T>(global: any, event: Event | undefined, resolve: (value: JsonValue) => T, reject: (error: Error | JsonValue) => T) : T {
 	if (!event) {
 		return reject(disconnectedError());
 	}
@@ -71,7 +71,7 @@ export function parseValueEvent<T>(event: Event | undefined, resolve: (value: Js
 	const type = event[2];
 	// Convert serialized representation into the appropriate Error type
 	if (type != 1 && /Error$/.test(type)) {
-		const ErrorType : typeof Error = (self as any)[type] || Error;
+		const ErrorType : typeof Error = global[type] || Error;
 		const error: Error = new ErrorType(value.message);
 		delete value.message;
 		for (let i in value) {

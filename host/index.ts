@@ -806,7 +806,7 @@ class Session {
 						logOrdering("server", "close", channelId, this.sessionID);
 						resolvedPromise.then(exit);
 						this.enteringCallback();
-						parseValueEvent(event, resolve as (value: JsonValue) => void, reject);
+						parseValueEvent(global, event, resolve as (value: JsonValue) => void, reject);
 					} else {
 						logOrdering("server", "close", channelId, this.sessionID);
 						exit();
@@ -1006,7 +1006,7 @@ class Session {
 				this.enteringCallback();
 				channel.close();
 				if (event) {
-					parseValueEvent(event, resolve as (value: JsonValue | void) => void, reject);
+					parseValueEvent(global, event, resolve as (value: JsonValue | void) => void, reject);
 				} else {
 					reject(disconnectedError());
 				}
@@ -1081,7 +1081,7 @@ class Session {
 			if (event) {
 				logOrdering("client", "message", channelId, this.sessionID);
 				logOrdering("client", "close", channelId, this.sessionID);
-				return parseValueEvent(event, value => value, error => {
+				return parseValueEvent(global, event, value => value, error => {
 					throw error;
 				}) as T;
 			}
@@ -1097,7 +1097,7 @@ class Session {
 				logOrdering("server", "message", channelId, this.sessionID);
 				logOrdering("server", "close", channelId, this.sessionID);
 				this.sendEvent(event);
-				return parseValueEvent(event, value => value, error => {
+				return parseValueEvent(global, event, value => value, error => {
 					throw error;
 				}) as T;
 			}
