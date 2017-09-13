@@ -1,4 +1,4 @@
-import { createClientChannel } from "mobius";
+import { createClientChannel, createClientPromise } from "mobius";
 import { Channel } from "mobius-types";
 import * as preact from "preact";
 export { h, cloneElement, Component, AnyComponent, ComponentProps } from "preact";
@@ -57,4 +57,24 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 export function host(content: JSX.Element) : void {
 	const element = document.body.children[0];
 	preact.render(content, element, element.children[0]);
+}
+
+const requestedStyles: { [href: string]: Promise<void> } = {};
+
+export function style(href: string) : Promise<void> {
+	let result = requestedStyles[href];
+	if (!result) {
+		const link = self.document.createElement("link");
+		link.rel = "stylesheet";
+		link.href = href;
+		result = requestedStyles[href] = createClientPromise(() => new Promise<void>((resolve, reject) => {
+			link.addEventListener("load", () => resolve(), false);
+			link.addEventListener("error", () => {
+				document.head.removeChild(link);
+				reject(new Error("Failed to load styles from " + href + "!"));
+			}, false);
+		}));
+		document.head.appendChild(link);
+	}
+	return result;
 }

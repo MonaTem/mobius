@@ -36,7 +36,7 @@ const setTimeout = window.setTimeout;
 const clearTimeout = window.clearTimeout;
 
 type Task = () => void;
-function isPromiseLike<T>(value: T | PromiseLike<T> | undefined) : value is PromiseLike<T> {
+function isPromiseLike<T>(value: T | Promise<T> | undefined) : value is Promise<T> {
 	return typeof value == "object" && "then" in (value as any);
 }
 
@@ -122,11 +122,11 @@ if (!("Promise" in (window as any)) || !/^Google |^Apple /.test(navigator.vendor
 	(window as any).Promise = bundledPromiseImplementation();
 }
 
-const resolvedPromise: PromiseLike<void> = Promise.resolve();
+const resolvedPromise: Promise<void> = Promise.resolve();
 
-function defer() : PromiseLike<void>;
-function defer<T>() : PromiseLike<T>;
-function defer(value?: any) : PromiseLike<any> {
+function defer() : Promise<void>;
+function defer<T>() : Promise<T>;
+function defer(value?: any) : Promise<any> {
 	return new Promise<any>(resolve => submitTask(taskQueue, resolve.bind(null, value)));
 }
 
@@ -136,9 +136,9 @@ function escape(e: any) {
 	});
 }
 
-function escaping(handler: () => any | PromiseLike<any>) : () => PromiseLike<void>;
-function escaping<T>(handler: (value: T) => any | PromiseLike<any>) : (value: T) => PromiseLike<T | void>;
-function escaping(handler: (value?: any) => any | PromiseLike<any>) : (value?: any) => PromiseLike<any> {
+function escaping(handler: () => any | Promise<any>) : () => Promise<void>;
+function escaping<T>(handler: (value: T) => any | Promise<any>) : (value: T) => Promise<T | void>;
+function escaping(handler: (value?: any) => any | Promise<any>) : (value?: any) => Promise<any> {
 	return (value?: any) => {
 		try {
 			return Promise.resolve(handler(value)).catch(escape);
@@ -318,7 +318,7 @@ function restartHeartbeat() {
 }
 
 let sendWhenDisconnected: (() => void) | undefined;
-export const whenDisconnected: PromiseLike<void> = new Promise(resolve => sendWhenDisconnected = resolve);
+export const whenDisconnected: Promise<void> = new Promise(resolve => sendWhenDisconnected = resolve);
 
 export function disconnect() {
 	if (sessionID) {
@@ -363,7 +363,7 @@ export function disconnect() {
 }
 window.addEventListener("unload", disconnect, false);
 
-function dispatchEvent(event: Event) : PromiseLike<void> | void {
+function dispatchEvent(event: Event) : Promise<void> | void {
 	let channelId = event[0];
 	let channel: ((event: Event) => void) | undefined;
 	if (channelId < 0) {
@@ -407,7 +407,7 @@ function callChannelWithEvent(channel: ((event: Event) => void) | undefined, eve
 function processEvents(events: (Event | boolean)[]) {
 	hadOpenServerChannel = pendingChannelCount != 0;
 	currentEvents = events;
-	return events.reduce((promise: PromiseLike<any>, event: Event | boolean) => {
+	return events.reduce((promise: Promise<any>, event: Event | boolean) => {
 		if (typeof event == "boolean") {
 			return promise.then(() => hadOpenServerChannel = event);
 		} else {
@@ -419,7 +419,7 @@ function processEvents(events: (Event | boolean)[]) {
 	});
 }
 
-function processMessage(message: ServerMessage) : PromiseLike<void> {
+function processMessage(message: ServerMessage) : Promise<void> {
 	// Process messages in order
 	const messageId = message.messageID;
 	if (messageId > incomingMessageId) {
@@ -650,7 +650,7 @@ export function flush() {
 }
 
 // APIs for client/, not to be used inside src/
-export const createServerPromise: <T extends JsonValue>(...args: any[]) => PromiseLike<T> = <T extends JsonValue>() => new Promise<T>((resolve, reject) => {
+export const createServerPromise: <T extends JsonValue>(...args: any[]) => Promise<T> = <T extends JsonValue>() => new Promise<T>((resolve, reject) => {
 	const channel = createRawServerChannel(event => {
 		channel.close();
 		if (event) {
@@ -661,7 +661,7 @@ export const createServerPromise: <T extends JsonValue>(...args: any[]) => Promi
 	});
 });
 
-export const synchronize = createServerPromise as () => PromiseLike<void>;
+export const synchronize = createServerPromise as () => Promise<void>;
 
 export function createServerChannel<T extends Function>(callback: T, onAbort?: () => void): Channel {
 	if (!("call" in callback)) {
@@ -681,7 +681,7 @@ export function createServerChannel<T extends Function>(callback: T, onAbort?: (
 }
 
 
-export function createClientPromise<T extends JsonValue | void>(ask: () => (PromiseLike<T> | T)) : PromiseLike<T> {
+export function createClientPromise<T extends JsonValue | void>(ask: () => (Promise<T> | T)) : Promise<T> {
 	if (!insideCallback) {
 		try {
 			return Promise.resolve(runAPIImplementation(ask));
@@ -873,7 +873,7 @@ export function coordinateValue<T extends JsonValue>(generator: () => T) : T {
 	return roundTrip(value);
 }
 
-export function shareSession() : PromiseLike<string> {
+export function shareSession() : Promise<string> {
 	return createServerPromise<string>().then(value => {
 		// Dummy channel that stays open
 		createServerChannel(emptyFunction);
@@ -932,7 +932,7 @@ function bundledPromiseImplementation() {
 				}
 			}
 		}
-		then<TResult1 = T, TResult2 = never>(onFulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): PromiseLike<TResult1 | TResult2> {
+		then<TResult1 = T, TResult2 = never>(onFulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2> {
 			return new Promise<TResult1 | TResult2>((resolve, reject) => {
 				const completed = () => {
 					try {
@@ -955,12 +955,12 @@ function bundledPromiseImplementation() {
 				}
 			});
 		}
-		catch<TResult = never>(onRejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): PromiseLike<T | TResult> {
+		catch<TResult = never>(onRejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult> {
 			return this.then(undefined, onRejected);
 		}
-		static resolve<T>(value: PromiseLike<T> | T) : PromiseLike<T>;
+		static resolve<T>(value: Promise<T> | T) : Promise<T>;
 	    static resolve(): Promise<void>;
-		static resolve<T>(value?: PromiseLike<T> | T) : PromiseLike<T> {
+		static resolve<T>(value?: Promise<T> | T) : Promise<T> {
 			if (isPromiseLike(value)) {
 				return new Promise<T>((resolve, reject) => value.then(resolve, reject));
 			}
@@ -969,13 +969,13 @@ function bundledPromiseImplementation() {
 			result.__state = PromiseState.Fulfilled;
 			return result;
 		}
-		static reject<T = never>(reason: any) : PromiseLike<T> {
+		static reject<T = never>(reason: any) : Promise<T> {
 			const result = new Promise<T>();
 			result.__value = reason;
 			result.__state = PromiseState.Rejected;
 			return result;
 		}
-		static race<T>(values: ReadonlyArray<PromiseLike<T> | T>) : PromiseLike<T> {
+		static race<T>(values: ReadonlyArray<Promise<T> | T>) : Promise<T> {
 			for (let i = 0; i < values.length; i++) {
 				const value = values[i];
 				if (!isPromiseLike(value)) {
@@ -992,11 +992,11 @@ function bundledPromiseImplementation() {
 			}
 			return new Promise<T>((resolve, reject) => {
 				for (let i = 0; i < values.length; i++) {
-					(values[i] as PromiseLike<T>).then(resolve, reject);
+					(values[i] as Promise<T>).then(resolve, reject);
 				}
 			});
 		}
-		static all<T>(values: ReadonlyArray<PromiseLike<T> | T>) : PromiseLike<T[]> {
+		static all<T>(values: ReadonlyArray<Promise<T> | T>) : Promise<T[]> {
 			let remaining = values.length;
 			const result = new Array(remaining);
 			return new Promise<T[]>((resolve, reject) => {

@@ -51,7 +51,7 @@ function escape(e: any) {
 	});
 }
 
-function escaping(handler: () => any | Promise<any>) : () => PromiseLike<void>;
+function escaping(handler: () => any | Promise<any>) : () => Promise<void>;
 function escaping<T>(handler: (value: T) => any | Promise<any>) : (value: T) => Promise<T | void>;
 function escaping(handler: (value?: any) => any | Promise<any>) : (value?: any) => Promise<any> {
 	return async (value?: any) => {
@@ -559,16 +559,16 @@ const enum ArchiveStatus {
 interface MobiusModuleExports {
 	insideCallback: boolean;
 	dead: boolean;
-	whenDisconnected: PromiseLike<void>;
+	whenDisconnected: Promise<void>;
 	disconnect(): void;
 	flush() : void;
-	synchronize() : PromiseLike<void>;
+	synchronize() : Promise<void>;
 	createClientPromise<T extends JsonValue | void>(...args: any[]): Promise<T>;
 	createServerPromise<T extends JsonValue | void>(ask: () => (Promise<T> | T), includedInPrerender?: boolean): Promise<T>;
 	createClientChannel<T extends Function>(callback: T): Channel;
 	createServerChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender?: boolean): Channel;
 	coordinateValue<T extends JsonValue>(generator: () => T) : T;
-	shareSession() : PromiseLike<string>;
+	shareSession() : Promise<string>;
 	secrets: { [key: string]: any };
 }
 
@@ -603,7 +603,7 @@ class Session {
 	hadOpenServerChannel: boolean = false;
 	// Archival
 	recentEvents?: (Event | boolean)[];
-	archivingEvents?: PromiseLike<void>;
+	archivingEvents?: Promise<void>;
 	archiveStatus: ArchiveStatus = ArchiveStatus.None;
 	bootstrappingChannels?: Set<number>;
 	bootstrappingPromise?: Promise<void>;
@@ -652,6 +652,15 @@ class Session {
 			return result;
 		}
 		throw new Error("Multiple clients attached to the same session are not supported!");
+	}
+
+	hasCapableClient() {
+		for (const client of this.clients) {
+			if (client[1].renderingMode <= RenderingMode.Prerendering) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	loadModule(path: string, newModule: SandboxModule) {
@@ -774,7 +783,7 @@ class Session {
 		await defer();
 		this.dispatchingEvent--;
 	}
-	createServerPromise<T extends JsonValue | void>(ask: () => (PromiseLike<T> | T), includedInPrerender: boolean = true): PromiseLike<T> {
+	createServerPromise<T extends JsonValue | void>(ask: () => (Promise<T> | T), includedInPrerender: boolean = true): Promise<T> {
 		if (!this.insideCallback) {
 			return new Promise(resolve => resolve(ask()));
 		}
@@ -985,7 +994,7 @@ class Session {
 			}
 		};
 	}
-	createClientPromise<T extends JsonValue | void>() {
+	createClientPromise<T extends JsonValue | void>(fallback?: () => Promise<T> | T) {
 		return new Promise<T>((resolve, reject) => {
 			if (!this.insideCallback) {
 				return reject(new Error("Unable to create client promise in this context!"));
@@ -994,14 +1003,31 @@ class Session {
 				return reject(disconnectedError());
 			}
 			const channel = this.createRawClientChannel(event => {
-				channel.close();
 				this.enteringCallback();
+				channel.close();
 				if (event) {
 					parseValueEvent(event, resolve as (value: JsonValue | void) => void, reject);
 				} else {
 					reject(disconnectedError());
 				}
 			});
+			if (!this.hasCapableClient() && !this.bootstrappingPromise) {
+				this.enterLocalChannel(true);
+				this.dispatchingAPIImplementation++;
+				const promise = fallback ? new Promise<T>(resolve => resolve(fallback())) : Promise.reject(new Error("Browser does not support client-side rendering!"))
+				this.dispatchingAPIImplementation--;
+				promise.then(async value => {
+					if (this.currentEvents) {
+						await defer();
+					}
+					this.dispatchClientEvent(eventForValue(-channel.channelId, value));
+				}, async error => {
+					if (this.currentEvents) {
+						await defer();
+					}
+					this.dispatchClientEvent(eventForException(-channel.channelId, error));
+				}).then(() => this.exitLocalChannel());
+			}
 		});
 	}
 	createClientChannel<T extends Function>(callback: T): Channel {
