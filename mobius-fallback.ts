@@ -33,6 +33,7 @@
 	let anyChanged = false;
 	let lastEventKey = "";
 	let queuedEvents: string[] = [];
+	let flushTimerId: number | undefined;
 
 	let form = document.forms["mobius-form" as any as number] as HTMLFormElement;
 	if (!form) {
@@ -58,24 +59,38 @@
 		return false;
 	}
 
-	function onInputEvent(event: Event) {
+	function eventForDOMEvent(event: Event, defaultType: string): [string, string] | undefined {
 		const element = (event.target || event.srcElement) as Element;
 		if (element) {
-			const type = event.type || "input";
+			const type = event.type || defaultType;
 			const key = (element.getAttribute && element.getAttribute(`data-mobius-on${type}`)) || (element as HTMLInputElement).name;
-			const pair = key + "=" + encodeURIComponent((element as HTMLInputElement).value);
-			if (lastEventKey == key) {
+			return [key, (element as HTMLInputElement).value];
+		}
+	}
+
+	function onInputEvent(event: Event) {
+		const pair = eventForDOMEvent(event, "input");
+		if (pair) {
+			// Coalesce similar events
+			if (lastEventKey == pair[0]) {
 				queuedEvents.pop();
 			} else {
-				lastEventKey = key;
+				lastEventKey = pair[0];
 			}
-			queuedEvents.push(pair);
+			queuedEvents.push(pair[0] + "=" + encodeURIComponent(pair[1]));
+			if (typeof flushTimerId == "undefined") {
+				flushTimerId = setTimeout(send, 300);
+			}
 		}
 		anyChanged = true;
 	}
 
 	function onGenericEvent(event: Event) {
-		send((event.target || event.srcElement) as HTMLElement, event.type || "click");
+		const pair = eventForDOMEvent(event, "click");
+		if (pair) {
+			queuedEvents.push(pair[0] + "=");
+		}
+		send();
 	}
 
 	function handlerForEventType(onType: string) {
@@ -116,49 +131,49 @@
 		}
 	}
 
-	function send(target?: HTMLElement, eventType?: string) {
-		var request: XMLHttpRequest = supportsNativeXHR ? new XMLHttpRequest() : new (window as any).ActiveXObject("MSXML2.XMLHTTP.3.0");
-		request.open("POST", location.href, true);
-		request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-		var body = queuedEvents;
-		queuedEvents = [];
-		lastEventKey = "";
-		body.unshift("postback=js");
-		for (let i = 0; i < form.length; i++) {
-			const element = form[i];
-			if (element.type == "hidden") {
-				if (element.name != "postback" && element.name != "hasServerChannels") {
-					body.push(element.name + "=" + encodeURIComponent(element.value));
-				}
-			}
+	function send() {
+		if (typeof flushTimerId != "undefined") {
+			clearTimeout(flushTimerId);
+			flushTimerId = undefined;
 		}
-		if (target) {
-			const name = target.getAttribute(`data-mobius-on${eventType}`) || (target as HTMLInputElement).name || target.getAttribute("name");
-			if (name) {
-				body.push(name + "=");
-			}
-		}
-		request.onreadystatechange = function() {
-			if (request.readyState == 4) {
-				isSending--;
-				if (request.status == 200) {
-					if (anyChanged) {
-						// Race condition, text field changed while the request was in flight, send again
-						send();
-					} else {
-						(window as any).setDOM(form, request.responseText);
-						// form.innerHTML = request.responseText;
-						interceptFormElements();
+		if (isSending <3) {
+			var request: XMLHttpRequest = supportsNativeXHR ? new XMLHttpRequest() : new (window as any).ActiveXObject("MSXML2.XMLHTTP.3.0");
+			request.open("POST", location.href, true);
+			request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+			var body = queuedEvents;
+			queuedEvents = [];
+			lastEventKey = "";
+			body.unshift("postback=js");
+			for (let i = 0; i < form.length; i++) {
+				const element = form[i];
+				if (element.type == "hidden") {
+					if (element.name != "postback" && element.name != "hasServerChannels") {
+						body.push(element.name + "=" + encodeURIComponent(element.value));
 					}
 				}
 			}
-		}
-		isSending++;
-		anyChanged = false;
-		request.send(body.join("&"));
-		const messageID = form["messageID"];
-		if (messageID) {
-			messageID.value = (messageID.value | 0) + 1;
+			request.onreadystatechange = function() {
+				if (request.readyState == 4) {
+					isSending--;
+					if (request.status == 200) {
+						if (anyChanged) {
+							// Race condition, text field changed while the request was in flight, send again
+							send();
+						} else {
+							(window as any).setDOM(form, request.responseText);
+							// form.innerHTML = request.responseText;
+							interceptFormElements();
+						}
+					}
+				}
+			}
+			isSending++;
+			anyChanged = false;
+			request.send(body.join("&"));
+			const messageID = form["messageID"];
+			if (messageID) {
+				messageID.value = (messageID.value | 0) + 1;
+			}
 		}
 	}
 
