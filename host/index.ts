@@ -572,6 +572,12 @@ interface MobiusModuleExports {
 	secrets: { [key: string]: any };
 }
 
+const bakedModules: { [moduleName: string]: (session: Session) => any } = {
+	mobius: (session: Session) => session.mobius,
+	request: (session: Session) => session.request,
+	documet: (session: Session) => session.globalProperties.document,
+};
+
 class Session {
 	host: Host;
 	sessionID: string;
@@ -665,8 +671,9 @@ class Session {
 
 	loadModule(path: string, newModule: SandboxModule) {
 		loadModule(path, newModule, this.globalProperties, (name: string) => {
-			if (name == "mobius") {
-				return this.mobius;
+			const bakedModule = bakedModules[name];
+			if (bakedModule) {
+				return bakedModule(this);
 			}
 			const modulePath = Module._findPath(name, newModule.paths, false);
 			if (modulePath) {
