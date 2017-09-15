@@ -54,7 +54,7 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 							break;
 					}
 				}
-				node.setAttribute(`data-mobius-on${name}`, `channelID${channel.channelId}`);
+				node.setAttribute(`data-mobius-on${name}`, channel.channelId.toString());
 				tuple = c[name] = [channel, listener];
 			}
 			listeners[name] = ignoreEvent;

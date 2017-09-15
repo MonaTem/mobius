@@ -63,8 +63,8 @@
 		const element = (event.target || event.srcElement) as Element;
 		if (element) {
 			const type = event.type || defaultType;
-			const key = (element.getAttribute && element.getAttribute(`data-mobius-on${type}`)) || (element as HTMLInputElement).name;
-			return [key, (element as HTMLInputElement).value];
+			const channelId = element.getAttribute && element.getAttribute(`data-mobius-on${type}`);
+			return [channelId ? "channelID" + channelId : (element as HTMLInputElement).name, (element as HTMLInputElement).value];
 		}
 	}
 
