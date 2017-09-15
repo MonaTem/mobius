@@ -67,9 +67,13 @@ api/mobius.d.ts: $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-clie
 public/client.js: api/mobius.d.ts src/app.js
 	./preact/node_modules/rollup/bin/rollup -c
 
+
 fallback: public/fallback.js
 
-public/fallback.js: mobius-fallback.ts types/*.d.ts tsconfig-fallback.json node_modules/typescript/bin/tsc
+build/diff-match-patch.js: node_modules/typescript/bin/tsc
+	grep -v module.exports node_modules/diff-match-patch/index.js > $@
+
+public/fallback.js: mobius-fallback.ts build/diff-match-patch.js types/*.d.ts tsconfig-fallback.json node_modules/typescript/bin/tsc
 	node_modules/typescript/bin/tsc -p tsconfig-fallback.json
 
 

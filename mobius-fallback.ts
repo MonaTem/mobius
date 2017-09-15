@@ -35,6 +35,9 @@
 	let queuedEvents: string[] = [];
 	let flushTimerId: number | undefined;
 
+	let currentHTMLSource = "";
+	const diff = new (window as any).diff_match_patch();
+
 	let form = document.forms["mobius-form" as any as number] as HTMLFormElement;
 	if (!form) {
 		form = document.createElement("form");
@@ -160,7 +163,13 @@
 							// Race condition, text field changed while the request was in flight, send again
 							send();
 						} else {
-							(window as any).setDOM(form, request.responseText);
+							const responseText = request.responseText;
+							if (responseText[0] == "<") {
+								currentHTMLSource = responseText;
+							} else {
+								currentHTMLSource = diff.patch_apply(diff.patch_fromText(responseText), currentHTMLSource)[0];
+							}
+							(window as any).setDOM(form, currentHTMLSource);
 							// form.innerHTML = request.responseText;
 							interceptFormElements();
 						}

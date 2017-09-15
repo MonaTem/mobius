@@ -11,6 +11,9 @@ const expressWs = require("express-ws");
 import * as uuid from "uuid";
 import { JSDOM } from "jsdom";
 
+import { diff_match_patch } from "diff-match-patch";
+const diff_match_patch_node = new (require("diff-match-patch-node") as typeof diff_match_patch);
+
 import { JsonValue, JsonMap, Channel } from "mobius-types";
 import { loadModule, SandboxModule } from "./sandbox";
 import { interceptGlobals, roundTrip, FakedGlobals } from "../common/determinism";
@@ -420,6 +423,7 @@ class Client {
 	queuedLocalEventsResolve: ((shouldContinue: true | void) => void) | undefined;
 	localResolveTimeout: NodeJS.Timer | undefined;
 	willSynchronizeChannels = false;
+	lastSentFormHTML?: string;
 
 	constructor(session: Session, clientID: number, renderingMode: RenderingMode) {
 		this.session = session;
@@ -1433,6 +1437,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			if (client.renderingMode >= RenderingMode.FullEmulation) {
 				const postback = body["postback"];
 				if (postback) {
+					const isJavaScript = postback == "js";
 					// JavaScript is disabled, emulate events from form POST
 					const session = client.session;
 					const inputEvents: Event[] = [];
@@ -1463,7 +1468,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 					message.events = message.events.concat(inputEvents.concat(buttonEvents));
 					// Process the faked message normally
 					await client.receiveMessage(message);
-					if (postback == "js") {
+					if (isJavaScript) {
 						// Wait for events to be ready
 						await client.dequeueEvents();
 					} else {
@@ -1472,14 +1477,23 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 						await session.pageRenderer.render();
 					}
 					// Render the DOM into HTML source
-					const html = await session.pageRenderer.generateHTML(client, postback == "js");
+					const html = await session.pageRenderer.generateHTML(client, isJavaScript);
+					let responseContent = html;
+					if (isJavaScript) {
+						if (client.lastSentFormHTML) {
+							const diff = diff_match_patch_node.patch_toText(diff_match_patch_node.patch_make(client.lastSentFormHTML, html));
+							if (diff.length < html.length) {
+								responseContent = diff;
+							}
+						}
+						client.lastSentFormHTML = html;
+					}
 					client.queuedLocalEvents = undefined;
 					if (simulatedLatency) {
 						await delay(simulatedLatency);
 					}
-					// Return HTML
-					res.set("Content-Type", postback == "js" ? "text/plain" : "text/html");
-					res.send(html);
+					res.set("Content-Type", isJavaScript ? "text/plain" : "text/html");
+					res.send(responseContent);
 					return;
 				}
 			}
