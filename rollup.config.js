@@ -8,14 +8,7 @@ function stripRedact() {
 	return {
 		visitor: {
 			CallExpression(path) {
-				const calleePath = path.get("callee");
-				const isMatched = stripFunctionNameList.some((fnName) => {
-					if (calleePath.matchesPattern(fnName)) {
-						return !calleePath.node.computed;
-					}
-					return calleePath.node.name === fnName;
-				});
-				if (isMatched && path.node.arguments.length != 0) {
+				if (path.get("callee").node.name == "redact" && path.node.arguments.length != 0) {
 					if (path.node.arguments.every(node => pure(node, { pureMembers: /./ }))) {
 						path.replaceWith(types.callExpression(types.identifier("redact"), []));
 					} else {
