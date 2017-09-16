@@ -46,6 +46,9 @@ node_modules/preact: node_modules/typescript/bin/tsc preact/dist/preact.js
 api/:
 	mkdir -p api
 
+build/:
+	mkdir -p build
+
 
 host: build/index.js
 
