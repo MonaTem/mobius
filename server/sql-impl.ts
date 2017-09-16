@@ -1,6 +1,7 @@
 import { createServerPromise, secrets } from "mobius";
 import { JsonMap } from "mobius-types";
 import { ExecuteResult } from "sql";
+import { peek, Redacted } from "redact";
 
 declare global {
 	namespace NodeJS {
@@ -27,11 +28,11 @@ function getPool(host: string) {
 	return pool;
 }
 
-export function execute(host: string, sql: string, params?: any[]) : Promise<ExecuteResult> {
+export function execute(host: string | Redacted<string>, sql: string | Redacted<string>, params?: any[] | Redacted<any[]>) : Promise<ExecuteResult> {
 	return createServerPromise(() => new Promise<ExecuteResult & JsonMap>((resolve, reject) => {
-		getPool(host).query({
-			sql: sql,
-			values: params || []
+		getPool(peek(host)).query({
+			sql: peek(sql),
+			values: params ? peek(params) : []
 		}, (error: any, result: any) => {
 			if (error) {
 				reject(error);

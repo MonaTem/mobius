@@ -55,7 +55,7 @@ build/index.js: $(HOST_FILES) $(COMMON_FILES) types/*.d.ts tsconfig-host.json no
 
 server: build/src/app.js
 
-build/src/app.js: $(SERVER_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
+build/src/app.js: $(SERVER_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/ build/ types/*.d.ts tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/typescript/bin/tsc -p tsconfig-server.json
 
 
@@ -64,7 +64,7 @@ client: public/client.js
 api/mobius.d.ts: $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/typescript/bin/tsc -p tsconfig-client.json
 
-public/client.js: api/mobius.d.ts src/app.js
+public/client.js: api/mobius.d.ts src/app.js rollup.config.js
 	./preact/node_modules/rollup/bin/rollup -c
 
 
