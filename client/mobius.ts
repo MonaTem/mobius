@@ -265,6 +265,7 @@ const afterLoaded = new Promise(resolve => {
 
 if (hasBootstrap) {
 	++outgoingMessageId;
+	--incomingMessageId;
 	const wrapperForm = document.getElementById("mobius-form") as HTMLFormElement;
 	if (wrapperForm) {
 		wrapperForm.onsubmit = () => false;
