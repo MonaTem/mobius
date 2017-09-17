@@ -1143,7 +1143,7 @@ class Session {
 			}
 			this.sharingEnabled = true;
 			const request: express.Request = this.request;
-			return request.protocol + "://" + request.get("host") + request.url + "?sessionID=" + this.sessionID;
+			return request.protocol + "://" + request.get("host") + request.url.replace(/(\.websocket)?\?.*$/, "") + "?sessionID=" + this.sessionID;
 		});
 		const result = await server;
 		// Dummy channel that stays open
