@@ -1379,6 +1379,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				// Joining existing session, must render document even if prerendering is disabled
 				session = await host.sessionFromId(sessionID, request);
 				client = session.newClient(request);
+				client.incomingMessageId++;
 			} else if ((host.renderingMode < RenderingMode.Prerendering) && !Client.requestRequiresForcedEmulation(request)) {
 				// Not prerendering or joining a session, just return the original source
 				return host.htmlSource;
