@@ -117,6 +117,16 @@ export function interceptGlobals<T extends Partial<FakedGlobals>>(
 	newDate.now = now;
 	// Override timers with ones that are coordinated between client/server
 	const timers: { [ id: number] : Closeable } = {};
+	function destroyTimer(timerId: number) {
+		if (typeof timerId == "number" && timerId < 0) {
+			const channel = timers[timerId];
+			if (channel) {
+				delete timers[timerId];
+				channel.close();
+			}
+			return true;
+		}
+	}
 	let currentTimerId = 0;
 
 	const realSetInterval = setInterval as Function as (callback: () => void, interval: number) => number;
@@ -133,15 +143,7 @@ export function interceptGlobals<T extends Partial<FakedGlobals>>(
 	};
 
 	globals.clearInterval = (intervalId: number) => {
-		if (typeof intervalId == "number" && intervalId < 0) {
-			const channel = timers[intervalId];
-			if (channel) {
-				delete timers[intervalId];
-				channel.close();
-			}
-		} else {
-			realClearInterval(intervalId);
-		}
+		destroyTimer(intervalId) || realClearInterval(intervalId);
 	};
 
 	const realSetTimeout = setTimeout as Function as (callback: () => void, delay: number) => number;
@@ -163,15 +165,7 @@ export function interceptGlobals<T extends Partial<FakedGlobals>>(
 	};
 
 	globals.clearTimeout = (timeoutId: number) => {
-		if (typeof timeoutId == "number" && timeoutId < 0) {
-			const channel = timers[timeoutId];
-			if (channel) {
-				delete timers[timeoutId];
-				channel.close();
-			}
-		} else {
-			realClearTimeout(timeoutId);
-		}
+		destroyTimer(timeoutId) || realClearTimeout(timeoutId);
 	};
 	// Recast now that all fields have been filled
 	return globals as (T & FakedGlobals);
