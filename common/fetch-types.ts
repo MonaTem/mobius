@@ -5,7 +5,7 @@ export interface FetchOptions {
 	headers?: { [name: string]: string };
 	body?: string;
 	redirect?: "follow" | "error" | "manual";
-	from?: "server" | "client";
+	from?: "server" | "client" | "client-or-server";
 }
 export interface FetchResponse extends JsonMap {
 	type: "basic" | "cors" | "default" | "error" | "opaque" | "opaqueredirect";
