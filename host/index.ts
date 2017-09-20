@@ -97,19 +97,21 @@ interface MobiusGlobalProperties {
 class Host {
 	sessions = new Map<string, Session>();
 	scriptPath: string;
+	serverModulePaths: string[];
 	modulePaths: string[];
 	htmlSource: string;
 	dom: JSDOM;
 	document: Document;
 	staleSessionTimeout: any;
 	secrets: JsonValue;
-	renderingMode: RenderingMode = RenderingMode.ClientPreferred;
-	constructor(scriptPath: string, modulePaths: string[], htmlPath: string, htmlSource: string, secrets: JsonValue) {
+	renderingMode: RenderingMode = RenderingMode.Prerendering;
+	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], htmlPath: string, htmlSource: string, secrets: JsonValue) {
 		this.secrets = secrets;
 		this.htmlSource = htmlSource;
 		this.dom = new JSDOM(htmlSource);
 		this.document = (this.dom.window as Window).document as Document;
 		this.scriptPath = scriptPath;
+		this.serverModulePaths = serverModulePaths;
 		this.modulePaths = modulePaths;
 		patchJSDOM(this.document);
 		this.staleSessionTimeout = setInterval(() => {
@@ -689,7 +691,7 @@ class Session {
 		return false;
 	}
 
-	loadModule(path: string, newModule: SandboxModule) {
+	loadModule(path: string, newModule: SandboxModule, allowNodeModules: boolean) {
 		loadModule(path, newModule, this.globalProperties, (name: string) => {
 			const bakedModule = bakedModules[name];
 			if (bakedModule) {
@@ -706,10 +708,16 @@ class Session {
 					paths: newModule.paths
 				};
 				this.modules.set(modulePath, subModule);
-				this.loadModule(modulePath, subModule);
+				this.loadModule(modulePath, subModule, !!Module._findPath(name, this.host.serverModulePaths));
 				return subModule.exports;
 			}
-			return require(name);
+			const result = require(name);
+			if (!allowNodeModules) {
+				var e = new Error(`Cannot access module '${name}' in this context`);
+				(e as any).code = "MODULE_NOT_FOUND";
+				throw e;
+			}
+			return result;
 		});
 		return newModule;
 	}
@@ -722,7 +730,7 @@ class Session {
 			this.loadModule(this.host.scriptPath, {
 				exports: {},
 				paths: this.host.modulePaths
-			});
+			}, false);
 		}
 	}
 
@@ -1364,9 +1372,10 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 	}
 
 	//(global.module as any).paths as string[]
-	const modulePaths = [relativePath("../server"), relativePath("../common"), relativePath("../../preact/dist")];
+	const serverModulePaths = [relativePath("../server")];
+	const modulePaths = serverModulePaths.concat([relativePath("../common"), relativePath("../../preact/dist")]);
 
-	const host = new Host(serverJSPath, modulePaths, htmlPath, (await htmlContents).toString(), JSON.parse((await secrets).toString()));
+	const host = new Host(serverJSPath, serverModulePaths, modulePaths, htmlPath, (await htmlContents).toString(), JSON.parse((await secrets).toString()));
 	// host.newClient({
 	// 	headers: []
 	// } as any as express.Request).then(client => client.session.run());
