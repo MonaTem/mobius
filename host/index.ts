@@ -424,6 +424,7 @@ class Client {
 	localResolveTimeout: NodeJS.Timer | undefined;
 	willSynchronizeChannels = false;
 	lastSentFormHTML?: string;
+	pendingCookies?: [string, string][];
 
 	constructor(session: Session, clientID: number, renderingMode: RenderingMode) {
 		this.session = session;
@@ -547,6 +548,20 @@ class Client {
 			defer().then(this.synchronizeChannels);
 		}
 	}
+
+	setCookie(key: string, value: string) {
+		const cookies = this.pendingCookies || (this.pendingCookies = []);
+		cookies.push([key, value]);
+	}
+	applyCookies(response: express.Response) {
+		const cookies = this.pendingCookies;
+		if (cookies) {
+			this.pendingCookies = undefined;
+			for (let [ key, value ] of cookies) {
+				response.cookie(key, value);
+			}
+		}
+	}
 }
 
 interface ArchivedSession {
@@ -579,7 +594,8 @@ interface MobiusModuleExports {
 const bakedModules: { [moduleName: string]: (session: Session) => any } = {
 	mobius: (session: Session) => session.mobius,
 	request: (session: Session) => session.request,
-	documet: (session: Session) => session.globalProperties.document,
+	setCookie: (session: Session) => session.setCookie.bind(session),
+	document: (session: Session) => session.globalProperties.document,
 };
 
 class Session {
@@ -1151,6 +1167,12 @@ class Session {
 		return result;
 	}
 
+	setCookie(key: string, value: string) {
+		for (const client of this.clients.values()) {
+			client.setCookie(key, value);
+		}
+	}
+
 	async destroy() {
 		if (!this.dead) {
 			this.dead = true;
@@ -1398,6 +1420,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			if (client.renderingMode == RenderingMode.ForcedEmulation) {
 				client.queuedLocalEvents = undefined;
 			}
+			client.applyCookies(response);
 			// Render the DOM into HTML source
 			return await session.pageRenderer.generateHTML(client);
 		})().then(async html => {
@@ -1493,6 +1516,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 					if (simulatedLatency) {
 						await delay(simulatedLatency);
 					}
+					client.applyCookies(res);
 					res.set("Content-Type", isJavaScript ? "text/plain" : "text/html");
 					res.send(responseContent);
 					return;
@@ -1507,6 +1531,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			if (simulatedLatency) {
 				await delay(simulatedLatency);
 			}
+			client.applyCookies(res);
 			res.set("Content-Type", "text/plain");
 			res.send(responseMessage);
 		})().catch(async e => {
