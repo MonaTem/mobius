@@ -1,7 +1,7 @@
 import { createServerPromise, createClientPromise } from "mobius";
 import { FetchOptions, FetchResponse } from "fetch-types";
 
-export function fetch(url: string, options?: FetchOptions) : Promise<FetchResponse> {
+export default function fetch(url: string, options?: FetchOptions) : Promise<FetchResponse> {
 	if (options && options.from == "client") {
 		return createClientPromise<FetchResponse>(() => (new Promise<XMLHttpRequest>((resolve, reject) => {
 			const request = new XMLHttpRequest();
