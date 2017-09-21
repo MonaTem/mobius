@@ -1,5 +1,66 @@
 import { JsonValue } from "mobius-types";
-import { roundTrip } from "./determinism";
+
+function classNameForConstructor(constructor: any): string {
+	const name = constructor.name as string | undefined;
+	// Support ES5 by falling back to parsing toString
+	return name || Object.toString.call(constructor).match(/.*? (\w+)/)[1];
+}
+
+function throwError(message: string) {
+	throw new Error(message);
+}
+
+function roundTripValue(obj: any, cycleDetection: any[]) : any {
+	// Round-trip values through JSON so that the client receives exactly the same type of values as the server
+	// return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify(obj)) as T;
+	switch (typeof obj) {
+		default:
+			if (obj !== null) {
+				if (cycleDetection.indexOf(obj) != -1) {
+					throwError("Cycles do not round-trip!");
+				}
+				cycleDetection.push(obj);
+				let result: any;
+				const constructor = obj.constructor;
+				switch (constructor) {
+					case undefined:
+					case Object:
+						result = {};
+						for (var key in obj) {
+							if (Object.hasOwnProperty.call(obj, key)) {
+								result[key] = roundTripValue(obj[key], cycleDetection);
+							}
+						}
+						break;
+					case Array:
+						result = [];
+						for (var i = 0; i < obj.length; i++) {
+							result[i] = roundTripValue(obj[i], cycleDetection);
+						}
+						break;
+					default:
+						throwError(classNameForConstructor(constructor) + " does not round-trip!");
+				}
+				cycleDetection.pop();
+				return result;
+			}
+			// fallthrough
+		case "boolean":
+		case "string":
+			return obj;
+		case "number":
+			if (obj !== obj) {
+				throwError("NaN does not round-trip!");
+			}
+			return obj;
+		case "undefined":
+			throwError("undefined does not round-trip!");
+	}
+}
+
+export function roundTrip<T extends JsonValue | void>(obj: T) : T {
+	return typeof obj == "undefined" ? obj : roundTripValue(obj, []) as T;
+}
 
 export type Event = [number] | [number, any] | [number, any, any];
 
@@ -40,20 +101,15 @@ export function eventForValue(channelId: number, value: JsonValue | void) : Even
 export function eventForException(channelId: number, error: any) : Event {
 	// Convert Error types to a representation that can be reconstituted remotely
 	let type : any = 1;
-	let serializedError: any = error;
+	let serializedError: { [key: string]: JsonValue } = {};
 	if (error instanceof Error) {
 		let errorClass : any = error.constructor;
-		if ("name" in errorClass) {
-			type = errorClass.name;
-		} else {
-			// ES5 support
-			type = errorClass.toString().match(/.*? (\w+)/)[0];
-		}
-		serializedError = { message: error.message, stack: error.stack };
+		type = classNameForConstructor(errorClass);
+		serializedError = { message: roundTrip(error.message) };
 		let anyError : any = error;
 		for (let i in anyError) {
 			if (Object.hasOwnProperty.call(anyError, i)) {
-				serializedError[i] = anyError[i];
+				serializedError[i] = roundTrip(anyError[i]);
 			}
 		}
 	}
@@ -64,7 +120,7 @@ export function parseValueEvent<T>(global: any, event: Event | undefined, resolv
 	if (!event) {
 		return reject(disconnectedError());
 	}
-	let value = event[1];
+	let value = roundTrip(event[1]);
 	if (event.length != 3) {
 		return resolve(value);
 	}
@@ -73,10 +129,9 @@ export function parseValueEvent<T>(global: any, event: Event | undefined, resolv
 	if (type != 1 && /Error$/.test(type)) {
 		const ErrorType : typeof Error = global[type] || Error;
 		const error: Error = new ErrorType(value.message);
-		delete value.message;
-		for (let i in value) {
-			if (Object.hasOwnProperty.call(value, i)) {
-				(error as any)[i] = value[i];
+		for (var i in value) {
+			if (Object.hasOwnProperty.call(value, i) && i != "message") {
+				(error as any)[i] = roundTrip(value[i]);
 			}
 		}
 		return reject(error);

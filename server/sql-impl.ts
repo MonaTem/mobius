@@ -39,7 +39,7 @@ export function execute(host: string | Redacted<string>, sql: string | Redacted<
 			} else {
 				let wrappedResult : ExecuteResult & JsonMap = {};
 				if (result instanceof Array) {
-					wrappedResult.records = result;
+					wrappedResult.records = result.map(record => Object.assign({}, record));
 				} else {
 					if (typeof result.insertId == "number") {
 						wrappedResult.insertId = result.insertId;

@@ -1,6 +1,6 @@
 import { Channel, JsonValue } from "mobius-types";
-import { interceptGlobals, roundTrip } from "determinism";
-import { logOrdering, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "_internal";
+import { interceptGlobals } from "determinism";
+import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "_internal";
 /**
  * @license THE MIT License (MIT)
  * 
@@ -710,7 +710,8 @@ export function createClientPromise<T extends JsonValue | void>(ask: () => (Prom
 		if (shouldImplementLocalChannel(channelId)) {
 			// Resolve value
 			new Promise<T>(resolve => resolve(runAPIImplementation(ask))).then(
-				escaping((value: T) => sendEvent(eventForValue(channelId, value))),
+				escaping((value: T) => sendEvent(eventForValue(channelId, value)))
+			).catch(
 				escaping((error: any) => sendEvent(eventForException(channelId, error)))
 			);
 		}
@@ -852,10 +853,11 @@ export function coordinateValue<T extends JsonValue>(generator: () => T) : T {
 		}
 		try {
 			value = generator();
+			const event = eventForValue(channelId, value);
 			try {
 				logOrdering("client", "message", channelId);
 				logOrdering("client", "close", channelId);
-				sendEvent(eventForValue(channelId, value), true, true);
+				sendEvent(event, true, true);
 			} catch(e) {
 				escape(e);
 			}

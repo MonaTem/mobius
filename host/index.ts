@@ -16,8 +16,8 @@ const diff_match_patch_node = new (require("diff-match-patch-node") as typeof di
 
 import { JsonValue, JsonMap, Channel } from "mobius-types";
 import { loadModule, SandboxModule } from "./sandbox";
-import { interceptGlobals, roundTrip, FakedGlobals } from "../common/determinism";
-import { logOrdering, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "../common/_internal";
+import { interceptGlobals, FakedGlobals } from "../common/determinism";
+import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "../common/_internal";
 
 const server = express();
 
@@ -855,6 +855,7 @@ class Session {
 			let result = new Promise<T>(resolve => resolve(ask()));
 			this.dispatchingAPIImplementation--;
 			result.then(async value => {
+				const event = eventForValue(channelId, value);
 				if (this.currentEvents) {
 					if (this.bootstrappingPromise) {
 						await this.bootstrappingPromise;
@@ -866,7 +867,7 @@ class Session {
 						this.updateOpenServerChannelStatus(true);
 						logOrdering("server", "message", channelId, this.sessionID);
 						logOrdering("server", "close", channelId, this.sessionID);
-						this.sendEvent(eventForValue(channelId, value));
+						this.sendEvent(event);
 					} catch (e) {
 						escape(e);
 					}
@@ -875,7 +876,7 @@ class Session {
 					this.enteringCallback();
 					resolve(roundtripped);
 				}
-			}, async error => {
+			}).catch(async error => {
 				if (this.currentEvents) {
 					if (this.bootstrappingPromise) {
 						await this.bootstrappingPromise;
@@ -1056,7 +1057,7 @@ class Session {
 						await defer();
 					}
 					this.dispatchClientEvent(eventForValue(-channel.channelId, value));
-				}, async error => {
+				}).catch(async error => {
 					if (this.currentEvents) {
 						await defer();
 					}
@@ -1138,10 +1139,11 @@ class Session {
 			}
 			try {
 				value = generator();
+				const event = eventForValue(channelId, value);
 				try {
 					logOrdering("server", "message", channelId, this.sessionID);
 					logOrdering("server", "close", channelId, this.sessionID);
-					this.sendEvent(eventForValue(channelId, value));
+					this.sendEvent(event);
 				} catch(e) {
 					escape(e);
 				}
