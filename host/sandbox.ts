@@ -1,13 +1,6 @@
 import * as vm from "vm";
 import { readFileSync } from "fs";
 
-const enum SandboxMode {
-	Simple = 0,
-	Full = 1,
-};
-
-const sandboxMode = SandboxMode.Simple as SandboxMode;
-
 export interface SandboxModule {
 	exports: any,
 	paths: string[]
@@ -19,33 +12,25 @@ interface SandboxGlobal {
 	require: (name: string) => any,
 	module: SandboxModule,
 	exports: any,
+	Object?: typeof Object,
+	Array?: typeof Array
 };
+
+declare global {
+	namespace NodeJS {
+		export interface Global {
+			newModule?: (global: any) => void;
+		}
+	}
+}
 
 const sandboxedScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: string) => {
 	const scriptContents = readFileSync(scriptPath).toString();
-	if (sandboxMode == SandboxMode.Full) {
-		// Full sandboxing, creating a new global context each time
-		const vmScript = new vm.Script(scriptContents, {
-			filename: scriptPath,
-			lineOffset: 0,
-			displayErrors: true
-		});
-		return vmScript.runInNewContext.bind(vmScript) as (global: T) => void;
-	} else {
-		// Simple sandboxing, relying on function scope
-		const context = {
-			app: (global: T) => {
-			},
-		};
-		vm.runInNewContext("function app(self){with(self){return(function(self,global,require,document,request){" + scriptContents + "\n})(self,self.global,self.require,self.document,self.request)}}", context, {
-			filename: scriptPath,
-			lineOffset: 0,
-			displayErrors: true
-		});
-		const result = context.app;
-		delete context.app;
-		return result;
-	}
+	return vm.runInThisContext("(function (self){with(self){return(function(self,global,require,document,request){" + scriptContents + "\n})(self,self.global,self.require,self.document,self.request)}})", {
+		filename: scriptPath,
+		lineOffset: 0,
+		displayErrors: true
+	}) as (global: T) => void;
 });
 
 function memoize<I, O>(func: (input: I) => O) {
