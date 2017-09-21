@@ -32,6 +32,15 @@ if (/\bMSIE [1-8]\b/.test(navigator.userAgent) || !("addEventListener" in window
 	throw "Insufficient browser support. Falling back to server-side rendering...";
 }
 
+if (history.replaceState) {
+	const queryComponents = location.search.substr(1).split(/\&/g);
+	const jsNoIndex = queryComponents.indexOf("js=no");
+	if (jsNoIndex != -1) {
+		queryComponents.splice(jsNoIndex, 1);
+		history.replaceState(history.state, "", queryComponents.length ? location.pathname + "?" + queryComponents.join("&") : location.pathname);
+	}
+}
+
 const setTimeout = window.setTimeout;
 const clearTimeout = window.clearTimeout;
 
@@ -263,12 +272,13 @@ const afterLoaded = new Promise(resolve => {
 	eventTarget.addEventListener("load", onload, false);
 }).then(defer);
 
+const wrapperForm = document.getElementById("mobius-form") as HTMLFormElement;
+if (wrapperForm) {
+	wrapperForm.onsubmit = () => false;
+}
+
 if (hasBootstrap) {
 	++outgoingMessageId;
-	const wrapperForm = document.getElementById("mobius-form") as HTMLFormElement;
-	if (wrapperForm) {
-		wrapperForm.onsubmit = () => false;
-	}
 	const events = bootstrapData.events || [];
 	currentEvents = events;
 	bootstrappingChannels = bootstrapData.channels;

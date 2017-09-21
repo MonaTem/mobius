@@ -23,6 +23,13 @@
  * SOFTWARE.
  */
 (() => {
+	const queryComponents = location.search.substr(1).split(/\&/g);
+	const jsNoIndex = queryComponents.indexOf("js=no");
+	if (jsNoIndex != -1) {
+		queryComponents.splice(jsNoIndex, 1);
+		location.href = location.pathname + "?" + queryComponents.join("&");
+		return;
+	}
 	const supportsNativeXHR = "XMLHttpRequest" in window;
 	const supportsActiveXObject = "ActiveXObject" in window;
 	if (!supportsNativeXHR && !supportsActiveXObject) {

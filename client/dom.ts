@@ -55,8 +55,12 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 }
 
 export function host(content: JSX.Element) : void {
-	const element = document.body.children[0];
-	preact.render(content, element, element.children[0]);
+	const element = document.getElementById("mobius-form") || document.body.children[0];
+	let child: Element | null | undefined = element.children[0];
+	while (child && child.nodeName == "INPUT") {
+		child = child.nextElementSibling;
+	}
+	preact.render(content, element, child);
 }
 
 const requestedStyles: { [href: string]: Promise<void> } = {};

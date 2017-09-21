@@ -99,17 +99,24 @@ class Host {
 	scriptPath: string;
 	serverModulePaths: string[];
 	modulePaths: string[];
+	internalModulePath: string;
 	htmlSource: string;
 	dom: JSDOM;
 	document: Document;
+	noscript: Element;
+	metaRedirect: Element;
 	staleSessionTimeout: any;
 	secrets: JsonValue;
-	renderingMode: RenderingMode = RenderingMode.Prerendering;
+	renderingMode: RenderingMode = RenderingMode.ClientPreferred;
 	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], htmlPath: string, htmlSource: string, secrets: JsonValue) {
 		this.secrets = secrets;
 		this.htmlSource = htmlSource;
 		this.dom = new JSDOM(htmlSource);
 		this.document = (this.dom.window as Window).document as Document;
+		this.noscript = this.document.createElement("noscript");
+		this.metaRedirect = this.document.createElement("meta");
+		this.metaRedirect.setAttribute("http-equiv", "refresh");
+		this.noscript.appendChild(this.metaRedirect);
 		this.scriptPath = scriptPath;
 		this.serverModulePaths = serverModulePaths;
 		this.modulePaths = modulePaths;
@@ -160,12 +167,15 @@ class Host {
 		const allowCreation = message.messageID == 0;
 		const session = await this.sessionFromId(message.sessionID || "", allowCreation ? request : undefined);
 		let client = session.clients.get(message.clientID as number | 0);
-		if (!client) {
+		if (client) {
+			client.request = request;
+		} else {
 			if (!allowCreation) {
 				throw new Error("Message ID is not valid: " + message.messageID);
 			}
 			client = session.newClient(request);
 		}
+		session.request = request;
 		return client;
 	}
 	serializeBody(body: Element) {
@@ -282,7 +292,12 @@ class PageRenderer {
 		let hasServerChannelsInput: HTMLInputElement | undefined;
 		let siblingNode: Node | null = null;
 		// Bootstrap script for prerendering/session restoration
-		if ((renderingMode == RenderingMode.Prerendering) || client.clientID) {
+		if (renderingMode == RenderingMode.ClientPreferred) {
+			const url = client.request.url;
+			session.host.metaRedirect.setAttribute("content", "0; url=" + url + (/\?/.test(url) ? "&" : "?") + "js=no");
+			document.head.appendChild(session.host.noscript);
+		}
+		if (((renderingMode == RenderingMode.Prerendering) || client.clientID) && !justFormElement) {
 			bootstrapScript = this.bootstrapScript;
 			if (!bootstrapScript) {
 				bootstrapScript = this.bootstrapScript = document.createElement("script");
@@ -359,8 +374,8 @@ class PageRenderer {
 				siblingNode = document.createTextNode("");
 				this.clientScript.parentNode!.insertBefore(siblingNode, this.clientScript);
 				this.clientScript.parentNode!.removeChild(this.clientScript);
-			} else {
-				this.clientScript.src = "fallback.js";
+			// } else {
+			// 	this.clientScript.src = "fallback.js";
 			}
 		}
 		try {
@@ -406,9 +421,12 @@ class PageRenderer {
 				if (siblingNode) {
 					siblingNode.parentNode!.insertBefore(this.clientScript, siblingNode);
 					siblingNode.parentNode!.removeChild(siblingNode);
-				} else {
-					this.clientScript.src = "client.js";
+				// } else {
+				// 	this.clientScript.src = "client.js";
 				}
+			}
+			if (client.renderingMode == RenderingMode.ClientPreferred) {
+				document.head.removeChild(session.host.noscript);
 			}
 		}
 	}
@@ -416,6 +434,7 @@ class PageRenderer {
 
 class Client {
 	session: Session;
+	request: express.Request;
 	clientID: number;
 	renderingMode: RenderingMode;
 	incomingMessageId: number = 0;
@@ -428,15 +447,16 @@ class Client {
 	lastSentFormHTML?: string;
 	pendingCookies?: [string, string][];
 
-	constructor(session: Session, clientID: number, renderingMode: RenderingMode) {
+	constructor(session: Session, request: express.Request, clientID: number, renderingMode: RenderingMode) {
 		this.session = session;
+		this.request = request;
 		this.clientID = clientID;
 		this.renderingMode = renderingMode;
 	}
 
 	static requestRequiresForcedEmulation(request: express.Request) : boolean {
 		const userAgent = request.headers['user-agent']+"";
-		return /\bMSIE [1-8]\b/.test(userAgent);
+		return /\bMSIE [1-8]\b/.test(userAgent) || request.query["js"] == "no";
 	}
 
 	async destroy() {
@@ -675,7 +695,8 @@ class Session {
 	newClient(request: express.Request, renderingMode?: RenderingMode) {
 		const newClientId = this.currentClientID++;
 		if (this.sharingEnabled || (newClientId == 0)) {
-			const result = new Client(this, newClientId, typeof renderingMode != "undefined" ? renderingMode : Client.requestRequiresForcedEmulation(request) ? RenderingMode.ForcedEmulation : this.host.renderingMode);
+			const result = new Client(this, request, newClientId, typeof renderingMode != "undefined" ? renderingMode : Client.requestRequiresForcedEmulation(request) ? RenderingMode.ForcedEmulation : this.host.renderingMode);
+			this.request = request;
 			this.clients.set(newClientId, result);
 			return result;
 		}
@@ -1409,16 +1430,18 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			let session: Session;
 			let client: Client;
 			if (sessionID) {
-				// Joining existing session, must render document even if prerendering is disabled
+				// Joining existing session
 				session = await host.sessionFromId(sessionID, request);
 				client = session.newClient(request);
 				client.incomingMessageId++;
-			} else if ((host.renderingMode < RenderingMode.Prerendering) && !Client.requestRequiresForcedEmulation(request)) {
-				// Not prerendering or joining a session, just return the original source
-				return host.htmlSource;
 			} else {
+				// New session
 				client = await host.newClient(request);
 				session = client.session;
+				if (client.renderingMode < RenderingMode.Prerendering) {
+					// Not prerendering or joining a session, just return the original source with the noscript added
+					return await session.pageRenderer.generateHTML(client);
+				}
 			}
 			session.updateOpenServerChannelStatus(true);
 			if (client.renderingMode >= RenderingMode.Prerendering) {
@@ -1468,7 +1491,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				res.send("");
 				return;
 			}
-			const client = await (body.sessionID ? host.clientFromMessage(message, req) : host.newClient(req, RenderingMode.FullEmulation));
+			const client = await host.clientFromMessage(message, req);
 			if (client.renderingMode >= RenderingMode.FullEmulation) {
 				const postback = body["postback"];
 				if (postback) {
