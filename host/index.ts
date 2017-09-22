@@ -132,16 +132,13 @@ class Host {
 			}
 		}, 10 * 1000);
 	}
-	async sessionFromId(sessionID: string, request?: express.Request) {
-		let session = this.sessions.get(sessionID);
-		if (session) {
-			return session;
-		}
+	async sessionFromId(sessionID: string | undefined, request: express.Request, allowNewSession: boolean) {
 		if (!sessionID) {
 			throw new Error("No session ID specified!");
 		}
-		if (!request) {
-			throw new Error("Session ID is not valid: " + sessionID);
+		let session = this.sessions.get(sessionID);
+		if (session) {
+			return session;
 		}
 		if (allowMultipleClientsPerSession) {
 			let archive;
@@ -156,25 +153,25 @@ class Host {
 				return session;
 			}
 		}
-		session = new Session(this, sessionID, request);
-		this.sessions.set(sessionID, session);
-		return session;
+		if (allowNewSession) {
+			session = new Session(this, sessionID, request);
+			session.newClient(request);
+			this.sessions.set(sessionID, session);
+			return session;
+		}
+		throw new Error("Session ID is not valid: " + sessionID);
 	}
 	pathForSessionId(sessionId: string) {
 		return "sessions/" + sessionId + ".json";
 	}
-	async clientFromMessage(message: ClientMessage, request: express.Request) {
-		const allowCreation = message.messageID == 0;
-		const session = await this.sessionFromId(message.sessionID || "", allowCreation ? request : undefined);
-		let client = session.clients.get(message.clientID as number | 0);
-		if (client) {
-			client.request = request;
-		} else {
-			if (!allowCreation) {
-				throw new Error("Message ID is not valid: " + message.messageID);
-			}
-			client = session.newClient(request);
+	async clientFromMessage(message: ClientMessage, request: express.Request, allowNewSession: boolean) {
+		const clientID = message.clientID as number | 0;
+		const session = await this.sessionFromId(message.sessionID, request, allowNewSession && message.messageID == 0 && clientID == 0);
+		let client = session.clients.get(clientID);
+		if (!client) {
+			throw new Error("Client ID is not valid: " + message.clientID);
 		}
+		client.request = request;
 		session.request = request;
 		return client;
 	}
@@ -1365,6 +1362,15 @@ function noCache(res: express.Response) {
 	res.header("Pragma", "no-cache");
 }
 
+function isRequestSameSite(request: express.Request) : boolean {
+	const origin = request.headers['origin'];
+	if (typeof origin == "string") {
+		return origin.replace(/^\w+:\/\//, "") === request.headers['host'];
+	} else {
+		return false;
+	}
+}
+
 function migrateChildren(fromNode: Node, toNode: Node) {
 	let firstChild: Node | null;
 	while (firstChild = fromNode.firstChild) {
@@ -1431,7 +1437,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			let client: Client;
 			if (sessionID) {
 				// Joining existing session
-				session = await host.sessionFromId(sessionID, request);
+				session = await host.sessionFromId(sessionID, request, false);
 				client = session.newClient(request);
 				client.incomingMessageId++;
 			} else {
@@ -1463,6 +1469,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			}
 			// Return HTML
 			noCache(response);
+			response.set("Content-Security-Policy", "frame-ancestors 'none'");
 			response.set("Content-Type", "text/html");
 			response.send(html);
 		}, async e => {
@@ -1472,6 +1479,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			// Internal error of some kind
 			response.status(500);
 			response.set("Content-Type", "text/plain");
+			response.set("Content-Security-Policy", "frame-ancestors 'none'");
 			response.send(util.inspect(e));
 		});
 	});
@@ -1491,83 +1499,82 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				res.send("");
 				return;
 			}
-			const client = await host.clientFromMessage(message, req);
-			if (client.renderingMode >= RenderingMode.FullEmulation) {
-				const postback = body["postback"];
-				if (postback) {
-					const isJavaScript = postback == "js";
-					// JavaScript is disabled, emulate events from form POST
-					const session = client.session;
-					const inputEvents: Event[] = [];
-					const buttonEvents: Event[] = [];
-					message.noJavaScript = true;
-					for (let key in body) {
-						if (!Object.hasOwnProperty.call(body, key)) {
-							continue;
-						}
-						const match = key.match(/^channelID(\d+)$/);
-						if (match && Object.hasOwnProperty.call(body, key)) {
-							const element = session.pageRenderer.body.querySelector("[name=\"" + key + "\"]");
-							if (element) {
-								const event: Event = [-match[1], { value: body[key] }];
-								switch (element.nodeName) {
-									case "INPUT":
-										if ((element as HTMLInputElement).value != body[key]) {
-											inputEvents.unshift(event);
-										}
-										break;
-									case "BUTTON":
-										buttonEvents.unshift(event);
-										break;
-								}
+			const postback = body["postback"];
+			const client = await host.clientFromMessage(message, req, !postback);
+			if (postback) {
+				const isJavaScript = postback == "js";
+				// JavaScript is disabled, emulate events from form POST
+				const session = client.session;
+				const inputEvents: Event[] = [];
+				const buttonEvents: Event[] = [];
+				message.noJavaScript = true;
+				for (let key in body) {
+					if (!Object.hasOwnProperty.call(body, key)) {
+						continue;
+					}
+					const match = key.match(/^channelID(\d+)$/);
+					if (match && Object.hasOwnProperty.call(body, key)) {
+						const element = session.pageRenderer.body.querySelector("[name=\"" + key + "\"]");
+						if (element) {
+							const event: Event = [-match[1], { value: body[key] }];
+							switch (element.nodeName) {
+								case "INPUT":
+									if ((element as HTMLInputElement).value != body[key]) {
+										inputEvents.unshift(event);
+									}
+									break;
+								case "BUTTON":
+									buttonEvents.unshift(event);
+									break;
 							}
 						}
 					}
-					message.events = message.events.concat(inputEvents.concat(buttonEvents));
-					// Process the faked message normally
-					await client.receiveMessage(message);
-					if (isJavaScript) {
-						// Wait for events to be ready
-						await client.dequeueEvents();
-					} else {
-						// client.produceMessage();
-						// Wait for content to be ready
-						await session.pageRenderer.render();
-					}
-					// Render the DOM into HTML source
-					const html = await session.pageRenderer.generateHTML(client, isJavaScript);
-					let responseContent = html;
-					if (isJavaScript) {
-						if (client.lastSentFormHTML) {
-							const diff = diff_match_patch_node.patch_toText(diff_match_patch_node.patch_make(client.lastSentFormHTML, html));
-							if (diff.length < html.length) {
-								responseContent = diff;
-							}
-						}
-						client.lastSentFormHTML = html;
-					}
-					client.queuedLocalEvents = undefined;
-					if (simulatedLatency) {
-						await delay(simulatedLatency);
-					}
-					client.applyCookies(res);
-					res.set("Content-Type", isJavaScript ? "text/plain" : "text/html");
-					res.send(responseContent);
-					return;
 				}
+				message.events = message.events.concat(inputEvents.concat(buttonEvents));
+				// Process the faked message normally
+				await client.receiveMessage(message);
+				if (isJavaScript) {
+					// Wait for events to be ready
+					await client.dequeueEvents();
+				} else {
+					// client.produceMessage();
+					// Wait for content to be ready
+					await session.pageRenderer.render();
+				}
+				// Render the DOM into HTML source
+				const html = await session.pageRenderer.generateHTML(client, isJavaScript);
+				let responseContent = html;
+				if (isJavaScript) {
+					if (client.lastSentFormHTML) {
+						const diff = diff_match_patch_node.patch_toText(diff_match_patch_node.patch_make(client.lastSentFormHTML, html));
+						if (diff.length < html.length) {
+							responseContent = diff;
+						}
+					}
+					client.lastSentFormHTML = html;
+				}
+				client.queuedLocalEvents = undefined;
+				if (simulatedLatency) {
+					await delay(simulatedLatency);
+				}
+				client.applyCookies(res);
+				res.set("Content-Type", isJavaScript ? "text/plain" : "text/html");
+				res.set("Content-Security-Policy", "frame-ancestors 'none'");
+				res.send(responseContent);
+			} else {
+				// Dispatch the events contained in the message
+				await client.receiveMessage(message);
+				// Wait for events to be ready
+				await client.dequeueEvents();
+				// Send the serialized response message back to the client
+				const responseMessage = serializeMessageAsText(client.produceMessage());
+				if (simulatedLatency) {
+					await delay(simulatedLatency);
+				}
+				client.applyCookies(res);
+				res.set("Content-Type", "text/plain");
+				res.send(responseMessage);
 			}
-			// Dispatch the events contained in the message
-			await client.receiveMessage(message);
-			// Wait for events to be ready
-			await client.dequeueEvents();
-			// Send the serialized response message back to the client
-			const responseMessage = serializeMessageAsText(client.produceMessage());
-			if (simulatedLatency) {
-				await delay(simulatedLatency);
-			}
-			client.applyCookies(res);
-			res.set("Content-Type", "text/plain");
-			res.send(responseMessage);
 		})().catch(async e => {
 			if (simulatedLatency) {
 				await delay(simulatedLatency);
@@ -1579,9 +1586,12 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 	});
 
 	expressWs(server);
-	(server as any).ws("/", (ws: any, req: express.Request) => {
+	(server as any).ws("/", async (ws: any, req: express.Request) => {
 		// WebSockets protocol implementation
-		(async () => {
+		try {
+			if (!isRequestSameSite(req)) {
+				throw new Error("Only same-site web sockets are permitted!");
+			}
 			let closed = false;
 			ws.on("error", () => {
 				ws.close();
@@ -1591,7 +1601,7 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			});
 			// Get the startup message contained in the WebSocket URL (avoid extra round trip to send events when websocket is opened)
 			const startMessage = messageFromBody(req.query);
-			const client = await host.clientFromMessage(startMessage, req);
+			const client = await host.clientFromMessage(startMessage, req, true);
 			// Track what the last sent/received message IDs are so we can avoid transmitting them
 			let lastIncomingMessageId = startMessage.messageID;
 			let lastOutgoingMessageId = -1;
@@ -1640,11 +1650,11 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				lastIncomingMessageId = message.messageID;
 				processSocketMessage(message);
 			});
-			processSocketMessage(startMessage);
-		})().catch(e => {
+			await processSocketMessage(startMessage);
+		} catch (e) {
 			console.error(e);
 			ws.close();
-		});
+		}
 	});
 
 	server.use(express.static(relativePath("../../public")));
