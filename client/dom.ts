@@ -56,9 +56,9 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 
 export function host(content: JSX.Element) : void {
 	const element = document.getElementById("mobius-form") || document.body.children[0];
-	let child: Element | null | undefined = element.children[0];
+	let child: Element | undefined = element.children[0];
 	while (child && child.nodeName == "INPUT") {
-		child = child.nextElementSibling;
+		child = child.nextElementSibling || undefined;
 	}
 	preact.render(content, element, child);
 }
