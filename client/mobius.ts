@@ -25,6 +25,11 @@ import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEve
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+if (top != self) {
+	document.documentElement.innerHTML = '';
+	throw "Not allowed to load as an iframe!";
+}
+
 if (/\bMSIE [1-8]\b/.test(navigator.userAgent) || !("addEventListener" in window) || typeof JSON == "undefined") {
 	const fallbackScript = document.createElement("script");
 	fallbackScript.src = "fallback.js";
