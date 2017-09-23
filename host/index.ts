@@ -1669,16 +1669,14 @@ async function topFrameHTML(response: express.Response, html: string) {
 	// Graceful shutdown
 	process.on("SIGTERM", onInterrupted);
 	process.on("SIGINT", onInterrupted);
-	function onInterrupted() {
+	async function onInterrupted() {
 		process.removeListener("SIGTERM", onInterrupted);
 		process.removeListener("SIGINT", onInterrupted);
-		console.log("Exiting...");
-		acceptSocket.close((err: any) => {
-			if (err) {
-				escape(err);
-			}
+		const acceptSocketClosed = new Promise(resolve => {
+			acceptSocket.close(resolve);
 		});
-		host.destroy().catch(escape);
+		await host.destroy();
+		await acceptSocketClosed;
+		process.exit(0);
 	}
-
 })().catch(escape);
