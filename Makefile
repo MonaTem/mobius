@@ -52,7 +52,7 @@ build/:
 
 host: build/host/index.js
 
-build/host/index.js: $(HOST_FILES) $(COMMON_FILES) types/*.d.ts tsconfig-host.json node_modules/typescript/bin/tsc
+build/host/index.js: build/src/app.js $(HOST_FILES) $(COMMON_FILES) types/*.d.ts tsconfig-host.json node_modules/typescript/bin/tsc
 	node_modules/typescript/bin/tsc -p tsconfig-host.json
 
 
