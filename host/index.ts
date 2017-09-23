@@ -1356,10 +1356,10 @@ class Session {
 	}
 };
 
-function noCache(res: express.Response) {
-	res.header("Cache-Control", "private, no-cache, no-store, must-revalidate");
-	res.header("Expires", new Date(0).toUTCString());
-	res.header("Pragma", "no-cache");
+function noCache(response: express.Response) {
+	response.header("Cache-Control", "private, no-cache, no-store, must-revalidate");
+	response.header("Expires", new Date(0).toUTCString());
+	response.header("Pragma", "no-cache");
 }
 
 function isRequestSameSite(request: express.Request) : boolean {
@@ -1376,6 +1376,17 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 	while (firstChild = fromNode.firstChild) {
 		toNode.appendChild(firstChild);
 	}
+}
+
+async function topFrameHTML(response: express.Response, html: string) {
+	if (simulatedLatency) {
+		await delay(simulatedLatency);
+	}
+	// Return HTML
+	noCache(response);
+	response.set("Content-Security-Policy", "frame-ancestors 'none'");
+	response.set("Content-Type", "text/html");
+	response.send(html);
 }
 
 (async () => {
@@ -1430,8 +1441,8 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 		type: () => true // Accept all MIME types
 	}));
 
-	server.get("/", (request, response) => {
-		(async () => {
+	server.get("/", async (request, response) => {
+		try {
 			const sessionID = request.query.sessionID;
 			let session: Session;
 			let client: Client;
@@ -1446,33 +1457,21 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				session = client.session;
 				if (client.renderingMode < RenderingMode.Prerendering) {
 					// Not prerendering or joining a session, just return the original source with the noscript added
-					return await session.pageRenderer.generateHTML(client);
+					return await topFrameHTML(response, await session.pageRenderer.generateHTML(client));
 				}
 			}
 			session.updateOpenServerChannelStatus(true);
-			if (client.renderingMode >= RenderingMode.Prerendering) {
-				// Prerendering was enabled, wait for content to be ready
-				client.incomingMessageId++;
-				client.outgoingMessageId++;
-				await session.pageRenderer.render();
-			}
+			// Prerendering was enabled, wait for content to be ready
+			client.outgoingMessageId++;
+			await session.pageRenderer.render();
 			// Steal events when using forced emulation
 			if (client.renderingMode == RenderingMode.ForcedEmulation) {
 				client.queuedLocalEvents = undefined;
 			}
 			client.applyCookies(response);
 			// Render the DOM into HTML source
-			return await session.pageRenderer.generateHTML(client);
-		})().then(async html => {
-			if (simulatedLatency) {
-				await delay(simulatedLatency);
-			}
-			// Return HTML
-			noCache(response);
-			response.set("Content-Security-Policy", "frame-ancestors 'none'");
-			response.set("Content-Type", "text/html");
-			response.send(html);
-		}, async e => {
+			await topFrameHTML(response, await session.pageRenderer.generateHTML(client));
+		} catch (e) {
 			if (simulatedLatency) {
 				await delay(simulatedLatency);
 			}
@@ -1481,13 +1480,12 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 			response.set("Content-Type", "text/plain");
 			response.set("Content-Security-Policy", "frame-ancestors 'none'");
 			response.send(util.inspect(e));
-		});
+		}
 	});
 
-	server.post("/", (req: express.Request, res: express.Response) => {
-		(async () => {
-			noCache(res);
-			const body = req.body;
+	server.post("/", async (request, response) => {
+		try {
+			const body = request.body;
 			const message = messageFromBody(body);
 			if (message.destroy) {
 				// Destroy the client's session (this is navigator.sendBeacon)
@@ -1495,12 +1493,13 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				if (simulatedLatency) {
 					await delay(simulatedLatency);
 				}
-				res.set("Content-Type", "text/plain");
-				res.send("");
+				noCache(response);
+				response.set("Content-Type", "text/plain");
+				response.send("");
 				return;
 			}
 			const postback = body["postback"];
-			const client = await host.clientFromMessage(message, req, !postback);
+			const client = await host.clientFromMessage(message, request, !postback);
 			if (postback) {
 				const isJavaScript = postback == "js";
 				// JavaScript is disabled, emulate events from form POST
@@ -1557,10 +1556,11 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				if (simulatedLatency) {
 					await delay(simulatedLatency);
 				}
-				client.applyCookies(res);
-				res.set("Content-Type", isJavaScript ? "text/plain" : "text/html");
-				res.set("Content-Security-Policy", "frame-ancestors 'none'");
-				res.send(responseContent);
+				client.applyCookies(response);
+				noCache(response);
+				response.set("Content-Type", isJavaScript ? "text/plain" : "text/html");
+				response.set("Content-Security-Policy", "frame-ancestors 'none'");
+				response.send(responseContent);
 			} else {
 				// Dispatch the events contained in the message
 				await client.receiveMessage(message);
@@ -1571,25 +1571,27 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				if (simulatedLatency) {
 					await delay(simulatedLatency);
 				}
-				client.applyCookies(res);
-				res.set("Content-Type", "text/plain");
-				res.send(responseMessage);
+				client.applyCookies(response);
+				noCache(response);
+				response.set("Content-Type", "text/plain");
+				response.send(responseMessage);
 			}
-		})().catch(async e => {
+		} catch (e) {
 			if (simulatedLatency) {
 				await delay(simulatedLatency);
 			}
-			res.status(500);
-			res.set("Content-Type", "text/plain");
-			res.send(util.inspect(e));
-		});
+			response.status(500);
+			noCache(response);
+			response.set("Content-Type", "text/plain");
+			response.send(util.inspect(e));
+		};
 	});
 
 	expressWs(server);
-	(server as any).ws("/", async (ws: any, req: express.Request) => {
+	(server as any).ws("/", async (ws: any, request: express.Request) => {
 		// WebSockets protocol implementation
 		try {
-			if (!isRequestSameSite(req)) {
+			if (!isRequestSameSite(request)) {
 				throw new Error("Only same-site web sockets are permitted!");
 			}
 			let closed = false;
@@ -1600,8 +1602,8 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 				closed = true;
 			});
 			// Get the startup message contained in the WebSocket URL (avoid extra round trip to send events when websocket is opened)
-			const startMessage = messageFromBody(req.query);
-			const client = await host.clientFromMessage(startMessage, req, true);
+			const startMessage = messageFromBody(request.query);
+			const client = await host.clientFromMessage(startMessage, request, true);
 			// Track what the last sent/received message IDs are so we can avoid transmitting them
 			let lastIncomingMessageId = startMessage.messageID;
 			let lastOutgoingMessageId = -1;
@@ -1662,8 +1664,6 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 	const port = 3000;
 	const acceptSocket = server.listen(port, () => {
 		console.log(`Listening on port ${port}...`);
-		// (server as any).on("close", () => {
-		// });
 	});
 
 	// Graceful shutdown
