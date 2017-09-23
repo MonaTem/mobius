@@ -12,12 +12,10 @@ declare global {
 export const send = (topic: string, message: JsonValue) => {
 	const topics = global.observers;
 	if (topics && Object.hasOwnProperty.call(topics, topic)) {
-		const observers = topics[topic];
-		for (let i = 0; i < observers.length; i++) {
-			observers[i](message);
-		}
+		topics[topic].slice().forEach(async (observer) => observer(message));
 	}
 }
+
 export function receive(topic: string, callback: (message: JsonValue) => void, onAbort?: () => void): Channel {
 	const topics = global.observers || (global.observers = {});
 	return createServerChannel(callback, send => {
