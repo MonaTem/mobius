@@ -39,9 +39,15 @@ if (/\bMSIE [1-8]\b/.test(navigator.userAgent) || !("addEventListener" in window
 
 if (history.replaceState) {
 	const queryComponents = location.search.substr(1).split(/\&/g);
-	const jsNoIndex = queryComponents.indexOf("js=no");
-	if (jsNoIndex != -1) {
-		queryComponents.splice(jsNoIndex, 1);
+	let i = queryComponents.length;
+	let replace: true | undefined;
+	while (i--) {
+		if (/^sessionID=/.test(queryComponents[i]) || queryComponents[i] == "js=no") {
+			queryComponents.splice(i, 1);
+			replace = true;
+		}
+	}
+	if (replace) {
 		history.replaceState(history.state, "", queryComponents.length ? location.pathname + "?" + queryComponents.join("&") : location.pathname);
 	}
 }
