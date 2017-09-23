@@ -669,7 +669,7 @@ export function flush() {
 }
 
 // APIs for client/, not to be used inside src/
-export const createServerPromise: <T extends JsonValue>(...args: any[]) => Promise<T> = <T extends JsonValue>() => new Promise<T>((resolve, reject) => {
+export const createServerPromise: <T extends JsonValue | void>(...args: any[]) => Promise<T> = <T extends JsonValue | void>() => new Promise<T>((resolve, reject) => {
 	const channel = createRawServerChannel(event => {
 		channel.close();
 		if (event) {
@@ -737,7 +737,7 @@ export function createClientPromise<T extends JsonValue | void>(ask: () => (Prom
 	});
 };
 
-export function createClientChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, batched?: boolean, shouldFlushMicroTasks?: true) : Channel {
+export function createClientChannel<T extends Function, U = void>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, batched?: boolean, shouldFlushMicroTasks?: true) : Channel {
 	if (!("call" in callback)) {
 		throw new TypeError("callback is not a function!");
 	}

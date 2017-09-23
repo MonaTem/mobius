@@ -1,6 +1,5 @@
-import { createServerPromise, secrets } from "mobius";
-import { JsonMap } from "mobius-types";
-import { ExecuteResult } from "sql";
+import { createServerPromise, createServerChannel, secrets } from "mobius";
+import { Record } from "sql";
 import { peek, Redacted } from "redact";
 
 declare global {
@@ -28,28 +27,28 @@ function getPool(host: string) {
 	return pool;
 }
 
-export function execute(host: string | Redacted<string>, sql: string | Redacted<string>, params?: any[] | Redacted<any[]>) : Promise<ExecuteResult> {
-	return createServerPromise(() => new Promise<ExecuteResult & JsonMap>((resolve, reject) => {
-		getPool(peek(host)).query({
+export function execute(host: string | Redacted<string>, sql: string | Redacted<string>, params?: any[] | Redacted<any[]>, stream?: (record: Record) => void) : Promise<Record[]> {
+	const records: Record[] = [];
+	let send: ((record: Record) => void) | undefined;
+	const channel = createServerChannel((record: Record) => {
+		records.push(record);
+		if (stream) {
+			stream(record);
+		}
+	}, (newSend: (record: Record) => void) => send = newSend);
+	return createServerPromise(() => new Promise<void>((resolve, reject) => {
+		const query = getPool(peek(host)).query({
 			sql: peek(sql),
 			values: params ? peek(params) : []
-		}, (error: any, result: any) => {
-			if (error) {
-				reject(error);
-			} else {
-				let wrappedResult : ExecuteResult & JsonMap = {};
-				if (result instanceof Array) {
-					wrappedResult.records = result.map(record => Object.assign({}, record));
-				} else {
-					if (typeof result.insertId == "number") {
-						wrappedResult.insertId = result.insertId;
-					}
-					if (typeof result.affectedRows == "number") {
-						wrappedResult.affectedRows = result.affectedRows;
-					}
-				}
-				resolve(wrappedResult);
-			}
-		});
-	}));
+		})
+		query.on("result", (record: any) => send!(Object.assign({}, record)));
+		query.on("end", resolve);
+		query.on("error", reject);
+	})).then(value => {
+		channel.close();
+		return records;
+	}, error => {
+		channel.close();
+		throw error;
+	});
 }
