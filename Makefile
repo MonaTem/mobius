@@ -44,30 +44,30 @@ node_modules/preact: node_modules/typescript/bin/tsc preact/dist/preact.js
 
 
 api/:
-	mkdir -p api
+	mkdir -p api/client
 
 build/:
 	mkdir -p build
 
 
-host: build/index.js
+host: build/host/index.js
 
-build/index.js: $(HOST_FILES) $(COMMON_FILES) types/*.d.ts tsconfig-host.json node_modules/typescript/bin/tsc
+build/host/index.js: $(HOST_FILES) $(COMMON_FILES) types/*.d.ts tsconfig-host.json node_modules/typescript/bin/tsc
 	node_modules/typescript/bin/tsc -p tsconfig-host.json
 
 
 server: build/src/app.js
 
-build/src/app.js: $(SERVER_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/ build/ types/*.d.ts tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
+build/src/app.js: $(SERVER_FILES) $(COMMON_FILES) api/ build/ types/*.d.ts tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/typescript/bin/tsc -p tsconfig-server.json
 
 
 client: public/client.js
 
-api/mobius.d.ts: $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
+client/mobius.js: $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/typescript/bin/tsc -p tsconfig-client.json
 
-public/client.js: api/mobius.d.ts src/app.js rollup.config.js
+public/client.js: client/mobius.js src/app.js rollup.config.js
 	./preact/node_modules/rollup/bin/rollup -c
 
 
@@ -82,7 +82,7 @@ public/fallback.js: mobius-fallback.ts build/diff-match-patch.js types/*.d.ts ts
 
 app: src/app.js
 
-src/app.js: $(SRC_FILES) api/mobius.d.ts types/*.d.ts tsconfig-app.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
+src/app.js: $(SRC_FILES) $(SERVER_FILES) $(COMMON_FILES) client/mobius.js types/*.d.ts tsconfig-app.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/typescript/bin/tsc -p tsconfig-app.json
 
 
