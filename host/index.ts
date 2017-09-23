@@ -524,7 +524,7 @@ class Client {
 					resolve(true);
 					return;
 				}
-			} else if (this.session.localChannelCount || this.session.sharingEnabled) {
+			} else if (this.session.localChannelCount) {
 				this.queuedLocalEventsResolve = resolve;
 				if (oldResolve) {
 					oldResolve(undefined);
