@@ -15,6 +15,7 @@ import { diff_match_patch } from "diff-match-patch";
 const diff_match_patch_node = new (require("diff-match-patch-node") as typeof diff_match_patch);
 
 import { JsonValue, JsonMap, Channel } from "mobius-types";
+import * as mobius from "mobius";
 import { loadModule, SandboxModule } from "./sandbox";
 import { interceptGlobals, FakedGlobals } from "../common/determinism";
 import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "../common/_internal";
@@ -499,8 +500,11 @@ class Client {
 		return this.processMessage(message);
 	}
 
-	produceMessage() : Partial<ServerMessage> {
+	produceMessage(close: boolean) : Partial<ServerMessage> {
 		const result: Partial<ServerMessage> = { messageID: this.outgoingMessageId++ };
+		if (close) {
+			result.close = true;
+		}
 		if (this.queuedLocalEvents) {
 			result.events = this.queuedLocalEvents;
 			this.queuedLocalEvents = undefined;
@@ -594,22 +598,6 @@ const enum ArchiveStatus {
 	Full
 };
 
-interface MobiusModuleExports {
-	insideCallback: boolean;
-	dead: boolean;
-	whenDisconnected: Promise<void>;
-	disconnect(): void;
-	flush() : void;
-	synchronize() : Promise<void>;
-	createClientPromise<T extends JsonValue | void>(...args: any[]): Promise<T>;
-	createServerPromise<T extends JsonValue | void>(ask: () => (Promise<T> | T), includedInPrerender?: boolean): Promise<T>;
-	createClientChannel<T extends Function>(callback: T): Channel;
-	createServerChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender?: boolean): Channel;
-	coordinateValue<T extends JsonValue>(generator: () => T) : T;
-	shareSession() : Promise<string>;
-	secrets: { [key: string]: any };
-}
-
 const bakedModules: { [moduleName: string]: (session: Session) => any } = {
 	mobius: (session: Session) => session.mobius,
 	request: (session: Session) => session.request,
@@ -624,7 +612,7 @@ class Session {
 	sendWhenDisconnected: () => void | undefined;
 	// Script context
 	modules = new Map<string, SandboxModule>();
-	mobius: MobiusModuleExports;
+	mobius: typeof mobius;
 	request: express.Request;
 	hasRun: boolean = false;
 	pageRenderer: PageRenderer;
@@ -659,14 +647,10 @@ class Session {
 		this.sessionID = sessionID;
 		this.pageRenderer = new PageRenderer(this);
 		// Server-side version of the API
-		const session = this;
 		const createServerChannel = this.createServerChannel.bind(this);
 		this.mobius = {
 			disconnect: () => this.destroy().catch(escape),
 			whenDisconnected: new Promise(resolve => this.sendWhenDisconnected = resolve),
-			get insideCallback() {
-				return session.insideCallback;
-			},
 			secrets: host.secrets as JsonMap,
 			dead: false,
 			createClientPromise: this.createClientPromise.bind(this),
@@ -807,9 +791,13 @@ class Session {
 	}
 
 	scheduleSynchronize() {
+		if (this.dead) {
+			return Promise.reject(disconnectedError());
+		}
 		for (const client of this.clients.values()) {
 			client.scheduleSynchronize();
 		}
+		return resolvedPromise;
 	}
 
 	enterLocalChannel(delayPageLoading: boolean = true) : number {
@@ -1565,9 +1553,9 @@ async function topFrameHTML(response: express.Response, html: string) {
 				// Dispatch the events contained in the message
 				await client.receiveMessage(message);
 				// Wait for events to be ready
-				await client.dequeueEvents();
+				const keepGoing = await client.dequeueEvents();
 				// Send the serialized response message back to the client
-				const responseMessage = serializeMessageAsText(client.produceMessage());
+				const responseMessage = serializeMessageAsText(client.produceMessage(!keepGoing));
 				if (simulatedLatency) {
 					await delay(simulatedLatency);
 				}
@@ -1629,7 +1617,7 @@ async function topFrameHTML(response: express.Response, html: string) {
 					const keepGoing = await client.dequeueEvents();
 					processingEvents = false;
 					if (!closed) {
-						const message = client.produceMessage();
+						const message = client.produceMessage(!keepGoing);
 						if (lastOutgoingMessageId == message.messageID) {
 							delete message.messageID;
 						}

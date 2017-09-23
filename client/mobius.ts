@@ -195,7 +195,7 @@ function shouldImplementLocalChannel(channelId: number) {
 // Maintain whether or not inside callback
 let dispatchingEvent = 1;
 let dispatchingAPIImplementation: number = 0;
-export let insideCallback: boolean = true;
+let insideCallback: boolean = true;
 function updateInsideCallback() {
 	insideCallback = dispatchingEvent != 0 && dispatchingAPIImplementation == 0;
 }
@@ -287,6 +287,23 @@ if (wrapperForm) {
 	wrapperForm.onsubmit = () => false;
 }
 
+const synchronizeChannels = escaping(() => {
+	willSynchronizeChannels = false;
+	if (!dead) {
+		const useWebSockets = pendingChannelCount != 0;
+		if ((useWebSockets && activeConnectionCount == 0) || queuedLocalEvents.length) {
+			sendMessages(useWebSockets);
+			restartHeartbeat();
+		} else if (websocket) {
+			// Disconnect WebSocket when server can't possibly send us messages
+			if (websocket.readyState < 2) {
+				websocket.close();
+			}
+			websocket = undefined;
+		}
+	}
+});
+
 if (bootstrapData.sessionID) {
 	++outgoingMessageId;
 	const events = bootstrapData.events || [];
@@ -308,7 +325,7 @@ if (bootstrapData.sessionID) {
 		// Swap the prerendered DOM element out for the one with mounted components
 		document.body.removeChild(serverRenderedHostElement);
 		clientRenderedHostElement.style.display = null;
-	}).then(didExitCallback).then(escaping(synchronizeChannels));
+	}).then(didExitCallback).then(synchronizeChannels);
 } else {
 	afterLoaded.then(didExitCallback);
 }
@@ -438,6 +455,7 @@ function processEvents(events: (Event | boolean)[]) {
 	});
 }
 
+let serverDisconnectCount = 0;
 function processMessage(message: ServerMessage) : Promise<void> {
 	// Process messages in order
 	const messageId = message.messageID;
@@ -458,11 +476,18 @@ function processMessage(message: ServerMessage) : Promise<void> {
 			return processMessage(reorderedMessage);
 		}
 	});
+	if (message.close && (++serverDisconnectCount) == 2) {
+		console.log("Disconnecting upon request from server!");
+		willSynchronizeChannels = true;
+		return promise.then(disconnect);
+	} else {
+		serverDisconnectCount = 0;
+	}
 	if (willSynchronizeChannels) {
 		return promise;
 	}
 	willSynchronizeChannels = true;
-	return promise.then(escaping(synchronizeChannels));
+	return promise.then(synchronizeChannels);
 }
 
 function cheesyEncodeURIComponent(text: string) {
@@ -569,16 +594,12 @@ function sendMessages(attemptWebSockets?: boolean) {
 			newSocket.addEventListener("message", (event: any) => {
 				const message = deserializeMessageFromText<ServerMessage>(event.data, lastWebSocketMessageId + 1);
 				lastWebSocketMessageId = message.messageID;
-				const promise = processMessage(message)
 				if (message.close) {
 					// Disconnect with orderly shutdown from server
 					websocket = undefined;
 					newSocket.close();
-					if (!willSynchronizeChannels) {
-						willSynchronizeChannels = true;
-						promise.then(escaping(synchronizeChannels));
-					}
 				}
+				processMessage(message);
 			}, false);
 			websocket = newSocket;
 			return;
@@ -588,23 +609,6 @@ function sendMessages(attemptWebSockets?: boolean) {
 	}
 	// WebSockets failed fast or were unavailable
 	sendFormMessage(message);
-}
-
-function synchronizeChannels() {
-	willSynchronizeChannels = false;
-	if (!dead) {
-		const useWebSockets = pendingChannelCount != 0;
-		if ((useWebSockets && activeConnectionCount == 0) || queuedLocalEvents.length) {
-			sendMessages(useWebSockets);
-			restartHeartbeat();
-		} else if (websocket) {
-			// Disconnect WebSocket when server can't possibly send us messages
-			if (websocket.readyState < 2) {
-				websocket.close();
-			}
-			websocket = undefined;
-		}
-	}
 }
 
 function createRawServerChannel(callback: (event?: Event) => void) : Channel {
@@ -656,16 +660,20 @@ function sendEvent(event: Event, batched?: boolean, skipsFencing?: boolean) {
 	}
 	// Queue an event to be sent to the server in the next flush
 	queuedLocalEvents.push(event);
-	if (!batched || websocket || queuedLocalEvents.length > 9) {
+	if ((!batched || websocket || queuedLocalEvents.length > 9) && !dead) {
 		flush();
 	}
 }
 
-export function flush() {
+export function flush() : Promise<void> {
+	if (dead) {
+		return Promise.reject(disconnectedError());
+	}
 	if (!willSynchronizeChannels) {
 		willSynchronizeChannels = true;
-		defer().then(escaping(synchronizeChannels));
+		defer().then(synchronizeChannels);
 	}
+	return resolvedPromise;
 }
 
 // APIs for client/, not to be used inside src/
@@ -820,7 +828,7 @@ export function createClientChannel<T extends Function, U = void>(callback: T, o
 }
 
 export function coordinateValue<T extends JsonValue>(generator: () => T) : T {
-	if (!dispatchingEvent) {
+	if (!dispatchingEvent || dead) {
 		return generator();
 	}
 	let value: T;
