@@ -30,7 +30,7 @@ if (top != self) {
 	throw "Not allowed to load as an iframe!";
 }
 
-if (/\bMSIE [1-8]\b/.test(navigator.userAgent) || !("addEventListener" in window) || typeof JSON == "undefined") {
+if (/\bMSIE [1-8]\b/.test(navigator.userAgent) || !window.addEventListener || typeof JSON == "undefined") {
 	const fallbackScript = document.createElement("script");
 	fallbackScript.src = "fallback.js";
 	document.head.appendChild(fallbackScript);
@@ -138,7 +138,7 @@ function submitTask(queue: Task[], task: Task) {
 }
 
 // Setup bundled Promise implementation if native implementation doesn't schedule as micro-tasks or is not present
-if (!("Promise" in (window as any)) || !/^Google |^Apple /.test(navigator.vendor)) {
+if (!(window as any).Promise || !/^Google |^Apple /.test(navigator.vendor)) {
 	(window as any).Promise = bundledPromiseImplementation();
 }
 
@@ -226,7 +226,7 @@ function runAPIImplementation<T>(block: () => T) : T {
 
 // Session state
 const startupScripts = document.getElementsByTagName("script");
-const bootstrapData = (elements => {
+const bootstrapData = (() => {
 	for (let i = 0; i < startupScripts.length; i++) {
 		const element = startupScripts[i];
 		if (element.getAttribute("type") == "application/x-mobius-bootstrap") {
@@ -236,8 +236,7 @@ const bootstrapData = (elements => {
 	}
 	return {} as Partial<BootstrapData>;
 })();
-const hasBootstrap = "sessionID" in bootstrapData;
-let sessionID: string | undefined = hasBootstrap ? bootstrapData.sessionID : uuid();
+let sessionID: string = bootstrapData.sessionID || uuid();
 const clientID = (bootstrapData.clientID as number) | 0;
 const serverURL = location.href.match(/^[^?]*/)![0];
 let activeConnectionCount = 0;
@@ -288,7 +287,7 @@ if (wrapperForm) {
 	wrapperForm.onsubmit = () => false;
 }
 
-if (hasBootstrap) {
+if (bootstrapData.sessionID) {
 	++outgoingMessageId;
 	const events = bootstrapData.events || [];
 	currentEvents = events;
@@ -342,7 +341,7 @@ let sendWhenDisconnected: (() => void) | undefined;
 export const whenDisconnected: Promise<void> = new Promise(resolve => sendWhenDisconnected = resolve);
 
 export function disconnect() {
-	if (sessionID) {
+	if (!dead) {
 		dead = true;
 		hadOpenServerChannel = false;
 		cancelHeartbeat();
@@ -364,7 +363,6 @@ export function disconnect() {
 		const message = produceMessage();
 		message.destroy = true;
 		const body = serializeMessageAsQueryString(message);
-		sessionID = undefined;
 		if (navigator.sendBeacon) {
 			navigator.sendBeacon(serverURL, body);
 		} else {
@@ -510,7 +508,7 @@ function sendFormMessage(message: Partial<ClientMessage>) {
 let lastWebSocketMessageId = 0;
 
 function sendMessages(attemptWebSockets?: boolean) {
-	if (!sessionID) {
+	if (dead) {
 		return;
 	}
 	if (heartbeatTimeout) {
