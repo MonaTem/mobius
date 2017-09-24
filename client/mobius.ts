@@ -317,7 +317,7 @@ if (bootstrapData.sessionID) {
 	// Create a hidden DOM element to render into until all events are processed
 	const serverRenderedHostElement = document.body.children[0];
 	serverRenderedHostElement.setAttribute("style", "pointer-events:none;user-select:none");
-	const clientRenderedHostElement = document.createElement(serverRenderedHostElement.nodeName);
+	const clientRenderedHostElement = document.createElement("div");
 	clientRenderedHostElement.style.display = "none";
 	document.body.insertBefore(clientRenderedHostElement, serverRenderedHostElement);
 	afterLoaded.then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(() => {

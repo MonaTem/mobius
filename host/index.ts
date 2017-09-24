@@ -17,6 +17,7 @@ const diff_match_patch_node = new (require("diff-match-patch-node") as typeof di
 import { JsonValue, JsonMap, Channel } from "mobius-types";
 import * as mobius from "mobius";
 import { loadModule, SandboxModule } from "./sandbox";
+import { PageRenderer, PageRenderMode } from "./page-renderer";
 import { interceptGlobals, FakedGlobals } from "../common/determinism";
 import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "../common/_internal";
 
@@ -67,10 +68,6 @@ function escaping(handler: (value?: any) => any | Promise<any>) : (value?: any) 
 function emptyFunction() {
 }
 
-function compatibleStringify(value: any): string {
-	return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\/script/g, "<\\/script");
-}
-
 interface MobiusGlobalProperties {
 	document: Document,
 	request: express.Request,
@@ -90,12 +87,10 @@ class Host {
 	metaRedirect: Element;
 	staleSessionTimeout: any;
 	secrets: JsonValue;
-	renderingMode: RenderingMode;
 	allowMultipleClientsPerSession: boolean;
 	sessionsPath: string;
-	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, renderingMode: RenderingMode, allowMultipleClientsPerSession: boolean) {
+	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean) {
 		this.destroying = false;
-		this.renderingMode = renderingMode;
 		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;
 		this.secrets = secrets;
 		this.sessionsPath = sessionsPath;
@@ -166,21 +161,7 @@ class Host {
 		session.request = request;
 		return client;
 	}
-	serializeDocument(head: Element, body: Element) {
-		const realHead = this.document.head;
-		const headParent = realHead.parentElement!;
-		headParent.replaceChild(head, realHead);
-		const realBody = this.document.body;
-		const bodyParent = realBody.parentElement!;
-		bodyParent.replaceChild(body, realBody);
-		try {
-			return this.dom.serialize();
-		} finally {
-			bodyParent.replaceChild(realBody, body);
-			headParent.replaceChild(realHead, head);
-		}
-	}
-	async newClient(request: express.Request, renderingMode?: RenderingMode) {
+	async newClient(request: express.Request) {
 		if (this.destroying) {
 			throw new Error("Cannot create new client while shutting down!");
 		}
@@ -189,7 +170,7 @@ class Host {
 			if (!this.sessions.has(sessionID) && (!this.allowMultipleClientsPerSession || !await exists(this.pathForSessionId(sessionID)))) {
 				const session = new Session(this, sessionID, request);
 				this.sessions.set(sessionID, session);
-				return session.newClient(request, renderingMode);
+				return session.newClient(request);
 			}
 		}
 	}
@@ -213,221 +194,10 @@ class Host {
 	}
 }
 
-export const enum RenderingMode {
-	ClientPreferred = 0,
-	Prerendering = 1,
-	FullEmulation = 2,
-	ForcedEmulation = 3,
-};
-
-class PageRenderer {
-	session: Session;
-	body: Element;
-	head: Element;
-	clientScript: HTMLScriptElement;
-	bootstrapScript?: HTMLScriptElement;
-	formNode?: HTMLFormElement;
-	postbackInput?: HTMLInputElement;
-	sessionIdInput?: HTMLInputElement;
-	clientIdInput?: HTMLInputElement;
-	messageIdInput?: HTMLInputElement;
-	hasServerChannelsInput?: HTMLInputElement;
-	channelCount: number = 0;
-	pageIsReady?: Promise<void>;
-	resolvePageIsReady?: () => void;
-	constructor(session: Session) {
-		this.session = session;
-		this.body = session.host.document.body.cloneNode(true) as Element;
-		this.head = session.host.document.head.cloneNode(true) as Element;
-		const clientScript = this.body.querySelector("script[src=\"client.js\"]") as HTMLScriptElement | null;
-		if (!clientScript) {
-			throw new Error("HTML does not contain a client.js reference: " + this.body.outerHTML);
-		}
-		this.clientScript = clientScript;
-	}
-	enterChannel() {
-		++this.channelCount;
-	}
-	async exitChannel() {
-		if (--this.channelCount == 0) {
-			await defer();
-			if (this.channelCount == 0) {
-				this.completeRender();
-			}
-		}
-	}
-	completeRender() {
-		const resolve = this.resolvePageIsReady;
-		if (resolve) {
-			this.resolvePageIsReady = undefined;
-			this.pageIsReady = undefined;
-			resolve();
-		}
-	}
-	render() : Promise<void> {
-		this.session.enterLocalChannel();
-		this.session.run();
-		defer().then(() => this.session.exitLocalChannel());
-		if (this.channelCount != 0) {
-			return this.pageIsReady || (this.pageIsReady = new Promise<void>(resolve => this.resolvePageIsReady = resolve));
-		}
-		return resolvedPromise;
-	}
-	async generateHTML(client: Client, generateFallbackTemplate: boolean = false) : Promise<string> {
-		const renderingMode = client.renderingMode;
-		const session = this.session;
-		const document = session.host.document;
-		let bootstrapScript: HTMLScriptElement | undefined;
-		let textNode: Node | undefined;
-		let formNode: HTMLFormElement | undefined;
-		let postbackInput: HTMLInputElement | undefined;
-		let sessionIdInput: HTMLInputElement | undefined;
-		let clientIdInput: HTMLInputElement | undefined;
-		let messageIdInput: HTMLInputElement | undefined;
-		let hasServerChannelsInput: HTMLInputElement | undefined;
-		let siblingNode: Node | null = null;
-		// Bootstrap script for prerendering/session restoration
-		if (renderingMode == RenderingMode.ClientPreferred) {
-			const url = client.request.url;
-			session.host.metaRedirect.setAttribute("content", "0; url=" + url + (/\?/.test(url) ? "&" : "?") + "js=no");
-			document.head.appendChild(session.host.noscript);
-		}
-		if (((renderingMode == RenderingMode.Prerendering) || client.clientID) && !generateFallbackTemplate) {
-			bootstrapScript = this.bootstrapScript;
-			if (!bootstrapScript) {
-				bootstrapScript = this.bootstrapScript = document.createElement("script");
-				bootstrapScript.type = "application/x-mobius-bootstrap";
-			}
-			const events = await session.readAllEvents();
-			const bootstrapData: BootstrapData = { sessionID: session.sessionID, channels: Array.from(session.pendingChannels.keys()) };
-			const queuedLocalEvents = events || client.queuedLocalEvents;
-			if (queuedLocalEvents) {
-				client.queuedLocalEvents = undefined;
-				bootstrapData.events = queuedLocalEvents;
-			}
-			if (client.clientID) {
-				bootstrapData.clientID = client.clientID;
-			}
-			textNode = document.createTextNode(compatibleStringify(bootstrapData));
-			bootstrapScript.appendChild(textNode);
-			this.clientScript.parentNode!.insertBefore(bootstrapScript, this.clientScript);
-		}
-		// Hidden form elements for no-script fallback
-		if (renderingMode >= RenderingMode.FullEmulation) {
-			formNode = this.formNode;
-			if (!formNode) {
-				formNode = this.formNode = document.createElement("form");
-				formNode.setAttribute("action", "?");
-				formNode.setAttribute("method", "POST");
-				formNode.setAttribute("id", "mobius-form");
-			}
-			postbackInput = this.postbackInput;
-			if (!postbackInput) {
-				postbackInput = this.postbackInput = document.createElement("input");
-				postbackInput.setAttribute("name", "postback");
-				postbackInput.setAttribute("type", "hidden");
-				postbackInput.setAttribute("value", "form");
-			}
-			formNode.appendChild(postbackInput);
-			sessionIdInput = this.sessionIdInput;
-			if (!sessionIdInput) {
-				sessionIdInput = this.sessionIdInput = document.createElement("input");
-				sessionIdInput.setAttribute("name", "sessionID");
-				sessionIdInput.setAttribute("type", "hidden");
-				sessionIdInput.setAttribute("value", session.sessionID);
-			}
-			formNode.appendChild(sessionIdInput);
-			clientIdInput = this.clientIdInput;
-			if (!clientIdInput) {
-				clientIdInput = this.clientIdInput = document.createElement("input");
-				clientIdInput.setAttribute("name", "clientID");
-				clientIdInput.setAttribute("type", "hidden");
-			}
-			clientIdInput.setAttribute("value", client.clientID.toString());
-			formNode.appendChild(clientIdInput);
-			messageIdInput = this.messageIdInput;
-			if (!messageIdInput) {
-				messageIdInput = this.messageIdInput = document.createElement("input");
-				messageIdInput.setAttribute("name", "messageID");
-				messageIdInput.setAttribute("type", "hidden");
-			}
-			messageIdInput.setAttribute("value", client.incomingMessageId.toString());
-			formNode.appendChild(messageIdInput);
-			hasServerChannelsInput = this.hasServerChannelsInput;
-			if (!hasServerChannelsInput) {
-				hasServerChannelsInput = this.hasServerChannelsInput = document.createElement("input");
-				hasServerChannelsInput.setAttribute("name", "hasServerChannels");
-				hasServerChannelsInput.setAttribute("type", "hidden");
-			}
-			hasServerChannelsInput.setAttribute("value", session.localChannelCount ? "1" : "");
-			formNode.appendChild(hasServerChannelsInput);
-			migrateChildren(this.body, formNode);
-			this.body.appendChild(formNode);
-		}
-		if (renderingMode >= RenderingMode.ForcedEmulation) {
-			if (generateFallbackTemplate) {
-				siblingNode = document.createTextNode("");
-				this.clientScript.parentNode!.insertBefore(siblingNode, this.clientScript);
-				this.clientScript.parentNode!.removeChild(this.clientScript);
-			// } else {
-			// 	this.clientScript.src = "fallback.js";
-			}
-		}
-		try {
-			return session.host.serializeDocument(this.head, this.body);
-		} finally {
-			if (renderingMode >= RenderingMode.FullEmulation && formNode) {
-				if (formNode) {
-					if (postbackInput) {
-						formNode.removeChild(postbackInput);
-					}
-					if (sessionIdInput) {
-						formNode.removeChild(sessionIdInput);
-					}
-					if (clientIdInput) {
-						formNode.removeChild(clientIdInput);
-					}
-					if (messageIdInput) {
-						formNode.removeChild(messageIdInput);
-					}
-					if (hasServerChannelsInput) {
-						formNode.removeChild(hasServerChannelsInput);
-					}
-					migrateChildren(formNode, this.body);
-					this.body.removeChild(formNode);
-				}
-			}
-			if ((renderingMode == RenderingMode.Prerendering) || client.clientID) {
-				if (bootstrapScript) {
-					const parentElement = bootstrapScript.parentElement;
-					if (parentElement) {
-						parentElement.removeChild(bootstrapScript);
-					}
-					if (textNode) {
-						bootstrapScript.removeChild(textNode);
-					}
-				}
-			}
-			if (client.renderingMode >= RenderingMode.ForcedEmulation) {
-				if (siblingNode) {
-					siblingNode.parentNode!.insertBefore(this.clientScript, siblingNode);
-					siblingNode.parentNode!.removeChild(siblingNode);
-				// } else {
-				// 	this.clientScript.src = "client.js";
-				}
-			}
-			if (client.renderingMode == RenderingMode.ClientPreferred) {
-				document.head.removeChild(session.host.noscript);
-			}
-		}
-	}
-}
-
 class Client {
 	session: Session;
 	request: express.Request;
 	clientID: number;
-	renderingMode: RenderingMode;
 	incomingMessageId: number = 0;
 	outgoingMessageId: number = 0;
 	reorderedMessages: { [messageId: number]: ClientMessage } = {};
@@ -437,17 +207,16 @@ class Client {
 	willSynchronizeChannels = false;
 	lastSentFormHTML?: string;
 	pendingCookies?: [string, string][];
+	clientIsActive?: true;
 
-	constructor(session: Session, request: express.Request, clientID: number, renderingMode: RenderingMode) {
+	constructor(session: Session, request: express.Request, clientID: number) {
 		this.session = session;
 		this.request = request;
 		this.clientID = clientID;
-		this.renderingMode = renderingMode;
 	}
 
 	static requestRequiresForcedEmulation(request: express.Request) : boolean {
-		const userAgent = request.headers['user-agent']+"";
-		return /\bMSIE [1-8]\b/.test(userAgent) || request.query["js"] == "no";
+		return request.query["js"] == "no";
 	}
 
 	async destroy() {
@@ -618,6 +387,9 @@ class Session {
 	localChannels = new Map<number, (event?: Event) => void>();
 	localChannelCount: number = 0;
 	dispatchingAPIImplementation: number = 0;
+	prerenderChannelCount: number = 0;
+	prerenderCompleted?: Promise<void>;
+	completePrerender?: () => void;
 	// Remote channels
 	remoteChannelCounter: number = 0;
 	pendingChannels = new Map<number, (event?: Event) => void>();
@@ -637,7 +409,7 @@ class Session {
 	constructor(host: Host, sessionID: string, request: express.Request) {
 		this.host = host;
 		this.sessionID = sessionID;
-		this.pageRenderer = new PageRenderer(this);
+		this.pageRenderer = new PageRenderer(this.host.dom, this.host.noscript, this.host.metaRedirect);
 		// Server-side version of the API
 		const createServerChannel = this.createServerChannel.bind(this);
 		this.mobius = {
@@ -673,10 +445,10 @@ class Session {
 		}
 	}
 
-	newClient(request: express.Request, renderingMode?: RenderingMode) {
+	newClient(request: express.Request) {
 		const newClientId = this.currentClientID++;
 		if (this.sharingEnabled || (newClientId == 0)) {
-			const result = new Client(this, request, newClientId, typeof renderingMode != "undefined" ? renderingMode : Client.requestRequiresForcedEmulation(request) ? RenderingMode.ForcedEmulation : this.host.renderingMode);
+			const result = new Client(this, request, newClientId);
 			this.request = request;
 			this.clients.set(newClientId, result);
 			return result;
@@ -686,7 +458,7 @@ class Session {
 
 	hasCapableClient() {
 		for (const client of this.clients) {
-			if (client[1].renderingMode <= RenderingMode.Prerendering) {
+			if (client[1].clientIsActive) {
 				return true;
 			}
 		}
@@ -796,17 +568,34 @@ class Session {
 		}
 	}
 
-	enterLocalChannel(delayPageLoading: boolean = true) : number {
-		if (delayPageLoading) {
-			this.pageRenderer.enterChannel();
+	enterLocalChannel(delayPrerender: boolean = true) : number {
+		if (delayPrerender) {
+			++this.prerenderChannelCount;
 		}
 		return ++this.localChannelCount;
 	}
-	exitLocalChannel(resumePageLoading: boolean = true) : number {
-		if (resumePageLoading) {
-			this.pageRenderer.exitChannel();
+	exitLocalChannel(resumePrerender: boolean = true) : number {
+		if (resumePrerender) {
+			if (--this.prerenderChannelCount == 0) {
+				if (this.completePrerender) {
+					this.completePrerender();
+					delete this.completePrerender;
+					delete this.prerenderCompleted;
+				}
+			}
 		}
 		return --this.localChannelCount;
+	}
+	waitForPrerender() : Promise<void> {
+		if (this.prerenderCompleted) {
+			return this.prerenderCompleted;
+		}
+		this.enterLocalChannel();
+		this.run();
+		defer().then(() => this.exitLocalChannel());
+		return this.prerenderCompleted = new Promise<void>(resolve => {
+			this.completePrerender = resolve;
+		});
 	}
 	shouldImplementLocalChannel(channelId: number) : boolean {
 		return !this.bootstrappingChannels || this.bootstrappingChannels.has(channelId);
@@ -1199,7 +988,6 @@ class Session {
 				pair[1]();
 			}
 			this.localChannels.clear();
-			this.pageRenderer.completeRender();
 			for (const client of this.clients.values()) {
 				await client.destroy();
 			}
@@ -1352,13 +1140,6 @@ function isRequestSameSite(request: express.Request) : boolean {
 	}
 }
 
-function migrateChildren(fromNode: Node, toNode: Node) {
-	let firstChild: Node | null;
-	while (firstChild = fromNode.firstChild) {
-		toNode.appendChild(firstChild);
-	}
-}
-
 async function topFrameHTML(response: express.Response, html: string) {
 	if (simulatedLatency) {
 		await delay(simulatedLatency);
@@ -1386,7 +1167,7 @@ function messageFromBody(body: { [key: string]: any }) : ClientMessage {
 	return message;
 }
 
-export default async function prepare(compiledPath: string, secrets: { [key: string]: any }, renderingMode: RenderingMode, allowMultipleClientsPerSession: boolean) {
+export default async function prepare(compiledPath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean) {
 	const serverJSPath = path.join(compiledPath, "app.js");
 
 	const htmlPath = relativePath("../../public/index.html");
@@ -1411,7 +1192,10 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 	const serverModulePaths = [relativePath("../server")];
 	const modulePaths = serverModulePaths.concat([relativePath("../common"), relativePath("../../preact/dist")]);
 
-	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, renderingMode, allowMultipleClientsPerSession);
+	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession);
+
+	// Render default state with noscript URL added
+	const defaultRenderedHTML = new PageRenderer(host.dom, host.noscript, host.metaRedirect).render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, { sessionID: "", localChannelCount: 0 }, "/?js=no");
 
 	return {
 		install(server: express.Express) {
@@ -1428,28 +1212,36 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 					if (sessionID) {
 						// Joining existing session
 						session = await host.sessionFromId(sessionID, request, false);
-						client = session.newClient(request, RenderingMode.Prerendering);
+						client = session.newClient(request);
 						client.incomingMessageId++;
 					} else {
+						// Not prerendering or joining a session, just return the original source with the noscript added
+						if (!Client.requestRequiresForcedEmulation(request)) {
+							return await topFrameHTML(response, defaultRenderedHTML);
+						}
 						// New session
 						client = await host.newClient(request);
 						session = client.session;
-						if (client.renderingMode < RenderingMode.Prerendering) {
-							// Not prerendering or joining a session, just return the original source with the noscript added
-							return await topFrameHTML(response, await session.pageRenderer.generateHTML(client));
-						}
 					}
 					session.updateOpenServerChannelStatus(true);
 					// Prerendering was enabled, wait for content to be ready
 					client.outgoingMessageId++;
-					await session.pageRenderer.render();
-					// Steal events when using forced emulation
-					if (client.renderingMode == RenderingMode.ForcedEmulation) {
+					await session.waitForPrerender();
+					// Read bootstrap data
+					const queuedLocalEvents = await session.readAllEvents() || client.queuedLocalEvents;
+					const bootstrapData: BootstrapData = { sessionID: session.sessionID, channels: Array.from(session.pendingChannels.keys()) };
+					if (queuedLocalEvents) {
 						client.queuedLocalEvents = undefined;
+						bootstrapData.events = queuedLocalEvents;
 					}
-					client.applyCookies(response);
+					if (client.clientID) {
+						bootstrapData.clientID = client.clientID;
+					}
+					client.incomingMessageId++;
 					// Render the DOM into HTML source
-					await topFrameHTML(response, await session.pageRenderer.generateHTML(client));
+					const html = session.pageRenderer.render(PageRenderMode.IncludeForm, client, session, undefined, bootstrapData);
+					client.applyCookies(response);
+					await topFrameHTML(response, html);
 				} catch (e) {
 					if (simulatedLatency) {
 						await delay(simulatedLatency);
@@ -1480,7 +1272,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 					const postback = body["postback"];
 					let client: Client;
 					if (!message.sessionID && postback == "js") {
-						client = await host.newClient(request, RenderingMode.ForcedEmulation);
+						client = await host.newClient(request);
 					} else {
 						client = await host.clientFromMessage(message, request, !postback);
 					}
@@ -1520,12 +1312,11 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 							// Wait for events to be ready
 							await client.dequeueEvents();
 						} else {
-							// client.produceMessage();
 							// Wait for content to be ready
-							await session.pageRenderer.render();
+							await session.waitForPrerender();
 						}
 						// Render the DOM into HTML source
-						const html = await session.pageRenderer.generateHTML(client, isJavaScript);
+						const html = session.pageRenderer.render(PageRenderMode.IncludeFormAndStripScript, client, session);
 						let responseContent = html;
 						if (isJavaScript) {
 							if (client.lastSentFormHTML) {
@@ -1546,6 +1337,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 						response.set("Content-Security-Policy", "frame-ancestors 'none'");
 						response.send(responseContent);
 					} else {
+						client.clientIsActive = true;
 						// Dispatch the events contained in the message
 						await client.receiveMessage(message);
 						// Wait for events to be ready
@@ -1588,6 +1380,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 					// Get the startup message contained in the WebSocket URL (avoid extra round trip to send events when websocket is opened)
 					const startMessage = messageFromBody(request.query);
 					const client = await host.clientFromMessage(startMessage, request, true);
+					client.clientIsActive = true;
 					// Track what the last sent/received message IDs are so we can avoid transmitting them
 					let lastIncomingMessageId = startMessage.messageID;
 					let lastOutgoingMessageId = -1;
@@ -1656,7 +1449,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 if (require.main === module) {
 	(async () => {
 		const secrets = JSON.parse((await readFile(relativePath("../../secrets.json"))).toString());
-		const mobius = await prepare(relativePath("../../build/src/"), secrets, RenderingMode.ClientPreferred, true);
+		const mobius = await prepare(relativePath("../../build/src/"), secrets, true);
 
 		const server = express();
 
