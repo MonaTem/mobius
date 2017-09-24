@@ -10,13 +10,13 @@ HOST_FILES = $(call scripts, host)
 SRC_FILES = $(call scripts, src)
 
 all: server client fallback app
-minify: public/client.min.js public/fallback.min.js all
+minify: build/client.min.js public/fallback.min.js all
 
 run: all
 	node --trace-warnings --inspect build/host/index.js
 
 clean:
-	rm -rf public/{client,fallback,app}{,.min}.js api/ {common,host,client,src}/*.js build/ types/host/
+	rm -rf public/fallback{,.min}.js api/ {common,host,client,src}/*.js build/ types/host/
 
 cleaner: clean
 	rm -rf node_modules
@@ -60,7 +60,7 @@ build/src/app.js: build/.server/src/app.js
 	node_modules/.bin/babel build/.server/ --out-dir build/
 
 
-client: public/client.js
+client: build/client.js
 
 build/.client/:
 	mkdir -p build/.client
@@ -68,7 +68,7 @@ build/.client/:
 build/.client/client/mobius.js: $(SRC_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/ build/.client types/*.d.ts tsconfig-client.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/.bin/tsc -p tsconfig-client.json
 
-public/client.js: build/.client/client/mobius.js build/.client/src/app.js rollup.config.js
+build/client.js: build/.client/client/mobius.js build/.client/app.js rollup.config.js
 	node_modules/.bin/rollup -c
 
 
@@ -81,9 +81,9 @@ public/fallback.js: mobius-fallback.ts build/diff-match-patch.js types/*.d.ts ts
 	node_modules/.bin/tsc -p tsconfig-fallback.json
 
 
-app: build/.client/src/app.js
+app: build/.client/app.js
 
-build/.client/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(COMMON_FILES) build/.client/client/mobius.js types/*.d.ts tsconfig-app.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
+build/.client/app.js: $(SRC_FILES) $(SERVER_FILES) $(COMMON_FILES) build/.client/client/mobius.js types/*.d.ts tsconfig-app.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/.bin/tsc -p tsconfig-app.json
 
 

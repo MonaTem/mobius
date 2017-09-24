@@ -20,8 +20,6 @@ import { loadModule, SandboxModule } from "./sandbox";
 import { interceptGlobals, FakedGlobals } from "../common/determinism";
 import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "../common/_internal";
 
-const server = express();
-
 const relativePath = (relative: string) => path.join(__dirname, relative);
 
 const readFile = util.promisify(fs.readFile);
@@ -31,9 +29,6 @@ const unlink = util.promisify(fs.unlink);
 const stat = util.promisify(fs.stat);
 const exists = (path: string) => new Promise<boolean>(resolve => fs.exists(path, resolve));
 const rimraf = util.promisify(rimrafAsync);
-
-server.disable("x-powered-by");
-server.disable("etag");
 
 const resolvedPromise: Promise<void> = Promise.resolve();
 
@@ -108,8 +103,9 @@ class Host {
 	metaRedirect: Element;
 	staleSessionTimeout: any;
 	secrets: JsonValue;
-	renderingMode: RenderingMode = RenderingMode.ClientPreferred;
-	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], htmlPath: string, htmlSource: string, secrets: JsonValue) {
+	renderingMode: RenderingMode;
+	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], htmlPath: string, htmlSource: string, secrets: JsonValue, renderingMode: RenderingMode) {
+		this.renderingMode = renderingMode;
 		this.secrets = secrets;
 		this.htmlSource = htmlSource;
 		this.dom = new JSDOM(htmlSource);
@@ -220,7 +216,7 @@ class Host {
 	}
 }
 
-const enum RenderingMode {
+export const enum RenderingMode {
 	ClientPreferred = 0,
 	Prerendering = 1,
 	FullEmulation = 2,
@@ -1381,294 +1377,311 @@ async function topFrameHTML(response: express.Response, html: string) {
 	response.send(html);
 }
 
-(async () => {
-	const serverJSPath = relativePath("../src/app.js");
+function messageFromBody(body: { [key: string]: any }) : ClientMessage {
+	const message: ClientMessage = {
+		sessionID: body.sessionID || "",
+		messageID: (body.messageID as number) | 0,
+		clientID: (body.clientID as number) | 0,
+		events: body.events ? JSON.parse("[" + body.events + "]") : []
+	}
+	if ("close" in body) {
+		message.close = (body.close | 0) == 1;
+	}
+	if ("destroy" in body) {
+		message.destroy = true;
+	}
+	return message;
+}
+
+export default async function prepare(compiledPath: string, secrets: { [key: string]: any }, renderingMode: RenderingMode) {
+	const serverJSPath = path.join(compiledPath, "app.js");
 
 	const htmlPath = relativePath("../../public/index.html");
 	const htmlContents = readFile(htmlPath);
 
-	const secretsPath = relativePath("../../secrets.json");
-	const secrets = readFile(secretsPath);
-
 	// Check if we can reuse existing sessions
 	let lastGraceful = 0;
 	try {
-		lastGraceful = (await stat("sessions/.graceful")).mtimeMs;
+		lastGraceful = (await stat(path.join(compiledPath, "sessions/.graceful"))).mtimeMs;
 	} catch (e) {
 	}
 	if (lastGraceful < (await stat(serverJSPath)).mtimeMs) {
-		await rimraf("sessions");
-		await mkdir("sessions");
+		await rimraf(path.join(compiledPath, "sessions"));
+		await mkdir(path.join(compiledPath, "sessions"));
 	} else {
-		await unlink("sessions/.graceful");
+		await unlink(path.join(compiledPath, "sessions/.graceful"));
 	}
 
-	//(global.module as any).paths as string[]
 	const serverModulePaths = [relativePath("../server")];
 	const modulePaths = serverModulePaths.concat([relativePath("../common"), relativePath("../../preact/dist")]);
 
-	const host = new Host(serverJSPath, serverModulePaths, modulePaths, htmlPath, (await htmlContents).toString(), JSON.parse((await secrets).toString()));
-	// host.newClient({
-	// 	headers: []
-	// } as any as express.Request).then(client => client.session.run());
+	const host = new Host(serverJSPath, serverModulePaths, modulePaths, htmlPath, (await htmlContents).toString(), secrets, renderingMode);
 
-	function messageFromBody(body: { [key: string]: any }) : ClientMessage {
-		const message: ClientMessage = {
-			sessionID: body.sessionID || "",
-			messageID: (body.messageID as number) | 0,
-			clientID: (body.clientID as number) | 0,
-			events: body.events ? JSON.parse("[" + body.events + "]") : []
-		}
-		if ("close" in body) {
-			message.close = (body.close | 0) == 1;
-		}
-		if ("destroy" in body) {
-			message.destroy = true;
-		}
-		return message;
-	}
+	return {
+		install(server: express.Express) {
+			server.use(bodyParser.urlencoded({
+				extended: true,
+				type: () => true // Accept all MIME types
+			}));
 
-	server.use(bodyParser.urlencoded({
-		extended: true,
-		type: () => true // Accept all MIME types
-	}));
-
-	server.get("/", async (request, response) => {
-		try {
-			const sessionID = request.query.sessionID;
-			let session: Session;
-			let client: Client;
-			if (sessionID) {
-				// Joining existing session
-				session = await host.sessionFromId(sessionID, request, false);
-				client = session.newClient(request);
-				client.incomingMessageId++;
-			} else {
-				// New session
-				client = await host.newClient(request);
-				session = client.session;
-				if (client.renderingMode < RenderingMode.Prerendering) {
-					// Not prerendering or joining a session, just return the original source with the noscript added
-					return await topFrameHTML(response, await session.pageRenderer.generateHTML(client));
-				}
-			}
-			session.updateOpenServerChannelStatus(true);
-			// Prerendering was enabled, wait for content to be ready
-			client.outgoingMessageId++;
-			await session.pageRenderer.render();
-			// Steal events when using forced emulation
-			if (client.renderingMode == RenderingMode.ForcedEmulation) {
-				client.queuedLocalEvents = undefined;
-			}
-			client.applyCookies(response);
-			// Render the DOM into HTML source
-			await topFrameHTML(response, await session.pageRenderer.generateHTML(client));
-		} catch (e) {
-			if (simulatedLatency) {
-				await delay(simulatedLatency);
-			}
-			// Internal error of some kind
-			response.status(500);
-			response.set("Content-Type", "text/plain");
-			response.set("Content-Security-Policy", "frame-ancestors 'none'");
-			response.send(util.inspect(e));
-		}
-	});
-
-	server.post("/", async (request, response) => {
-		try {
-			const body = request.body;
-			const message = messageFromBody(body);
-			if (message.destroy) {
-				// Destroy the client's session (this is navigator.sendBeacon)
-				await host.destroyClientById(message.sessionID || "", message.clientID as number | 0);
-				if (simulatedLatency) {
-					await delay(simulatedLatency);
-				}
-				noCache(response);
-				response.set("Content-Type", "text/plain");
-				response.send("");
-				return;
-			}
-			const postback = body["postback"];
-			const client = await host.clientFromMessage(message, request, !postback);
-			if (postback) {
-				const isJavaScript = postback == "js";
-				// JavaScript is disabled, emulate events from form POST
-				const session = client.session;
-				const inputEvents: Event[] = [];
-				const buttonEvents: Event[] = [];
-				message.noJavaScript = true;
-				for (let key in body) {
-					if (!Object.hasOwnProperty.call(body, key)) {
-						continue;
-					}
-					const match = key.match(/^channelID(\d+)$/);
-					if (match && Object.hasOwnProperty.call(body, key)) {
-						const element = session.pageRenderer.body.querySelector("[name=\"" + key + "\"]");
-						if (element) {
-							const event: Event = [-match[1], { value: body[key] }];
-							switch (element.nodeName) {
-								case "INPUT":
-									if ((element as HTMLInputElement).value != body[key]) {
-										inputEvents.unshift(event);
-									}
-									break;
-								case "BUTTON":
-									buttonEvents.unshift(event);
-									break;
-							}
-						}
-					}
-				}
-				message.events = message.events.concat(inputEvents.concat(buttonEvents));
-				// Process the faked message normally
-				await client.receiveMessage(message);
-				if (isJavaScript) {
-					// Wait for events to be ready
-					await client.dequeueEvents();
-				} else {
-					// client.produceMessage();
-					// Wait for content to be ready
-					await session.pageRenderer.render();
-				}
-				// Render the DOM into HTML source
-				const html = await session.pageRenderer.generateHTML(client, isJavaScript);
-				let responseContent = html;
-				if (isJavaScript) {
-					if (client.lastSentFormHTML) {
-						const diff = diff_match_patch_node.patch_toText(diff_match_patch_node.patch_make(client.lastSentFormHTML, html));
-						if (diff.length < html.length) {
-							responseContent = diff;
-						}
-					}
-					client.lastSentFormHTML = html;
-				}
-				client.queuedLocalEvents = undefined;
-				if (simulatedLatency) {
-					await delay(simulatedLatency);
-				}
-				client.applyCookies(response);
-				noCache(response);
-				response.set("Content-Type", isJavaScript ? "text/plain" : "text/html");
-				response.set("Content-Security-Policy", "frame-ancestors 'none'");
-				response.send(responseContent);
-			} else {
-				// Dispatch the events contained in the message
-				await client.receiveMessage(message);
-				// Wait for events to be ready
-				const keepGoing = await client.dequeueEvents();
-				// Send the serialized response message back to the client
-				const responseMessage = serializeMessageAsText(client.produceMessage(!keepGoing));
-				if (simulatedLatency) {
-					await delay(simulatedLatency);
-				}
-				client.applyCookies(response);
-				noCache(response);
-				response.set("Content-Type", "text/plain");
-				response.send(responseMessage);
-			}
-		} catch (e) {
-			if (simulatedLatency) {
-				await delay(simulatedLatency);
-			}
-			response.status(500);
-			noCache(response);
-			response.set("Content-Type", "text/plain");
-			response.send(util.inspect(e));
-		};
-	});
-
-	expressWs(server);
-	(server as any).ws("/", async (ws: any, request: express.Request) => {
-		// WebSockets protocol implementation
-		try {
-			if (!isRequestSameSite(request)) {
-				throw new Error("Only same-site web sockets are permitted!");
-			}
-			let closed = false;
-			ws.on("error", () => {
-				ws.close();
-			});
-			ws.on("close", () => {
-				closed = true;
-			});
-			// Get the startup message contained in the WebSocket URL (avoid extra round trip to send events when websocket is opened)
-			const startMessage = messageFromBody(request.query);
-			const client = await host.clientFromMessage(startMessage, request, true);
-			// Track what the last sent/received message IDs are so we can avoid transmitting them
-			let lastIncomingMessageId = startMessage.messageID;
-			let lastOutgoingMessageId = -1;
-			async function processSocketMessage(message: ClientMessage) {
-				if (typeof message.close == "boolean") {
-					// Determine if client accepted our close instruction
-					if (closed = message.close) {
-						ws.close();
-					}
-				}
+			server.get("/", async (request, response) => {
 				try {
-					await client.receiveMessage(message);
-					await processMoreEvents();
+					const sessionID = request.query.sessionID;
+					let session: Session;
+					let client: Client;
+					if (sessionID) {
+						// Joining existing session
+						session = await host.sessionFromId(sessionID, request, false);
+						client = session.newClient(request);
+						client.incomingMessageId++;
+					} else {
+						// New session
+						client = await host.newClient(request);
+						session = client.session;
+						if (client.renderingMode < RenderingMode.Prerendering) {
+							// Not prerendering or joining a session, just return the original source with the noscript added
+							return await topFrameHTML(response, await session.pageRenderer.generateHTML(client));
+						}
+					}
+					session.updateOpenServerChannelStatus(true);
+					// Prerendering was enabled, wait for content to be ready
+					client.outgoingMessageId++;
+					await session.pageRenderer.render();
+					// Steal events when using forced emulation
+					if (client.renderingMode == RenderingMode.ForcedEmulation) {
+						client.queuedLocalEvents = undefined;
+					}
+					client.applyCookies(response);
+					// Render the DOM into HTML source
+					await topFrameHTML(response, await session.pageRenderer.generateHTML(client));
 				} catch (e) {
-					ws.close();
+					if (simulatedLatency) {
+						await delay(simulatedLatency);
+					}
+					// Internal error of some kind
+					response.status(500);
+					response.set("Content-Type", "text/plain");
+					response.set("Content-Security-Policy", "frame-ancestors 'none'");
+					response.send(util.inspect(e));
 				}
-			}
-			let processingEvents = false;
-			async function processMoreEvents() {
-				// Dequeue response messages in a loop until socket is closed
-				while (!processingEvents && !closed) {
-					processingEvents = true;
-					const keepGoing = await client.dequeueEvents();
-					processingEvents = false;
-					if (!closed) {
-						const message = client.produceMessage(!keepGoing);
-						if (lastOutgoingMessageId == message.messageID) {
-							delete message.messageID;
-						}
-						lastOutgoingMessageId = client.outgoingMessageId;
-						if (client.session.localChannelCount == 0 || !keepGoing) {
-							message.close = true;
-							closed = true;
-						}
-						const serialized = serializeMessageAsText(message);
+			});
+
+			server.post("/", async (request, response) => {
+				try {
+					const body = request.body;
+					const message = messageFromBody(body);
+					if (message.destroy) {
+						// Destroy the client's session (this is navigator.sendBeacon)
+						await host.destroyClientById(message.sessionID || "", message.clientID as number | 0);
 						if (simulatedLatency) {
 							await delay(simulatedLatency);
 						}
-						ws.send(serialized);
+						noCache(response);
+						response.set("Content-Type", "text/plain");
+						response.send("");
+						return;
 					}
-				}
-			}
-			// Process incoming messages
-			ws.on("message", (msg: string) => {
-				const message = deserializeMessageFromText<ClientMessage>(msg, lastIncomingMessageId + 1);
-				lastIncomingMessageId = message.messageID;
-				processSocketMessage(message);
+					const postback = body["postback"];
+					const client = await host.clientFromMessage(message, request, !postback);
+					if (postback) {
+						const isJavaScript = postback == "js";
+						// JavaScript is disabled, emulate events from form POST
+						const session = client.session;
+						const inputEvents: Event[] = [];
+						const buttonEvents: Event[] = [];
+						message.noJavaScript = true;
+						for (let key in body) {
+							if (!Object.hasOwnProperty.call(body, key)) {
+								continue;
+							}
+							const match = key.match(/^channelID(\d+)$/);
+							if (match && Object.hasOwnProperty.call(body, key)) {
+								const element = session.pageRenderer.body.querySelector("[name=\"" + key + "\"]");
+								if (element) {
+									const event: Event = [-match[1], { value: body[key] }];
+									switch (element.nodeName) {
+										case "INPUT":
+											if ((element as HTMLInputElement).value != body[key]) {
+												inputEvents.unshift(event);
+											}
+											break;
+										case "BUTTON":
+											buttonEvents.unshift(event);
+											break;
+									}
+								}
+							}
+						}
+						message.events = message.events.concat(inputEvents.concat(buttonEvents));
+						// Process the faked message normally
+						await client.receiveMessage(message);
+						if (isJavaScript) {
+							// Wait for events to be ready
+							await client.dequeueEvents();
+						} else {
+							// client.produceMessage();
+							// Wait for content to be ready
+							await session.pageRenderer.render();
+						}
+						// Render the DOM into HTML source
+						const html = await session.pageRenderer.generateHTML(client, isJavaScript);
+						let responseContent = html;
+						if (isJavaScript) {
+							if (client.lastSentFormHTML) {
+								const diff = diff_match_patch_node.patch_toText(diff_match_patch_node.patch_make(client.lastSentFormHTML, html));
+								if (diff.length < html.length) {
+									responseContent = diff;
+								}
+							}
+							client.lastSentFormHTML = html;
+						}
+						client.queuedLocalEvents = undefined;
+						if (simulatedLatency) {
+							await delay(simulatedLatency);
+						}
+						client.applyCookies(response);
+						noCache(response);
+						response.set("Content-Type", isJavaScript ? "text/plain" : "text/html");
+						response.set("Content-Security-Policy", "frame-ancestors 'none'");
+						response.send(responseContent);
+					} else {
+						// Dispatch the events contained in the message
+						await client.receiveMessage(message);
+						// Wait for events to be ready
+						const keepGoing = await client.dequeueEvents();
+						// Send the serialized response message back to the client
+						const responseMessage = serializeMessageAsText(client.produceMessage(!keepGoing));
+						if (simulatedLatency) {
+							await delay(simulatedLatency);
+						}
+						client.applyCookies(response);
+						noCache(response);
+						response.set("Content-Type", "text/plain");
+						response.send(responseMessage);
+					}
+				} catch (e) {
+					if (simulatedLatency) {
+						await delay(simulatedLatency);
+					}
+					response.status(500);
+					noCache(response);
+					response.set("Content-Type", "text/plain");
+					response.send(util.inspect(e));
+				};
 			});
-			await processSocketMessage(startMessage);
-		} catch (e) {
-			console.error(e);
-			ws.close();
+
+			expressWs(server);
+			(server as any).ws("/", async (ws: any, request: express.Request) => {
+				// WebSockets protocol implementation
+				try {
+					if (!isRequestSameSite(request)) {
+						throw new Error("Only same-site web sockets are permitted!");
+					}
+					let closed = false;
+					ws.on("error", () => {
+						ws.close();
+					});
+					ws.on("close", () => {
+						closed = true;
+					});
+					// Get the startup message contained in the WebSocket URL (avoid extra round trip to send events when websocket is opened)
+					const startMessage = messageFromBody(request.query);
+					const client = await host.clientFromMessage(startMessage, request, true);
+					// Track what the last sent/received message IDs are so we can avoid transmitting them
+					let lastIncomingMessageId = startMessage.messageID;
+					let lastOutgoingMessageId = -1;
+					async function processSocketMessage(message: ClientMessage) {
+						if (typeof message.close == "boolean") {
+							// Determine if client accepted our close instruction
+							if (closed = message.close) {
+								ws.close();
+							}
+						}
+						try {
+							await client.receiveMessage(message);
+							await processMoreEvents();
+						} catch (e) {
+							ws.close();
+						}
+					}
+					let processingEvents = false;
+					async function processMoreEvents() {
+						// Dequeue response messages in a loop until socket is closed
+						while (!processingEvents && !closed) {
+							processingEvents = true;
+							const keepGoing = await client.dequeueEvents();
+							processingEvents = false;
+							if (!closed) {
+								const message = client.produceMessage(!keepGoing);
+								if (lastOutgoingMessageId == message.messageID) {
+									delete message.messageID;
+								}
+								lastOutgoingMessageId = client.outgoingMessageId;
+								if (client.session.localChannelCount == 0 || !keepGoing) {
+									message.close = true;
+									closed = true;
+								}
+								const serialized = serializeMessageAsText(message);
+								if (simulatedLatency) {
+									await delay(simulatedLatency);
+								}
+								ws.send(serialized);
+							}
+						}
+					}
+					// Process incoming messages
+					ws.on("message", (msg: string) => {
+						const message = deserializeMessageFromText<ClientMessage>(msg, lastIncomingMessageId + 1);
+						lastIncomingMessageId = message.messageID;
+						processSocketMessage(message);
+					});
+					await processSocketMessage(startMessage);
+				} catch (e) {
+					console.error(e);
+					ws.close();
+				}
+			});
+
+			server.use("/fallback.js", express.static(relativePath("../../public/fallback.js")));
+			server.use("/client.js", express.static(path.join(compiledPath, "client.js")));
+		},
+		stop() {
+			return host.destroy();
 		}
-	});
+	};
+}
 
-	server.use(express.static(relativePath("../../public")));
+if (require.main === module) {
+	(async () => {
+		const secrets = JSON.parse((await readFile(relativePath("../../secrets.json"))).toString());
+		const mobius = await prepare(relativePath("../../build/src/"), secrets, RenderingMode.ClientPreferred);
 
-	const port = 3000;
-	const acceptSocket = server.listen(port, () => {
-		console.log(`Listening on port ${port}...`);
-	});
+		const server = express();
 
-	// Graceful shutdown
-	process.on("SIGTERM", onInterrupted);
-	process.on("SIGINT", onInterrupted);
-	async function onInterrupted() {
-		process.removeListener("SIGTERM", onInterrupted);
-		process.removeListener("SIGINT", onInterrupted);
-		const acceptSocketClosed = new Promise(resolve => {
-			acceptSocket.close(resolve);
+		server.disable("x-powered-by");
+		server.disable("etag");
+
+		mobius.install(server);
+
+		server.use(express.static(relativePath("../../public")));
+
+		const port = 3000;
+		const acceptSocket = server.listen(port, () => {
+			console.log(`Listening on port ${port}...`);
 		});
-		await host.destroy();
-		await acceptSocketClosed;
-		process.exit(0);
-	}
-})().catch(escape);
+
+		// Graceful shutdown
+		process.on("SIGTERM", onInterrupted);
+		process.on("SIGINT", onInterrupted);
+		async function onInterrupted() {
+			process.removeListener("SIGTERM", onInterrupted);
+			process.removeListener("SIGINT", onInterrupted);
+			const acceptSocketClosed = new Promise(resolve => {
+				acceptSocket.close(resolve);
+			});
+			await mobius.stop();
+			await acceptSocketClosed;
+			process.exit(0);
+		}
+	})().catch(escape);
+}

@@ -53,7 +53,7 @@ function fixTypeScriptExtendsWarning() {
 export default {
 	input: "build/.client/src/app.js",
 	output: {
-		file: "public/client.js",
+		file: "build/src/client.js",
 		format: "iife"
 	},
 	plugins: [
