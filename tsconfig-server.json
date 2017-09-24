@@ -8,7 +8,9 @@
 		"common/*.tsx",
 		"src/*.ts",
 		"src/*.tsx",
-		"host/*.ts",
+		"src/*.jsx",
+		"src/*.js",
+		"host/*.ts"
 	],
 	"exclude": [
 		"node_modules/"

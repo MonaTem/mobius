@@ -3,7 +3,9 @@
 		"types/reduced-dom.d.ts",
 		"types/ambient.d.ts",
 		"src/*.tsx",
-		"src/*.ts"
+		"src/*.ts",
+		"src/*.jsx",
+		"src/*.js"
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
