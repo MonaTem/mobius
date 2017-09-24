@@ -653,7 +653,13 @@ class Session {
 			createServerChannel,
 			coordinateValue: this.coordinateValue,
 			synchronize: () => this.createServerPromise(() => undefined),
-			flush: this.scheduleSynchronize.bind(this),
+			flush: async () => {
+				if (this.dead) {
+					throw disconnectedError();
+				}
+				this.scheduleSynchronize();
+				return resolvedPromise;
+			},
 			shareSession: this.shareSession
 		};
 		this.request = request;
@@ -788,13 +794,9 @@ class Session {
 	}
 
 	scheduleSynchronize() {
-		if (this.dead) {
-			return Promise.reject(disconnectedError());
-		}
 		for (const client of this.clients.values()) {
 			client.scheduleSynchronize();
 		}
-		return resolvedPromise;
 	}
 
 	enterLocalChannel(delayPageLoading: boolean = true) : number {
