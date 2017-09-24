@@ -86,7 +86,7 @@ export function style(href: string) : Promise<void> {
 				document.head.removeChild(link);
 				reject(new Error("Failed to load styles from " + href + "!"));
 			}, false);
-		}));
+		}), true);
 		document.head.appendChild(link);
 	}
 	return result;

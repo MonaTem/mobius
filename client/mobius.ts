@@ -700,15 +700,11 @@ export function createServerChannel<T extends Function>(callback: T, onAbort?: (
 }
 
 
-export function createClientPromise<T extends JsonValue | void>(ask: () => (Promise<T> | T)) : Promise<T> {
-	if (!insideCallback) {
-		try {
-			return Promise.resolve(runAPIImplementation(ask));
-		} catch (e) {
-			return Promise.reject(e);
-		}
-	}
+export function createClientPromise<T extends JsonValue | void>(ask: () => (Promise<T> | T), batched?: boolean) : Promise<T> {
 	return new Promise<T>((resolve, reject) => {
+		if (!insideCallback) {
+			return runAPIImplementation(ask);
+		}
 		let channelId = ++localChannelCounter;
 		logOrdering("client", "open", channelId);
 		pendingLocalChannels[channelId] = function(event: Event) {
@@ -729,9 +725,9 @@ export function createClientPromise<T extends JsonValue | void>(ask: () => (Prom
 		if (shouldImplementLocalChannel(channelId)) {
 			// Resolve value
 			new Promise<T>(resolve => resolve(runAPIImplementation(ask))).then(
-				escaping((value: T) => sendEvent(eventForValue(channelId, value)))
+				escaping((value: T) => sendEvent(eventForValue(channelId, value), batched))
 			).catch(
-				escaping((error: any) => sendEvent(eventForException(channelId, error)))
+				escaping((error: any) => sendEvent(eventForException(channelId, error), batched))
 			);
 		}
 	});
