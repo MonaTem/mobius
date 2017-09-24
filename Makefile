@@ -88,4 +88,4 @@ build/.client/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(COMMON_FILES) build/.cl
 
 
 %.min.js: %.js Makefile
-	node ./node_modules/google-closure-compiler-js/cmd.js --languageIn ES5 --languageOut ES3 --assumeFunctionWrapper true --rewritePolyfills false $< > $@
+	node node_modules/.bin/google-closure-compiler-js --languageIn ES5 --languageOut ES3 --assumeFunctionWrapper true --rewritePolyfills false $< > $@
