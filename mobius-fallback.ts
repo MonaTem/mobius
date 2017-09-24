@@ -23,6 +23,8 @@
  * SOFTWARE.
  */
 (() => {
+	document.body.className = "mobius-active";
+
 	const queryComponents = location.search.substr(1).split(/\&/g);
 	const jsNoIndex = queryComponents.indexOf("js=no");
 	if (jsNoIndex != -1) {

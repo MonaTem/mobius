@@ -37,6 +37,8 @@ if (/\bMSIE [1-8]\b/.test(navigator.userAgent) || !window.addEventListener || ty
 	throw "Insufficient browser support. Falling back to server-side rendering...";
 }
 
+document.body.className = "mobius-active mobius-full";
+
 if (history.replaceState) {
 	const queryComponents = location.search.substr(1).split(/\&/g);
 	let i = queryComponents.length;
