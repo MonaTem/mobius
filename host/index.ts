@@ -915,7 +915,7 @@ class Session {
 			let open = true;
 			try {
 				const potentialState = onOpen(function() {
-					if (!closed) {
+					if (open) {
 						callback.apply(null, arguments);
 					}
 				} as any as T);
