@@ -11,9 +11,17 @@ function stripRedact() {
 	return {
 		visitor: {
 			CallExpression(path) {
-				if (path.get("callee").node.name == "redact" && path.node.arguments.length != 0) {
+				if (path.node.arguments.length == 0) {
+					return;
+				}
+				const callee = path.node.callee;
+				if (callee.type != "Identifier") {
+					return;
+				}
+				const binding = path.scope.getBinding(callee.name);
+				if (binding && binding.path.node.type == "ImportSpecifier" && binding.path.node.imported.type == "Identifier" && binding.path.node.imported.name == "redact") {
 					if (path.node.arguments.every(node => pure(node, { pureMembers: /./ }))) {
-						path.replaceWith(types.callExpression(types.identifier("redact"), []));
+						path.replaceWith(types.callExpression(callee, []));
 					} else {
 						throw path.buildCodeFrameError(`Potential side-effects in ${path.getSource()}, where only pure arguments are expected!`);
 					}
