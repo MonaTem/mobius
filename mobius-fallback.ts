@@ -27,7 +27,7 @@
 	const jsNoIndex = queryComponents.indexOf("js=no");
 	if (jsNoIndex != -1) {
 		queryComponents.splice(jsNoIndex, 1);
-		location.href = location.pathname + "?" + queryComponents.join("&");
+		location.replace(location.pathname + "?" + queryComponents.join("&"));
 		return;
 	}
 	const supportsNativeXHR = "XMLHttpRequest" in window;
@@ -176,7 +176,7 @@
 							} else {
 								currentHTMLSource = diff.patch_apply(diff.patch_fromText(responseText), currentHTMLSource)[0];
 							}
-							(window as any).setDOM(form, currentHTMLSource);
+							(window as any).setDOM(document.documentElement, currentHTMLSource);
 							// form.innerHTML = request.responseText;
 							interceptFormElements();
 						}

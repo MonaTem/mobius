@@ -273,7 +273,7 @@ class PageRenderer {
 		}
 		return resolvedPromise;
 	}
-	async generateHTML(client: Client, justFormElement: boolean = false) : Promise<string> {
+	async generateHTML(client: Client, generateFallbackTemplate: boolean = false) : Promise<string> {
 		const renderingMode = client.renderingMode;
 		const session = this.session;
 		const document = session.host.document;
@@ -292,7 +292,7 @@ class PageRenderer {
 			session.host.metaRedirect.setAttribute("content", "0; url=" + url + (/\?/.test(url) ? "&" : "?") + "js=no");
 			document.head.appendChild(session.host.noscript);
 		}
-		if (((renderingMode == RenderingMode.Prerendering) || client.clientID) && !justFormElement) {
+		if (((renderingMode == RenderingMode.Prerendering) || client.clientID) && !generateFallbackTemplate) {
 			bootstrapScript = this.bootstrapScript;
 			if (!bootstrapScript) {
 				bootstrapScript = this.bootstrapScript = document.createElement("script");
@@ -365,7 +365,7 @@ class PageRenderer {
 			this.body.appendChild(formNode);
 		}
 		if (renderingMode >= RenderingMode.ForcedEmulation) {
-			if (justFormElement) {
+			if (generateFallbackTemplate) {
 				siblingNode = document.createTextNode("");
 				this.clientScript.parentNode!.insertBefore(siblingNode, this.clientScript);
 				this.clientScript.parentNode!.removeChild(this.clientScript);
@@ -374,11 +374,7 @@ class PageRenderer {
 			}
 		}
 		try {
-			if (justFormElement && formNode) {
-				return formNode.outerHTML;
-			} else {
-				return session.host.serializeDocument(this.head, this.body);
-			}
+			return session.host.serializeDocument(this.head, this.body);
 		} finally {
 			if (renderingMode >= RenderingMode.FullEmulation && formNode) {
 				if (formNode) {
@@ -1482,7 +1478,12 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 						return;
 					}
 					const postback = body["postback"];
-					const client = await host.clientFromMessage(message, request, !postback);
+					let client: Client;
+					if (!message.sessionID && postback == "js") {
+						client = await host.newClient(request, RenderingMode.ForcedEmulation);
+					} else {
+						client = await host.clientFromMessage(message, request, !postback);
+					}
 					if (postback) {
 						const isJavaScript = postback == "js";
 						// JavaScript is disabled, emulate events from form POST
@@ -1529,7 +1530,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 						if (isJavaScript) {
 							if (client.lastSentFormHTML) {
 								const diff = diff_match_patch_node.patch_toText(diff_match_patch_node.patch_make(client.lastSentFormHTML, html));
-								if (diff.length < html.length) {
+								if (diff.length < html.length && diff.length) {
 									responseContent = diff;
 								}
 							}

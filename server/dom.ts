@@ -96,7 +96,7 @@ export function style(href: string) : Promise<void> {
 		const link = self.document.createElement("link");
 		link.rel = "stylesheet";
 		link.href = href;
-		self.document.body.appendChild(link);
+		self.document.head.appendChild(link);
 		result = requestedStyles[href] = createClientPromise(() => {
 			// Fallback is to return immediately--if unable to track client's ability to load CSS, just proceed
 		});
