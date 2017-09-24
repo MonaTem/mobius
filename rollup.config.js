@@ -23,6 +23,25 @@ function stripRedact() {
 	};
 }
 
+function fixTypeScriptExtendsWarning() {
+	return {
+		visitor: {
+			LogicalExpression: {
+				exit(path) {
+					const node = path.node;
+					const left = node.left;
+					if (node.operator == "||" && left.type == "LogicalExpression" && left.operator == "&&" && left.left.type == "ThisExpression") {
+						const right = left.right;
+						if (right.type == "MemberExpression" && right.object.type == "ThisExpression" && right.property.type == "Identifier" && right.property.name == "__extends") {
+							path.replaceWith(node.right);
+						}
+					}
+				}
+			}
+		}
+	};
+}
+
 export default {
 	entry: "build/.client/src/app.js",
 	dest: "public/client.js",
@@ -36,7 +55,7 @@ export default {
 		}),
 		rollupBabel({
 			babelrc: false,
-			plugins: [stripRedact(), rewriteForInStatements(babel)]
+			plugins: [stripRedact(), rewriteForInStatements(babel), fixTypeScriptExtendsWarning()]
 		})
 	]
 };
