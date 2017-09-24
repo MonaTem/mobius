@@ -832,8 +832,8 @@ class Session {
 		let channelId = ++this.localChannelCounter;
 		const exit = escaping(() => {
 			if (channelId != -1) {
-				channelId = -1;
 				this.localChannels.delete(channelId);
+				channelId = -1;
 				this.exitLocalChannel(includedInPrerender);
 			}
 		});
