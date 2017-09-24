@@ -354,9 +354,6 @@ function restartHeartbeat() {
 	heartbeatTimeout = setTimeout(sendMessages, sessionHeartbeatInterval);
 }
 
-let sendWhenDisconnected: (() => void) | undefined;
-export const whenDisconnected: Promise<void> = new Promise(resolve => sendWhenDisconnected = resolve);
-
 export function disconnect() {
 	if (!dead) {
 		dead = true;
@@ -389,12 +386,7 @@ export function disconnect() {
 			request.send(body);
 		}
 		// Flush fenced events
-		fencedLocalEvents.reduce((promise, event) => promise.then(escaping(dispatchEvent.bind(null, event))).then(defer), resolvedPromise).then(() => {
-			// Send disconnection event
-			if (sendWhenDisconnected) {
-				sendWhenDisconnected();
-			}
-		});
+		fencedLocalEvents.reduce((promise, event) => promise.then(escaping(dispatchEvent.bind(null, event))).then(defer), resolvedPromise);
 	}
 }
 window.addEventListener("unload", disconnect, false);

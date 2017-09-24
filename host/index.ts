@@ -609,7 +609,6 @@ class Session {
 	host: Host;
 	sessionID: string;
 	dead: boolean = false;
-	sendWhenDisconnected: () => void | undefined;
 	// Script context
 	modules = new Map<string, SandboxModule>();
 	mobius: typeof mobius;
@@ -650,7 +649,6 @@ class Session {
 		const createServerChannel = this.createServerChannel.bind(this);
 		this.mobius = {
 			disconnect: () => this.destroy().catch(escape),
-			whenDisconnected: new Promise(resolve => this.sendWhenDisconnected = resolve),
 			secrets: host.secrets as JsonMap,
 			dead: false,
 			createClientPromise: this.createClientPromise.bind(this),
@@ -1208,9 +1206,6 @@ class Session {
 				await client.destroy();
 			}
 			this.host.sessions.delete(this.sessionID);
-			if (this.sendWhenDisconnected) {
-				this.sendWhenDisconnected();
-			}
 		}
 	}
 
