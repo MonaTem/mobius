@@ -10,7 +10,7 @@ module.exports = function({ types }) {
 					const keysIdentifier = path.scope.generateUidIdentifier("keys");
 					const iIdentifier = path.scope.generateUidIdentifier("i");
 					const keysSubIExpression = types.memberExpression(keysIdentifier, iIdentifier, true);
-					const body = node.body.type == "BlockStatement" ? node.body.body.slice() : [];
+					const body = node.body.type == "BlockStatement" ? node.body.body.slice() : [node.body];
 					if (node.left.type == "VariableDeclaration") {
 						body.unshift(types.variableDeclaration(node.left.kind, [types.variableDeclarator(node.left.declarations[0].id, keysSubIExpression)]));
 					} else {
