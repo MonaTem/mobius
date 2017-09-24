@@ -407,15 +407,14 @@ class Session {
 		this.sessionID = sessionID;
 		this.pageRenderer = new PageRenderer(this.host.dom, this.host.noscript, this.host.metaRedirect);
 		// Server-side version of the API
-		const createServerChannel = this.createServerChannel.bind(this);
 		this.mobius = {
 			disconnect: () => this.destroy().catch(escape),
 			secrets: host.secrets as JsonMap,
 			dead: false,
-			createClientPromise: this.createClientPromise.bind(this),
-			createServerPromise: this.createServerPromise.bind(this),
-			createClientChannel: this.createClientChannel.bind(this),
-			createServerChannel,
+			createClientPromise: this.createClientPromise,
+			createServerPromise: this.createServerPromise,
+			createClientChannel: this.createClientChannel,
+			createServerChannel: this.createServerChannel,
 			coordinateValue: this.coordinateValue,
 			synchronize: () => this.createServerPromise(() => undefined),
 			flush: async () => {
@@ -435,7 +434,7 @@ class Session {
 			}),
 			request: this.request
 		};
-		this.globalProperties = interceptGlobals(globalProperties, () => this.insideCallback, this.coordinateValue, createServerChannel);
+		this.globalProperties = interceptGlobals(globalProperties, () => this.insideCallback, this.coordinateValue, this.createServerChannel);
 		if (this.host.allowMultipleClientsPerSession) {
 			this.recentEvents = [];
 		}
@@ -607,9 +606,9 @@ class Session {
 		await defer();
 		this.dispatchingEvent--;
 	}
-	createServerPromise<T extends JsonValue | void>(ask: () => (Promise<T> | T), includedInPrerender: boolean = true): Promise<T> {
+	createServerPromise = <T extends JsonValue | void>(ask: () => (Promise<T> | T), includedInPrerender: boolean = true) => {
 		if (!this.insideCallback) {
-			return new Promise(resolve => resolve(ask()));
+			return new Promise<T>(resolve => resolve(ask()));
 		}
 		// Record and ship values/errors of server-side promises
 		let channelId = ++this.localChannelCounter;
@@ -688,7 +687,7 @@ class Session {
 			});
 		});
 	}
-	createServerChannel<T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender: boolean = true): Channel {
+	createServerChannel = <T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender: boolean = true) => {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
@@ -819,7 +818,7 @@ class Session {
 			}
 		};
 	}
-	createClientPromise<T extends JsonValue | void>(fallback?: () => Promise<T> | T) {
+	createClientPromise = <T extends JsonValue | void>(fallback?: () => Promise<T> | T) => {
 		return new Promise<T>((resolve, reject) => {
 			if (!this.insideCallback) {
 				return reject(new Error("Unable to create client promise in this context!"));
@@ -855,7 +854,7 @@ class Session {
 			}
 		});
 	}
-	createClientChannel<T extends Function>(callback: T): Channel {
+	createClientChannel = <T extends Function>(callback: T) => {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
