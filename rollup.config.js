@@ -24,7 +24,7 @@ function stripRedact() {
 }
 
 export default {
-	entry: "src/app.js",
+	entry: "build/.client/src/app.js",
 	dest: "public/client.js",
 	format: "iife",
 	plugins: [
@@ -32,7 +32,7 @@ export default {
 			include: {
 				"preact": "preact/dist/preact.esm.js"
 			},
-			paths: ["src", "common", "client", "preact/dist"]
+			paths: ["build/.client/src", "build/.client/common", "build/.client/client", "preact/dist"]
 		}),
 		rollupBabel({
 			babelrc: false,

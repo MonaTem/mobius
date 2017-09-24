@@ -6,8 +6,5 @@ api/
 build/
 types/host/
 types/src/
-common/*.js
-client/*.js
-src/*.js
 *.js.map
 *.min.js

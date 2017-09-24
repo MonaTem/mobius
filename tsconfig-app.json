@@ -7,6 +7,7 @@
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
+		"outDir": "build/.client/src/",
 		"allowJs": false,
 		"jsx": "react",
 		"jsxFactory": "dom.h",
