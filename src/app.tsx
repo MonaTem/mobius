@@ -254,7 +254,13 @@ class ErrorBoundary extends dom.Component<{}, { error?: string }> {
 dom.host((
 	<div>
 		<h1>Mobius Sample App</h1>
-		<CollapsibleSection title="Random numbers">
+		<CollapsibleSection title="To Do List">
+			<NewItemWidget/>
+			<ErrorBoundary>
+				<ItemsWidget/>
+			</ErrorBoundary>
+		</CollapsibleSection>
+		<CollapsibleSection title="Random Stream">
 			<RandomWidget/>
 		</CollapsibleSection>
 		<CollapsibleSection title="Messaging">
@@ -262,12 +268,6 @@ dom.host((
 				<ReceiveWidget/>
 			</ErrorBoundary>
 			<BroadcastWidget/>
-		</CollapsibleSection>
-		<CollapsibleSection title="To Do List">
-			<NewItemWidget/>
-			<ErrorBoundary>
-				<ItemsWidget/>
-			</ErrorBoundary>
 		</CollapsibleSection>
 		<CollapsibleSection title="Session Sharing">
 			<ErrorBoundary>
