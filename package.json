@@ -11,7 +11,8 @@
     "build": "make -j4",
     "clean": "make clean",
     "minify": "make minify -j4",
-    "run": "make run -j4"
+    "start": "make run -j4",
+    "install": "npm run-script build"
   },
   "author": "Ryan Petrich <rpetrich@gmail.com>",
   "license": "MIT",
