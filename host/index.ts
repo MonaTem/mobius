@@ -90,8 +90,10 @@ class Host {
 	staleSessionTimeout: any;
 	secrets: JsonValue;
 	renderingMode: RenderingMode;
-	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], htmlPath: string, htmlSource: string, secrets: JsonValue, renderingMode: RenderingMode) {
+	allowMultipleClientsPerSession: boolean;
+	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], htmlPath: string, htmlSource: string, secrets: JsonValue, renderingMode: RenderingMode, allowMultipleClientsPerSession: boolean) {
 		this.renderingMode = renderingMode;
+		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;
 		this.secrets = secrets;
 		this.htmlSource = htmlSource;
 		this.dom = new JSDOM(htmlSource);
@@ -123,7 +125,7 @@ class Host {
 		if (session) {
 			return session;
 		}
-		if (allowMultipleClientsPerSession) {
+		if (this.allowMultipleClientsPerSession) {
 			let archive;
 			try {
 				archive = await Session.readArchivedSession(this.pathForSessionId(sessionID));
@@ -175,7 +177,7 @@ class Host {
 	async newClient(request: express.Request, renderingMode?: RenderingMode) {
 		for (;;) {
 			const sessionID = uuid();
-			if (!this.sessions.has(sessionID) && (!allowMultipleClientsPerSession || !await exists(this.pathForSessionId(sessionID)))) {
+			if (!this.sessions.has(sessionID) && (!this.allowMultipleClientsPerSession || !await exists(this.pathForSessionId(sessionID)))) {
 				const session = new Session(this, sessionID, request);
 				this.sessions.set(sessionID, session);
 				return session.newClient(request, renderingMode);
@@ -208,8 +210,6 @@ export const enum RenderingMode {
 	FullEmulation = 2,
 	ForcedEmulation = 3,
 };
-
-const allowMultipleClientsPerSession = true;
 
 class PageRenderer {
 	session: Session;
@@ -657,7 +657,7 @@ class Session {
 			request: this.request
 		};
 		this.globalProperties = interceptGlobals(globalProperties, () => this.insideCallback, this.coordinateValue, createServerChannel);
-		if (allowMultipleClientsPerSession) {
+		if (this.host.allowMultipleClientsPerSession) {
 			this.recentEvents = [];
 		}
 	}
@@ -1159,7 +1159,7 @@ class Session {
 	shareSession = async () => {
 		// Server promise so that client can confirm that sharing is enabled
 		const server = this.createServerPromise(async () => {
-			if (!allowMultipleClientsPerSession) {
+			if (!this.host.allowMultipleClientsPerSession) {
 				throw new Error("Sharing has been disabled!");
 			}
 			this.sharingEnabled = true;
@@ -1379,7 +1379,7 @@ function messageFromBody(body: { [key: string]: any }) : ClientMessage {
 	return message;
 }
 
-export default async function prepare(compiledPath: string, secrets: { [key: string]: any }, renderingMode: RenderingMode) {
+export default async function prepare(compiledPath: string, secrets: { [key: string]: any }, renderingMode: RenderingMode, allowMultipleClientsPerSession: boolean) {
 	const serverJSPath = path.join(compiledPath, "app.js");
 
 	const htmlPath = relativePath("../../public/index.html");
@@ -1401,7 +1401,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 	const serverModulePaths = [relativePath("../server")];
 	const modulePaths = serverModulePaths.concat([relativePath("../common"), relativePath("../../preact/dist")]);
 
-	const host = new Host(serverJSPath, serverModulePaths, modulePaths, htmlPath, (await htmlContents).toString(), secrets, renderingMode);
+	const host = new Host(serverJSPath, serverModulePaths, modulePaths, htmlPath, (await htmlContents).toString(), secrets, renderingMode, allowMultipleClientsPerSession);
 
 	return {
 		install(server: express.Express) {
@@ -1640,7 +1640,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 if (require.main === module) {
 	(async () => {
 		const secrets = JSON.parse((await readFile(relativePath("../../secrets.json"))).toString());
-		const mobius = await prepare(relativePath("../../build/src/"), secrets, RenderingMode.ClientPreferred);
+		const mobius = await prepare(relativePath("../../build/src/"), secrets, RenderingMode.ClientPreferred, true);
 
 		const server = express();
 
