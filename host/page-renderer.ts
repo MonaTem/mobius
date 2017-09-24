@@ -51,11 +51,9 @@ export class PageRenderer {
 		this.head = this.document.head.cloneNode(true) as Element;
 		this.noscript = noscript;
 		this.metaRedirect = metaRedirect;
-		const clientScript = this.body.querySelector("script[src=\"client.js\"]") as HTMLScriptElement | null;
-		if (!clientScript) {
-			throw new Error("HTML does not contain a client.js reference: " + this.body.outerHTML);
-		}
-		this.clientScript = clientScript;
+		const clientScript = this.clientScript = this.document.createElement("script");
+		clientScript.src = "client.js";
+		this.body.appendChild(clientScript);
 	}
 	render(mode: PageRenderMode, clientState: ClientState, sessionState: SessionState, noScriptURL?: string, bootstrapData?: BootstrapData) : string {
 		const document = this.document;
