@@ -1,4 +1,4 @@
-.PHONY: all run clean cleaner minify client server host app fallback
+.PHONY: all run clean cleaner minify client server app fallback
 
 rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
 scripts=$(call rwildcard, $1/, *.tsx) $(call rwildcard, $1/, *.ts)
@@ -9,14 +9,14 @@ SERVER_FILES = $(call scripts, server)
 HOST_FILES = $(call scripts, host)
 SRC_FILES = $(call scripts, src)
 
-all: host server client fallback app
+all: server client fallback app
 minify: public/client.min.js public/fallback.min.js all
 
 run: all
 	node --trace-warnings --inspect build/host/index.js
 
 clean:
-	rm -rf public/{client,fallback,app}{,.min}.js api/ {common,host,client,src}/*.js build/
+	rm -rf public/{client,fallback,app}{,.min}.js api/ {common,host,client,src}/*.js build/ types/host/
 
 cleaner: clean
 	rm -rf node_modules
@@ -47,28 +47,28 @@ api/:
 	mkdir -p api/client
 
 build/:
-	mkdir -p build
-
-
-host: build/host/index.js
-
-build/host/index.js: build/src/app.js $(HOST_FILES) $(COMMON_FILES) types/*.d.ts tsconfig-host.json node_modules/typescript/bin/tsc
-	node_modules/typescript/bin/tsc -p tsconfig-host.json
+	mkdir -p build/
 
 
 server: build/src/app.js
 
-build/src/app.js: $(SERVER_FILES) $(COMMON_FILES) api/ build/ types/*.d.ts tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
-	node_modules/typescript/bin/tsc -p tsconfig-server.json
+build/.server/: build/
+	mkdir -p build/.server
+
+build/.server/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(HOST_FILES) $(COMMON_FILES) api/ build/.server/ types/*.d.ts tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
+	./node_modules/.bin/tsc -p tsconfig-server.json
+
+build/src/app.js: build/.server/src/app.js
+	./node_modules/.bin/babel build/.server/ --out-dir build/
 
 
 client: public/client.js
 
-client/mobius.js: $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
+client/mobius.js: $(SRC_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/ types/*.d.ts tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/typescript/bin/tsc -p tsconfig-client.json
 
 public/client.js: client/mobius.js src/app.js rollup.config.js
-	./preact/node_modules/rollup/bin/rollup -c
+	./node_modules/.bin/rollup -c
 
 
 fallback: public/fallback.js
@@ -77,13 +77,13 @@ build/diff-match-patch.js: node_modules/typescript/bin/tsc
 	grep -v module.exports node_modules/diff-match-patch/index.js > $@
 
 public/fallback.js: mobius-fallback.ts build/diff-match-patch.js types/*.d.ts tsconfig-fallback.json node_modules/typescript/bin/tsc
-	node_modules/typescript/bin/tsc -p tsconfig-fallback.json
+	./node_modules/.bin/tsc -p tsconfig-fallback.json
 
 
 app: src/app.js
 
 src/app.js: $(SRC_FILES) $(SERVER_FILES) $(COMMON_FILES) client/mobius.js types/*.d.ts tsconfig-app.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
-	node_modules/typescript/bin/tsc -p tsconfig-app.json
+	./node_modules/.bin/tsc -p tsconfig-app.json
 
 
 %.min.js: %.js Makefile

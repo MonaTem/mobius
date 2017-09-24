@@ -7,11 +7,15 @@
 		"common/*.ts",
 		"common/*.tsx",
 		"src/*.ts",
-		"src/*.tsx"
+		"src/*.tsx",
+		"host/*.ts",
+	],
+	"exclude": [
+		"node_modules/"
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
-		"outDir": "build",
+		"outDir": "build/.server/",
 		"allowJs": false,
 		"declaration": true,
 		"declarationDir": "types",
@@ -30,7 +34,7 @@
 		],
 		"typeRoots": [
 			"types",
-			"node_modules"
+			"node_modules/@types"
 		],
 		"lib": [
 			"es6",

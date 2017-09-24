@@ -21,6 +21,7 @@
     "@types/qs": "^6.5.0",
     "@types/rimraf": "^2.0.2",
     "@types/uuid": "^3.4.2",
+    "babel-cli": "^6.26.0",
     "babel-core": "^6.24.1",
     "body-parser": "^1.18.0",
     "diff-match-patch": "^1.0.0",

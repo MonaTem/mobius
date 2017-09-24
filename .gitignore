@@ -4,6 +4,7 @@ public/fallback.js
 sessions/
 api/
 build/
+types/host/
 types/src/
 common/*.js
 client/*.js
