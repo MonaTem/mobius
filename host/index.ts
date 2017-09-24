@@ -1432,7 +1432,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 					if (sessionID) {
 						// Joining existing session
 						session = await host.sessionFromId(sessionID, request, false);
-						client = session.newClient(request);
+						client = session.newClient(request, RenderingMode.Prerendering);
 						client.incomingMessageId++;
 					} else {
 						// New session
