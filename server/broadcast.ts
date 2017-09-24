@@ -1,5 +1,6 @@
 import { createServerChannel } from "mobius";
-import { JsonValue, Channel } from "mobius-types";
+import { JsonValue, JsonArray, JsonMap, Channel } from "mobius-types";
+import { peek, Redacted } from "redact";
 
 declare global {
 	namespace NodeJS {
@@ -9,28 +10,31 @@ declare global {
 	}
 }
 
-export const send = (topic: string, message: JsonValue) => {
+export const send = (topic: string | Redacted<string>, message: JsonValue | Redacted<JsonValue | JsonArray | JsonMap>) => {
+	const peekedTopic = peek(topic);
+	const peekedMessage = peek(message);
 	const topics = global.observers;
-	if (topics && Object.hasOwnProperty.call(topics, topic)) {
-		topics[topic].slice().forEach(async (observer) => observer(message));
+	if (topics && Object.hasOwnProperty.call(topics, peekedTopic)) {
+		topics[peekedTopic].slice().forEach(async (observer) => observer(peekedMessage));
 	}
 }
 
-export function receive(topic: string, callback: (message: JsonValue) => void, onAbort?: () => void): Channel {
+export function receive(topic: string | Redacted<string>, callback: (message: JsonValue) => void, onAbort?: () => void): Channel {
 	const topics = global.observers || (global.observers = {});
+	const peekedTopic = peek(topic);
 	return createServerChannel(callback, send => {
-		const observers = Object.hasOwnProperty.call(topics, topic) ? topics[topic] : (topics[topic] = []);
+		const observers = Object.hasOwnProperty.call(topics, peekedTopic) ? topics[peekedTopic] : (topics[peekedTopic] = []);
 		observers.push(send);
 		return send;
 	}, send => {
-		if (Object.hasOwnProperty.call(topics, topic)) {
-			const observers = topics[topic];
+		if (Object.hasOwnProperty.call(topics, peekedTopic)) {
+			const observers = topics[peekedTopic];
 			const index = observers.indexOf(send);
 			if (index != -1) {
 				observers.splice(index, 1);
 			}
 			if (observers.length == 0) {
-				delete topics[topic];
+				delete topics[peekedTopic];
 			}
 		}
 	}, false);
