@@ -72,6 +72,10 @@ export function host(content: JSX.Element) : void {
 	preact.render(content, element, child);
 }
 
+export function title(newTitle: string) : void {
+	document.title = newTitle;
+}
+
 const requestedStyles: { [href: string]: Promise<void> } = {};
 
 export function style(href: string) : Promise<void> {

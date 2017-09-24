@@ -176,14 +176,18 @@ class Host {
 		session.request = request;
 		return client;
 	}
-	serializeBody(body: Element) {
+	serializeDocument(head: Element, body: Element) {
+		const realHead = this.document.head;
+		const headParent = realHead.parentElement!;
+		headParent.replaceChild(head, realHead);
 		const realBody = this.document.body;
-		const parent = realBody.parentElement!;
-		parent.replaceChild(body, realBody);
+		const bodyParent = realBody.parentElement!;
+		bodyParent.replaceChild(body, realBody);
 		try {
 			return this.dom.serialize();
 		} finally {
-			parent.replaceChild(realBody, body);
+			bodyParent.replaceChild(realBody, body);
+			headParent.replaceChild(realHead, head);
 		}
 	}
 	async newClient(request: express.Request, renderingMode?: RenderingMode) {
@@ -228,6 +232,7 @@ const allowMultipleClientsPerSession = true;
 class PageRenderer {
 	session: Session;
 	body: Element;
+	head: Element;
 	clientScript: HTMLScriptElement;
 	bootstrapScript?: HTMLScriptElement;
 	formNode?: HTMLFormElement;
@@ -242,6 +247,7 @@ class PageRenderer {
 	constructor(session: Session) {
 		this.session = session;
 		this.body = session.host.document.body.cloneNode(true) as Element;
+		this.head = session.host.document.head.cloneNode(true) as Element;
 		const clientScript = this.body.querySelector("script[src=\"client.js\"]") as HTMLScriptElement | null;
 		if (!clientScript) {
 			throw new Error("HTML does not contain a client.js reference: " + this.body.outerHTML);
@@ -380,7 +386,7 @@ class PageRenderer {
 			if (justFormElement && formNode) {
 				return formNode.outerHTML;
 			} else {
-				return session.host.serializeBody(this.body);
+				return session.host.serializeDocument(this.head, this.body);
 			}
 		} finally {
 			if (renderingMode >= RenderingMode.FullEmulation && formNode) {
@@ -662,7 +668,10 @@ class Session {
 		};
 		this.request = request;
 		const globalProperties: MobiusGlobalProperties & Partial<FakedGlobals> = {
-			document: Object.create(this.host.document, { body: { value: this.pageRenderer.body } }),
+			document: Object.create(this.host.document, {
+				body: { value: this.pageRenderer.body },
+				head: { value: this.pageRenderer.head }
+			}),
 			request: this.request
 		};
 		this.globalProperties = interceptGlobals(globalProperties, () => this.insideCallback, this.coordinateValue, createServerChannel);

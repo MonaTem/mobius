@@ -78,6 +78,16 @@ export function host(content: JSX.Element) : void {
 	preact.render(content, element, element.children[0]);
 }
 
+export function title(newTitle: string) : void {
+	const head = self.document.head;
+	let element = head.querySelector("title");
+	if (!element) {
+		element = self.document.createElement("title");
+		head.appendChild(element);
+	}
+	element.innerText = newTitle;
+}
+
 const requestedStyles: { [href: string]: Promise<void> } = {};
 
 export function style(href: string) : Promise<void> {
