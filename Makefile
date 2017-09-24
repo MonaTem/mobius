@@ -35,7 +35,7 @@ preact/dist/preact.js: preact/package.json
 	npm install -g npm-run-all rollup babel-cli jscodeshift gzip-size-cli rimraf
 	pushd preact && npm install
 
-node_modules/preact/dist/preact.d.ts: preact/src/preact.d.ts preact/dist/preact.js
+node_modules/preact/dist/preact.d.ts: preact/dist/preact.js
 	pushd preact && npm run copy-typescript-definition
 
 node_modules/preact: node_modules/typescript/bin/tsc preact/dist/preact.js
