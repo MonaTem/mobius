@@ -92,11 +92,13 @@ class Host {
 	secrets: JsonValue;
 	renderingMode: RenderingMode;
 	allowMultipleClientsPerSession: boolean;
-	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], htmlPath: string, htmlSource: string, secrets: JsonValue, renderingMode: RenderingMode, allowMultipleClientsPerSession: boolean) {
+	sessionsPath: string;
+	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, renderingMode: RenderingMode, allowMultipleClientsPerSession: boolean) {
 		this.destroying = false;
 		this.renderingMode = renderingMode;
 		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;
 		this.secrets = secrets;
+		this.sessionsPath = sessionsPath;
 		this.htmlSource = htmlSource;
 		this.dom = new JSDOM(htmlSource);
 		this.document = (this.dom.window as Window).document as Document;
@@ -151,7 +153,7 @@ class Host {
 		throw new Error("Session ID is not valid: " + sessionID);
 	}
 	pathForSessionId(sessionId: string) {
-		return "sessions/" + sessionId + ".json";
+		return path.join(this.sessionsPath, sessionId + ".json");
 	}
 	async clientFromMessage(message: ClientMessage, request: express.Request, allowNewSession: boolean) {
 		const clientID = message.clientID as number | 0;
@@ -208,7 +210,6 @@ class Host {
 			promises.push(session.destroy());
 		}
 		await Promise.all(promises);
-		await writeFile("sessions/.graceful", "");
 	}
 }
 
@@ -1395,23 +1396,26 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 	const htmlPath = relativePath("../../public/index.html");
 	const htmlContents = readFile(htmlPath);
 
+	const sessionsPath = path.join(compiledPath, "sessions");
+	const gracefulPath = path.join(sessionsPath, ".graceful");
+
 	// Check if we can reuse existing sessions
 	let lastGraceful = 0;
 	try {
-		lastGraceful = (await stat(path.join(compiledPath, "sessions/.graceful"))).mtimeMs;
+		lastGraceful = (await stat(gracefulPath)).mtimeMs;
 	} catch (e) {
 	}
 	if (lastGraceful < (await stat(serverJSPath)).mtimeMs) {
-		await rimraf(path.join(compiledPath, "sessions"));
-		await mkdir(path.join(compiledPath, "sessions"));
+		await rimraf(sessionsPath);
+		await mkdir(sessionsPath);
 	} else {
-		await unlink(path.join(compiledPath, "sessions/.graceful"));
+		await unlink(gracefulPath);
 	}
 
 	const serverModulePaths = [relativePath("../server")];
 	const modulePaths = serverModulePaths.concat([relativePath("../common"), relativePath("../../preact/dist")]);
 
-	const host = new Host(serverJSPath, serverModulePaths, modulePaths, htmlPath, (await htmlContents).toString(), secrets, renderingMode, allowMultipleClientsPerSession);
+	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, renderingMode, allowMultipleClientsPerSession);
 
 	return {
 		install(server: express.Express) {
@@ -1641,8 +1645,9 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 			server.use("/fallback.js", express.static(relativePath("../../public/fallback.js")));
 			server.use("/client.js", express.static(path.join(compiledPath, "client.js")));
 		},
-		stop() {
-			return host.destroy();
+		async stop() {
+			await host.destroy();
+			await writeFile(gracefulPath, "");
 		}
 	};
 }
