@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "Experiment for simpler web apps",
   "main": "build/host/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/rpetrich/mobius.git"
+  },
   "scripts": {
     "build": "make -j4",
     "clean": "make clean",
