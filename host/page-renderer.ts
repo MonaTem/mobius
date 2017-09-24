@@ -71,7 +71,7 @@ export class PageRenderer {
 			formNode = this.formNode;
 			if (!formNode) {
 				formNode = this.formNode = document.createElement("form");
-				formNode.setAttribute("action", "?");
+				formNode.setAttribute("action", "/");
 				formNode.setAttribute("method", "POST");
 				formNode.setAttribute("id", "mobius-form");
 			}
