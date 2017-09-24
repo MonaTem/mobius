@@ -573,11 +573,13 @@ class Session {
 	exitLocalChannel(resumePrerender: boolean = true) : number {
 		if (resumePrerender) {
 			if (--this.prerenderChannelCount == 0) {
-				if (this.completePrerender) {
-					this.completePrerender();
-					delete this.completePrerender;
-					delete this.prerenderCompleted;
-				}
+				defer().then(() => {
+					if (this.completePrerender) {
+						this.completePrerender();
+						delete this.completePrerender;
+						delete this.prerenderCompleted;
+					}
+				});
 			}
 		}
 		return --this.localChannelCount;
