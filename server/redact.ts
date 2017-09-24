@@ -1,12 +1,14 @@
+const symbol = Symbol();
+
 export class Redacted<T> {
-	value: T;
+	__suppress_declared_never_used_error?: T;
 	constructor(value: T) {
-		this.value = value;
+		Object.defineProperty(this, symbol, { value });
 	}
 }
 
 export function peek<T>(value: T | Redacted<T>) {
-	return value instanceof Redacted ? value.value : value;
+	return value instanceof Redacted ? (value as any)[symbol] as T : value;
 }
 
 export function redact<T>(value: T) {
