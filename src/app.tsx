@@ -12,9 +12,9 @@ class CollapsibleSection extends dom.Component<{ title: string }, { visible: boo
 	}
 	render() {
 		if (this.state.visible) {
-			return <div><div><button onClick={this.hide}>–</button> <strong>{this.props.title}:</strong></div><div>{this.props.children}</div></div>
+			return <div><h2 class="active"><button onClick={this.hide}>{this.props.title}</button></h2><div>{this.props.children}</div></div>
 		} else {
-			return <div><div><button onClick={this.show}>+</button> <strong>{this.props.title}:</strong></div></div>
+			return <div><h2 class="inactive"><button onClick={this.show}>{this.props.title}</button></h2></div>
 		}
 	}
 	show = () => this.setState({ visible: true })
@@ -45,12 +45,17 @@ class RandomWidget extends dom.Component<{}, { value: string }> {
 }
 
 
-class TextField extends dom.Component<{ value: string, onChange: (value: string) => void }, { value: string }> {
+class TextField extends dom.Component<{ value: string, placeholder?: string, onChange: (value: string) => void, onEnter: () => void }, { value: string }> {
 	onChange = (event: any) => {
 		this.props.onChange(event.value as string);
 	}
+	onKeyPress = (event: any) => {
+		if (event.keyCode == 13 && this.props.onEnter) {
+			this.props.onEnter();
+		}
+	}
 	render() {
-		return <input value={this.props.value} onChange={this.onChange} onInput={this.onChange}/>
+		return <input placeholder={this.props.placeholder || ""} value={this.props.value} onChange={this.onChange} onInput={this.onChange} onKeyPress={this.props.onEnter ? this.onKeyPress : undefined}/>
 	}
 }
 
@@ -61,7 +66,7 @@ class ReceiveWidget extends dom.Component<{}, { messages: string[] }> {
 		console.log("Receiving messages");
 		this.state = { messages: [] };
 	}
-	receiveChannel: Channel = receive("messages", value => {
+	receiveChannel: Channel = receive(redact("messages"), value => {
 		console.log("Received: " + value);
 		this.setState({ messages: [value as string].concat(this.state.messages) });
 	});
@@ -83,14 +88,14 @@ class BroadcastWidget extends dom.Component<{}, { value: string }> {
 	render() {
 		return (
 			<div>
-				<TextField value={this.state.value} onChange={this.updateValue}/>
+				<TextField value={this.state.value} onChange={this.updateValue} onEnter={this.send}/>
 				<button onClick={this.send}>Send</button>
 			</div>
 		);
 	}
 	updateValue = (value: string) => this.setState({ value })
 	send = () => {
-		send("messages", this.state.value);
+		send(redact("messages"), redact(this.state.value));
 	}
 }
 
@@ -133,7 +138,7 @@ class NewItemWidget extends dom.Component<{}, { value: string }> {
 	render() {
 		return (
 			<div>
-				<TextField value={this.state.value} onChange={this.onChange} />
+				<TextField placeholder="New Item" value={this.state.value} onChange={this.onChange} onEnter={this.send} />
 				<button onClick={this.send}>Add</button>
 			</div>
 		);
@@ -145,7 +150,7 @@ class NewItemWidget extends dom.Component<{}, { value: string }> {
 				operation: "create",
 				record: { id: result.insertId as number, text: this.state.value }
 			};
-			send("item-changes", message);
+			send(redact("item-changes"), redact(message));
 			this.setState({ value: "" });
 		}).catch(e => console.log(e));
 	}
@@ -159,9 +164,9 @@ class ItemWidget extends dom.Component<{ item: Item }, { pendingText: string | u
 	render() {
 		return (
 			<div>
-				<TextField value={typeof this.state.pendingText != "undefined" ? this.state.pendingText : this.props.item.text} onChange={this.setPendingText}/>
+				<TextField value={typeof this.state.pendingText != "undefined" ? this.state.pendingText : this.props.item.text} onChange={this.setPendingText} onEnter={this.save}/>
+				<button onClick={this.save} class={typeof this.state.pendingText != "undefined" ? "save-dirty" : "save-clean"} disabled={this.state.inProgress}>Save</button>
 				<button onClick={this.delete} disabled={this.state.inProgress}>Delete</button>
-				{typeof this.state.pendingText != "undefined" ? <button onClick={this.save} disabled={this.state.inProgress}>Save</button> : null}
 			</div>
 		);
 	}
@@ -170,25 +175,23 @@ class ItemWidget extends dom.Component<{ item: Item }, { pendingText: string | u
 	}
 	save = () => {
 		if (typeof this.state.pendingText != "undefined") {
-			const message: DbRecordChange<Item> = {
-				operation: "modify",
-				record: { id: this.props.item.id, text: this.state.pendingText }
-			};
 			this.setState({ inProgress: true });
 			sql.modify(redact("localhost"), redact("UPDATE mobius_todo.items SET text = ? WHERE id = ?"), redact([this.state.pendingText, this.props.item.id])).then(result => {
-				send("item-changes", message);
+				send(redact("item-changes"), redact({
+					operation: "modify",
+					record: { id: this.props.item.id, text: this.state.pendingText }
+				} as DbRecordChange<Item>));
 				this.setState({ pendingText: undefined, inProgress: false });
 			}).catch(e => console.log(e));
 		}
 	}
 	delete = () => {
 		this.setState({ inProgress: true });
-		const message: DbRecordChange<Item> = {
-			operation: "delete",
-			record: this.props.item
-		};
 		sql.modify(redact("localhost"), redact("DELETE FROM mobius_todo.items WHERE id = ?"), redact([this.props.item.id])).then(result => {
-			send("item-changes", message);
+			send(redact("item-changes"), redact({
+				operation: "delete",
+				record: this.props.item
+			} as DbRecordChange<Item>));
 			this.setState({ inProgress: false });
 		});
 	}
@@ -198,7 +201,7 @@ class ListWidget<T extends DbRecord> extends dom.Component<{ fetch: () => Promis
 	constructor(props: any, context: any) {
 		super(props, context);
 		this.state = { records: [], message: "Loading..." };
-		this.receiveChannel = receive(this.props.topic, (change: DbRecordChange<T>) => {
+		this.receiveChannel = receive(redact(this.props.topic), (change: DbRecordChange<T>) => {
 			this.setState({ records: updatedRecordsFromChange(this.state.records, change) });
 		});
 		Promise.resolve(this.props.fetch()).then(records => this.setState({ records, message: undefined })).catch(e => this.setState({ message: e.toString() }));
@@ -214,44 +217,70 @@ class ListWidget<T extends DbRecord> extends dom.Component<{ fetch: () => Promis
 
 const ItemsWidget = () => <ListWidget fetch={() => sql.query(redact("localhost"), redact("SELECT id, text FROM mobius_todo.items ORDER BY id DESC"))} render={(item: Item) => <ItemWidget item={item} key={item.id}/>} topic="item-changes" />;
 
-class SharingWidget extends dom.Component<{}, { url?: string }> {
+class SharingWidget extends dom.Component<{}, { url?: string, error?: any }> {
 	constructor(props: any, context: any) {
 		super(props, context);
-		shareSession().then(url => this.setState({ url }));
+		shareSession().then(url => this.setState({ url })).catch(error => this.setState({ error }));
 	}
 	render() {
-		const url = this.state.url;
-		if (url) {
-			return <a href={url} target="_blank">Share</a>
+		if (this.state.error) {
+			return <span>{this.state.error.toString()}</span>
+		}
+		if (this.state.url) {
+			return <a href={this.state.url} target="_blank">Share</a>
 		}
 		return <span>Loading...</span>
 	}
 }
 
+class ErrorBoundary extends dom.Component<{}, { error?: string }> {
+	componentWillReceiveProps(nextProps: any) {
+		if (nextProps.children) {
+			this.setState({ error: undefined });
+		}
+	}
+	componentDidCatch(error: any) {
+		this.setState({ error: error + "" });
+	}
+	render() {
+		if (this.state.error) {
+			return <div>{this.state.error}</div>
+		} else {
+			return <div>{this.props.children}</div>
+		}
+	}
+}
+
 dom.host((
 	<div>
+		<h1>Mobius Sample App</h1>
 		<CollapsibleSection title="Random numbers">
 			<RandomWidget/>
 		</CollapsibleSection>
-		<p/>
 		<CollapsibleSection title="Messaging">
-			<ReceiveWidget/>
+			<ErrorBoundary>
+				<ReceiveWidget/>
+			</ErrorBoundary>
+			<BroadcastWidget/>
 		</CollapsibleSection>
-		<BroadcastWidget/>
-		<p/>
 		<CollapsibleSection title="To Do List">
 			<NewItemWidget/>
-			<ItemsWidget/>
+			<ErrorBoundary>
+				<ItemsWidget/>
+			</ErrorBoundary>
 		</CollapsibleSection>
-		<p/>
 		<CollapsibleSection title="Session Sharing">
-			<SharingWidget/>
+			<ErrorBoundary>
+				<SharingWidget/>
+			</ErrorBoundary>
 		</CollapsibleSection>
+		<div class="about">made with <span class="heart">♥️</span> by <a href="https://twitter.com/rpetrich/">@rpetrich</a></div>
 	</div>
 ));
+
+dom.style("app.css");
 
 // Log current time
 console.log("Date.now()", Date.now());
 console.log("new Date()", new Date().toString());
 console.log("Math.random", Math.random());
-
