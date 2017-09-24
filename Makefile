@@ -53,10 +53,10 @@ build/.server/:
 	mkdir -p build/.server
 
 build/.server/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(HOST_FILES) $(COMMON_FILES) api/ build/.server/ types/*.d.ts tsconfig-server.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
-	./node_modules/.bin/tsc -p tsconfig-server.json
+	node_modules/.bin/tsc -p tsconfig-server.json
 
 build/src/app.js: build/.server/src/app.js
-	./node_modules/.bin/babel build/.server/ --out-dir build/
+	node_modules/.bin/babel build/.server/ --out-dir build/
 
 
 client: public/client.js
@@ -65,10 +65,10 @@ build/.client/:
 	mkdir -p build/.client
 
 build/.client/client/mobius.js: $(SRC_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/ build/.client types/*.d.ts tsconfig-client.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
-	node_modules/typescript/bin/tsc -p tsconfig-client.json
+	node_modules/.bin/tsc -p tsconfig-client.json
 
 public/client.js: build/.client/client/mobius.js build/.client/src/app.js rollup.config.js
-	./node_modules/.bin/rollup -c
+	node_modules/.bin/rollup -c
 
 
 fallback: public/fallback.js
@@ -77,13 +77,13 @@ build/diff-match-patch.js: node_modules/typescript/bin/tsc
 	grep -v module.exports node_modules/diff-match-patch/index.js > $@
 
 public/fallback.js: mobius-fallback.ts build/diff-match-patch.js types/*.d.ts tsconfig-fallback.json node_modules/typescript/bin/tsc
-	./node_modules/.bin/tsc -p tsconfig-fallback.json
+	node_modules/.bin/tsc -p tsconfig-fallback.json
 
 
 app: build/.client/src/app.js
 
 build/.client/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(COMMON_FILES) build/.client/client/mobius.js types/*.d.ts tsconfig-app.json node_modules/typescript/bin/tsc node_modules/preact node_modules/preact/dist/preact.d.ts
-	./node_modules/.bin/tsc -p tsconfig-app.json
+	node_modules/.bin/tsc -p tsconfig-app.json
 
 
 %.min.js: %.js Makefile
