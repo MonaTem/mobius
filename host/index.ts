@@ -215,10 +215,6 @@ class Client {
 		this.clientID = clientID;
 	}
 
-	static requestRequiresForcedEmulation(request: express.Request) : boolean {
-		return request.query["js"] == "no";
-	}
-
 	async destroy() {
 		this.session.clients.delete(this.clientID);
 		if (this.queuedLocalEventsResolve) {
@@ -1216,7 +1212,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 						client.incomingMessageId++;
 					} else {
 						// Not prerendering or joining a session, just return the original source with the noscript added
-						if (!Client.requestRequiresForcedEmulation(request)) {
+						if (request.query["js"] !== "no") {
 							return await topFrameHTML(response, defaultRenderedHTML);
 						}
 						// New session
