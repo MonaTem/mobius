@@ -78,6 +78,7 @@ interface MobiusGlobalProperties {
 
 class Host {
 	sessions = new Map<string, Session>();
+	destroying: boolean = false;
 	scriptPath: string;
 	serverModulePaths: string[];
 	modulePaths: string[];
@@ -92,6 +93,7 @@ class Host {
 	renderingMode: RenderingMode;
 	allowMultipleClientsPerSession: boolean;
 	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], htmlPath: string, htmlSource: string, secrets: JsonValue, renderingMode: RenderingMode, allowMultipleClientsPerSession: boolean) {
+		this.destroying = false;
 		this.renderingMode = renderingMode;
 		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;
 		this.secrets = secrets;
@@ -125,24 +127,26 @@ class Host {
 		if (session) {
 			return session;
 		}
-		if (this.allowMultipleClientsPerSession) {
-			let archive;
-			try {
-				archive = await Session.readArchivedSession(this.pathForSessionId(sessionID));
-			} catch (e) {
+		if (!this.destroying) {
+			if (this.allowMultipleClientsPerSession) {
+				let archive;
+				try {
+					archive = await Session.readArchivedSession(this.pathForSessionId(sessionID));
+				} catch (e) {
+				}
+				if (archive) {
+					session = new Session(this, sessionID, request);
+					this.sessions.set(sessionID, session);
+					await session.restoreFromArchive(archive as ArchivedSession);
+					return session;
+				}
 			}
-			if (archive) {
+			if (allowNewSession) {
 				session = new Session(this, sessionID, request);
+				session.newClient(request);
 				this.sessions.set(sessionID, session);
-				await session.restoreFromArchive(archive as ArchivedSession);
 				return session;
 			}
-		}
-		if (allowNewSession) {
-			session = new Session(this, sessionID, request);
-			session.newClient(request);
-			this.sessions.set(sessionID, session);
-			return session;
 		}
 		throw new Error("Session ID is not valid: " + sessionID);
 	}
@@ -175,6 +179,9 @@ class Host {
 		}
 	}
 	async newClient(request: express.Request, renderingMode?: RenderingMode) {
+		if (this.destroying) {
+			throw new Error("Cannot create new client while shutting down!");
+		}
 		for (;;) {
 			const sessionID = uuid();
 			if (!this.sessions.has(sessionID) && (!this.allowMultipleClientsPerSession || !await exists(this.pathForSessionId(sessionID)))) {
@@ -194,6 +201,7 @@ class Host {
 		}
 	}
 	async destroy() {
+		this.destroying = true;
 		clearInterval(this.staleSessionTimeout);
 		const promises: Promise<void>[] = [];
 		for (let session of this.sessions.values()) {
