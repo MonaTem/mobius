@@ -148,7 +148,7 @@ class Host {
 		throw new Error("Session ID is not valid: " + sessionID);
 	}
 	pathForSessionId(sessionId: string) {
-		return path.join(this.sessionsPath, sessionId + ".json");
+		return path.join(this.sessionsPath, encodeURIComponent(sessionId) + ".json");
 	}
 	async clientFromMessage(message: ClientMessage, request: express.Request, allowNewSession: boolean) {
 		const clientID = message.clientID as number | 0;
