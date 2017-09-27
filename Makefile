@@ -67,10 +67,10 @@ api/client:
 build/.client/:
 	mkdir -p build/.client
 
-build/.client/client/mobius.js: $(SRC_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/client build/.client types/*.d.ts tsconfig-client.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
+build/.client/client/mobius.js: $(CLIENT_FILES) $(COMMON_FILES) api/client build/.client types/*.d.ts tsconfig-client.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/.bin/tsc -p tsconfig-client.json
 
-build/src/client.js: build/.client/client/mobius.js build/.client/app.js rollup.config.js
+build/src/client.js: build/.client/client/mobius.js build/.client/src/app.js rollup.config.js
 	node_modules/.bin/rollup -c
 
 
@@ -83,9 +83,9 @@ build/fallback.js: mobius-fallback.ts build/diff-match-patch.js types/*.d.ts tsc
 	node_modules/.bin/tsc -p tsconfig-fallback.json
 
 
-app: build/.client/app.js
+app: build/.client/src/app.js
 
-build/.client/app.js: $(SRC_FILES) $(SERVER_FILES) $(COMMON_FILES) build/.client/client/mobius.js types/*.d.ts tsconfig-app.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
+build/.client/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(COMMON_FILES) build/.client/client/mobius.js types/*.d.ts tsconfig-app.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/.bin/tsc -p tsconfig-app.json
 
 
