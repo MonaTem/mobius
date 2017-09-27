@@ -10,13 +10,13 @@ HOST_FILES = $(call scripts, host)
 SRC_FILES = $(call scripts, src)
 
 all: server client fallback app
-minify: build/client.min.js build/fallback.min.js all
+minify: build/src/client.min.js build/fallback.min.js all
 
 run: all
 	node --trace-warnings --inspect build/host/index.js
 
 clean:
-	rm -rf public/fallback{,.min}.js api/ {common,host,client,src}/*.js build/ types/host/
+	rm -rf api/ build/ types/host/
 
 cleaner: clean
 	rm -rf node_modules
@@ -59,7 +59,7 @@ build/src/app.js: build/.server/src/app.js
 	node_modules/.bin/babel build/.server/ --out-dir build/
 
 
-client: build/client.js
+client: build/src/client.js
 
 api/client:
 	mkdir -p api/client
@@ -70,7 +70,7 @@ build/.client/:
 build/.client/client/mobius.js: $(SRC_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/client build/.client types/*.d.ts tsconfig-client.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/.bin/tsc -p tsconfig-client.json
 
-build/client.js: build/.client/client/mobius.js build/.client/app.js rollup.config.js
+build/src/client.js: build/.client/client/mobius.js build/.client/app.js rollup.config.js
 	node_modules/.bin/rollup -c
 
 
