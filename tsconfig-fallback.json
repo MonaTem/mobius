@@ -8,7 +8,7 @@
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
-		"outFile": "public/fallback.js",
+		"outFile": "build/fallback.js",
 		"allowJs": true,
 		"strict": true,
 		"strictNullChecks": true,

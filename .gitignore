@@ -1,6 +1,4 @@
 node_modules
-public/client.js
-public/fallback.js
 api/
 build/
 types/host/

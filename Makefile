@@ -10,7 +10,7 @@ HOST_FILES = $(call scripts, host)
 SRC_FILES = $(call scripts, src)
 
 all: server client fallback app
-minify: build/client.min.js public/fallback.min.js all
+minify: build/client.min.js build/fallback.min.js all
 
 run: all
 	node --trace-warnings --inspect build/host/index.js
@@ -72,12 +72,12 @@ build/client.js: build/.client/client/mobius.js build/.client/app.js rollup.conf
 	node_modules/.bin/rollup -c
 
 
-fallback: public/fallback.js
+fallback: build/fallback.js
 
 build/diff-match-patch.js: node_modules
 	grep -v module.exports node_modules/diff-match-patch/index.js > $@
 
-public/fallback.js: mobius-fallback.ts build/diff-match-patch.js types/*.d.ts tsconfig-fallback.json node_modules
+build/fallback.js: mobius-fallback.ts build/diff-match-patch.js types/*.d.ts tsconfig-fallback.json node_modules
 	node_modules/.bin/tsc -p tsconfig-fallback.json
 
 

@@ -1433,7 +1433,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 				}
 			});
 
-			server.use("/fallback.js", express.static(relativePath("../../public/fallback.js")));
+			server.use("/fallback.js", express.static(path.join(compiledPath, "fallback.js")));
 			server.use("/client.js", express.static(path.join(compiledPath, "client.js")));
 		},
 		async stop() {
