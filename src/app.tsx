@@ -3,7 +3,6 @@ import * as dom from "dom";
 import { receive, send } from "broadcast";
 import * as sql from "sql";
 import { shareSession } from "mobius";
-import { redact } from "redact";
 
 class CollapsibleSection extends dom.Component<{ title: string }, { visible: boolean }> {
 	constructor(props: any, context: any) {
@@ -66,7 +65,7 @@ class ReceiveWidget extends dom.Component<{}, { messages: string[] }> {
 		console.log("Receiving messages");
 		this.state = { messages: [] };
 	}
-	receiveChannel: Channel = receive(redact("messages"), value => {
+	receiveChannel: Channel = receive("messages", value => {
 		console.log("Received: " + value);
 		this.setState({ messages: [value as string].concat(this.state.messages) });
 	});
@@ -95,7 +94,7 @@ class BroadcastWidget extends dom.Component<{}, { value: string }> {
 	}
 	updateValue = (value: string) => this.setState({ value })
 	send = () => {
-		send(redact("messages"), redact(this.state.value));
+		send("messages", this.state.value);
 	}
 }
 
@@ -145,12 +144,12 @@ class NewItemWidget extends dom.Component<{}, { value: string }> {
 	}
 	onChange = (value: string) => this.setState({ value })
 	send = () => {
-		sql.modify(redact("localhost"), redact("INSERT INTO mobius_todo.items (text) VALUES (?)"), redact([this.state.value])).then(result => {
+		sql.modify("localhost", "INSERT INTO mobius_todo.items (text) VALUES (?)", [this.state.value]).then(result => {
 			const message: DbRecordChange<Item> = {
 				operation: "create",
 				record: { id: result.insertId as number, text: this.state.value }
 			};
-			send(redact("item-changes"), redact(message));
+			send("item-changes", message);
 			this.setState({ value: "" });
 		}).catch(e => console.log(e));
 	}
@@ -176,22 +175,22 @@ class ItemWidget extends dom.Component<{ item: Item }, { pendingText: string | u
 	save = () => {
 		if (typeof this.state.pendingText != "undefined") {
 			this.setState({ inProgress: true });
-			sql.modify(redact("localhost"), redact("UPDATE mobius_todo.items SET text = ? WHERE id = ?"), redact([this.state.pendingText, this.props.item.id])).then(result => {
-				send(redact("item-changes"), redact({
+			sql.modify("localhost", "UPDATE mobius_todo.items SET text = ? WHERE id = ?", [this.state.pendingText, this.props.item.id]).then(result => {
+				send("item-changes", {
 					operation: "modify",
 					record: { id: this.props.item.id, text: this.state.pendingText }
-				} as DbRecordChange<Item>));
+				} as DbRecordChange<Item>);
 				this.setState({ pendingText: undefined, inProgress: false });
 			}).catch(e => console.log(e));
 		}
 	}
 	delete = () => {
 		this.setState({ inProgress: true });
-		sql.modify(redact("localhost"), redact("DELETE FROM mobius_todo.items WHERE id = ?"), redact([this.props.item.id])).then(result => {
-			send(redact("item-changes"), redact({
+		sql.modify("localhost", "DELETE FROM mobius_todo.items WHERE id = ?", [this.props.item.id]).then(result => {
+			send("item-changes", {
 				operation: "delete",
 				record: this.props.item
-			} as DbRecordChange<Item>));
+			} as DbRecordChange<Item>);
 			this.setState({ inProgress: false });
 		});
 	}
@@ -201,7 +200,7 @@ class ListWidget<T extends DbRecord> extends dom.Component<{ fetch: () => Promis
 	constructor(props: any, context: any) {
 		super(props, context);
 		this.state = { records: [], message: "Loading..." };
-		this.receiveChannel = receive(redact(this.props.topic), (change: DbRecordChange<T>) => {
+		this.receiveChannel = receive(this.props.topic, (change: DbRecordChange<T>) => {
 			this.setState({ records: updatedRecordsFromChange(this.state.records, change) });
 		});
 		Promise.resolve(this.props.fetch()).then(records => this.setState({ records, message: undefined })).catch(e => this.setState({ message: e.toString() }));
@@ -215,7 +214,7 @@ class ListWidget<T extends DbRecord> extends dom.Component<{ fetch: () => Promis
 	}
 }
 
-const ItemsWidget = () => <ListWidget fetch={() => sql.query(redact("localhost"), redact("SELECT id, text FROM mobius_todo.items ORDER BY id DESC"))} render={(item: Item) => <ItemWidget item={item} key={item.id}/>} topic="item-changes" />;
+const ItemsWidget = () => <ListWidget fetch={() => sql.query("localhost", "SELECT id, text FROM mobius_todo.items ORDER BY id DESC")} render={(item: Item) => <ItemWidget item={item} key={item.id}/>} topic="item-changes" />;
 
 class SharingWidget extends dom.Component<{}, { url?: string, error?: any }> {
 	constructor(props: any, context: any) {
