@@ -1434,7 +1434,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 			});
 
 			server.use("/fallback.js", express.static(path.join(compiledPath, "fallback.js")));
-			server.use("/client.js", express.static(path.join(compiledPath, "client.js")));
+			server.use("/client.js", express.static(path.join(compiledPath, "src/client.js")));
 		},
 		async stop() {
 			await host.destroy();
@@ -1446,7 +1446,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 if (require.main === module) {
 	(async () => {
 		const secrets = JSON.parse((await readFile(relativePath("../../secrets.json"))).toString());
-		const mobius = await prepare(relativePath("../../build/src/"), secrets, true);
+		const mobius = await prepare(relativePath("../../build/"), secrets, true);
 
 		const server = express();
 
