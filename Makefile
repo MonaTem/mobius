@@ -44,16 +44,15 @@ node_modules/preact: node_modules preact/dist/preact.js
 	pushd node_modules && ln -sf ../preact/ preact
 
 
-api/:
-	mkdir -p api/client
-
-
 server: build/src/app.js
+
+api/server:
+	mkdir -p api/server
 
 build/.server/:
 	mkdir -p build/.server
 
-build/.server/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(HOST_FILES) $(COMMON_FILES) api/ build/.server/ types/*.d.ts tsconfig-server.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
+build/.server/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(HOST_FILES) $(COMMON_FILES) api/server build/.server/ types/*.d.ts tsconfig-server.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/.bin/tsc -p tsconfig-server.json
 
 build/src/app.js: build/.server/src/app.js
@@ -62,10 +61,13 @@ build/src/app.js: build/.server/src/app.js
 
 client: build/client.js
 
+api/client:
+	mkdir -p api/client
+
 build/.client/:
 	mkdir -p build/.client
 
-build/.client/client/mobius.js: $(SRC_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/ build/.client types/*.d.ts tsconfig-client.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
+build/.client/client/mobius.js: $(SRC_FILES) $(CLIENT_FILES) $(COMMON_FILES) api/client build/.client types/*.d.ts tsconfig-client.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/.bin/tsc -p tsconfig-client.json
 
 build/client.js: build/.client/client/mobius.js build/.client/app.js rollup.config.js
