@@ -59,7 +59,7 @@ build/src/app.js: build/.server/src/app.js
 	node_modules/.bin/babel build/.server/ --out-dir build/
 
 
-client: build/src/client.js
+client: build/.client/client/mobius.js
 
 api/client:
 	mkdir -p api/client
@@ -69,9 +69,6 @@ build/.client/:
 
 build/.client/client/mobius.js: $(CLIENT_FILES) $(COMMON_FILES) api/client build/.client types/*.d.ts tsconfig-client.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
 	node_modules/.bin/tsc -p tsconfig-client.json
-
-build/src/client.js: build/.client/client/mobius.js build/.client/src/app.js rollup.config.js
-	node_modules/.bin/rollup -c
 
 
 fallback: build/fallback.js
