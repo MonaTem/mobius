@@ -18,6 +18,9 @@ import { JsonValue, JsonMap, Channel } from "mobius-types";
 import * as mobius from "mobius";
 import { loadModule, SandboxModule } from "./sandbox";
 import { PageRenderer, PageRenderMode } from "./page-renderer";
+import clientRollup from "./client-rollup";
+// import memoize from "./memoize";
+
 import { interceptGlobals, FakedGlobals } from "../common/determinism";
 import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "../common/_internal";
 
@@ -1165,7 +1168,7 @@ function messageFromBody(body: { [key: string]: any }) : ClientMessage {
 }
 
 export default async function prepare(compiledPath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean) {
-	const serverJSPath = path.join(compiledPath, "app.js");
+	const serverJSPath = path.join(compiledPath, "src/app.js");
 
 	const htmlPath = relativePath("../../public/index.html");
 	const htmlContents = readFile(htmlPath);
@@ -1434,7 +1437,20 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 			});
 
 			server.use("/fallback.js", express.static(path.join(compiledPath, "fallback.js")));
-			server.use("/client.js", express.static(path.join(compiledPath, "src/client.js")));
+			const clientScript = clientRollup("src/app.js", path.join(compiledPath, ".client"));
+			server.get("/client.js", async (request: express.Request, response: express.Response) => {
+				try {
+					const code = await clientScript;
+					response.set("Content-Type", "text/javascript");
+					response.send(code);
+				} catch (e) {
+					response.status(500);
+					response.set("Content-Type", "text/plain");
+					response.set("Content-Security-Policy", "frame-ancestors 'none'");
+					response.send(util.inspect(e));
+				}
+			});
+			// server.use("/client.js", express.static(path.join(compiledPath, "client.js")));
 		},
 		async stop() {
 			await host.destroy();
@@ -1475,5 +1491,15 @@ if (require.main === module) {
 			await acceptSocketClosed;
 			process.exit(0);
 		}
+
+		server.get("/term", async (request, response) => {
+			response.send("exiting");
+			const acceptSocketClosed = new Promise(resolve => {
+				acceptSocket.close(resolve);
+			});
+			await mobius.stop();
+			await acceptSocketClosed;
+		});
+
 	})().catch(escape);
 }
