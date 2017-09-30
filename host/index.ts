@@ -18,7 +18,7 @@ import { JsonValue, JsonMap, Channel } from "mobius-types";
 import * as mobius from "mobius";
 import { loadModule, SandboxModule } from "./sandbox";
 import { PageRenderer, PageRenderMode } from "./page-renderer";
-import clientRollup from "./client-rollup";
+import clientCompile from "./client-compiler";
 // import memoize from "./memoize";
 
 import { interceptGlobals, FakedGlobals } from "../common/determinism";
@@ -1437,7 +1437,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 			});
 
 			server.use("/fallback.js", express.static(path.join(compiledPath, "fallback.js")));
-			const clientScript = clientRollup("src/app.js", path.join(compiledPath, ".client"));
+			const clientScript = clientCompile("src/app.js", path.join(compiledPath, ".client"));
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
 				try {
 					const code = await clientScript;
