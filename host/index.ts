@@ -364,6 +364,8 @@ const bakedModules: { [moduleName: string]: (session: Session) => any } = {
 	request: (session: Session) => session.request,
 	setCookie: (session: Session) => session.setCookie.bind(session),
 	document: (session: Session) => session.globalProperties.document,
+	head: (session: Session) => session.pageRenderer.head,
+	body: (session: Session) => session.pageRenderer.body,
 };
 
 class Session {
@@ -431,10 +433,7 @@ class Session {
 		};
 		this.request = request;
 		const globalProperties: MobiusGlobalProperties & Partial<FakedGlobals> = {
-			document: Object.create(this.host.document, {
-				body: { value: this.pageRenderer.body },
-				head: { value: this.pageRenderer.head }
-			}),
+			document: this.host.document,
 			request: this.request
 		};
 		this.globalProperties = interceptGlobals(globalProperties, () => this.insideCallback, this.coordinateValue, this.createServerChannel);

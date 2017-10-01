@@ -74,12 +74,12 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 }
 
 export function host(content: JSX.Element) : void {
-	const element = self.document.body.children[0];
+	const element = (require("body") as HTMLBodyElement).children[0];
 	preact.render(content, element, element.children[0]);
 }
 
 export function title(newTitle: string) : void {
-	const head = self.document.head;
+	const head = (require("head") as HTMLHeadElement);
 	let element = head.querySelector("title");
 	if (!element) {
 		element = self.document.createElement("title");
@@ -96,7 +96,7 @@ export function style(href: string) : Promise<void> {
 		const link = self.document.createElement("link");
 		link.rel = "stylesheet";
 		link.href = href;
-		self.document.head.appendChild(link);
+		(require("head") as HTMLHeadElement).appendChild(link);
 		result = requestedStyles[href] = createClientPromise(() => {
 			// Fallback is to return immediately--if unable to track client's ability to load CSS, just proceed
 		});
