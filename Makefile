@@ -73,10 +73,13 @@ build/.client/client/mobius.js: $(CLIENT_FILES) $(COMMON_FILES) api/client build
 
 fallback: build/fallback.js
 
-build/diff-match-patch.js: node_modules
+build/:
+	mkdir -p build/
+
+build/diff-match-patch.js: node_modules build/
 	grep -v module.exports node_modules/diff-match-patch/index.js > $@
 
-build/fallback.js: mobius-fallback.ts build/diff-match-patch.js types/*.d.ts tsconfig-fallback.json node_modules
+build/fallback.js: mobius-fallback.ts build/diff-match-patch.js types/*.d.ts tsconfig-fallback.json node_modules build/
 	node_modules/.bin/tsc -p tsconfig-fallback.json
 
 
