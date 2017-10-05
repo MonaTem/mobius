@@ -92,6 +92,7 @@ class Host {
 	secrets: JsonValue;
 	allowMultipleClientsPerSession: boolean;
 	sessionsPath: string;
+	preactModule: any;
 	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean) {
 		this.destroying = false;
 		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;
@@ -107,7 +108,15 @@ class Host {
 		this.scriptPath = scriptPath;
 		this.serverModulePaths = serverModulePaths;
 		this.modulePaths = modulePaths;
+		// Client-side emulation
 		patchJSDOM(this.document);
+		const preactPath = Module._findPath("preact", [relativePath("../../node_modules")], false);
+		const preactModule = { exports: {}, paths: [] };
+		loadModule(preactPath, preactModule, { document: this.document }, (name: string) => {
+			throw new Error("Did not expect preact module to require other modules!");
+		});
+		this.preactModule = preactModule.exports;
+		// Session timeout
 		this.staleSessionTimeout = setInterval(() => {
 			const now = Date.now();
 			for (let session of this.sessions.values()) {
@@ -366,6 +375,7 @@ const bakedModules: { [moduleName: string]: (session: Session) => any } = {
 	document: (session: Session) => session.globalProperties.document,
 	head: (session: Session) => session.pageRenderer.head,
 	body: (session: Session) => session.pageRenderer.body,
+	preact: (session: Session) => session.host.preactModule,
 };
 
 class Session {
@@ -1189,7 +1199,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 	}
 
 	const serverModulePaths = [relativePath("../server")];
-	const modulePaths = serverModulePaths.concat([relativePath("../common"), relativePath("../../preact/dist")]);
+	const modulePaths = serverModulePaths.concat([relativePath("../common")]);
 
 	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession);
 

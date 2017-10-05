@@ -20,29 +20,16 @@ clean:
 
 cleaner: clean
 	rm -rf node_modules
-	pushd preact && npm run-script clean
 
 
 node_modules: package.json
 	mkdir -p node_modules && touch node_modules
 	npm install
 
-
-preact/package.json: .gitmodules
-	git submodule update --init --recursive preact && touch preact/package.json
-
-preact/dist/preact.js: preact/package.json
+node_modules/preact/dist/preact.js: node_modules
 	# Global tools that preact requires be available
 	npm install -g npm-run-all rollup babel-cli jscodeshift gzip-size-cli rimraf
-	pushd preact && npm install
-
-node_modules/preact/dist/preact.d.ts: preact/dist/preact.js
-	pushd preact && npm run copy-typescript-definition
-
-node_modules/preact: node_modules preact/dist/preact.js
-	mkdir -p node_modules
-	pushd node_modules && ln -sf ../preact/ preact
-
+	pushd node_modules/preact && npm install
 
 server: build/src/app.js
 
@@ -52,7 +39,7 @@ api/server:
 build/.server/:
 	mkdir -p build/.server
 
-build/.server/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(HOST_FILES) $(COMMON_FILES) api/server build/.server/ types/*.d.ts tsconfig-server.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
+build/.server/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(HOST_FILES) $(COMMON_FILES) api/server build/.server/ types/*.d.ts tsconfig-server.json node_modules node_modules/preact/dist/preact.js
 	node_modules/.bin/tsc -p tsconfig-server.json
 
 build/src/app.js: build/.server/src/app.js
@@ -67,7 +54,7 @@ api/client:
 build/.client/:
 	mkdir -p build/.client
 
-build/.client/client/mobius.js: $(CLIENT_FILES) $(COMMON_FILES) api/client build/.client types/*.d.ts tsconfig-client.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
+build/.client/client/mobius.js: $(CLIENT_FILES) $(COMMON_FILES) api/client build/.client types/*.d.ts tsconfig-client.json node_modules node_modules/preact/dist/preact.js
 	node_modules/.bin/tsc -p tsconfig-client.json
 
 
@@ -85,7 +72,7 @@ build/fallback.js: mobius-fallback.ts build/diff-match-patch.js types/*.d.ts tsc
 
 app: build/.client/src/app.js
 
-build/.client/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(COMMON_FILES) build/.client/client/mobius.js types/*.d.ts tsconfig-app.json node_modules node_modules/preact node_modules/preact/dist/preact.d.ts
+build/.client/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(COMMON_FILES) build/.client/client/mobius.js types/*.d.ts tsconfig-app.json node_modules node_modules/preact/dist/preact.js
 	node_modules/.bin/tsc -p tsconfig-app.json
 
 

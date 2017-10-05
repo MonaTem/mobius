@@ -143,9 +143,9 @@ export default async function(input: string, basePath: string) : Promise<string>
 		plugins: [
 			includePaths({
 				include: {
-					"preact": "preact/dist/preact.esm.js"
+					"preact": "node_modules/preact/dist/preact.esm.js"
 				},
-				paths: [path.join(basePath, "src"), path.join(basePath, "common"), path.join(basePath, "client"), "preact/dist"]
+				paths: [path.join(basePath, "src"), path.join(basePath, "common"), path.join(basePath, "client")]
 			}),
 			rollupBabel({
 				babelrc: false,
