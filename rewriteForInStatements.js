@@ -9,6 +9,9 @@ module.exports = function({ types }) {
 						if (ancestor.isLabeledStatement() && ancestor.node.label.name === "ignore_nondeterminism") {
 							return;
 						}
+						if (ancestor.isVariableDeclarator() && ancestor.get("id").isIdentifier() && ancestor.node.id.name == "__extends") {
+							return;
+						}
 					}
 					const node = path.node;
 					const rightIdentifier = path.scope.generateUidIdentifier("right");
