@@ -152,6 +152,9 @@ export default async function(input: string, basePath: string, minify: boolean) 
 				compilerOptions: {
 					baseUrl: basePath,
 					paths: {
+						"app": [
+							path.join(basePath, input)
+						],
 						"*": [
 							path.join(__dirname, "../../client/*"),
 							path.join(__dirname, "../../common/*"),
@@ -175,7 +178,7 @@ export default async function(input: string, basePath: string, minify: boolean) 
 		}) as Plugin);
 	}
 	const bundle = await rollup({
-		input: path.join(basePath, input),
+		input: path.join(__dirname, "../../client/main.js"),
 		plugins: plugins
 	});
 	const output = await bundle.generate({
