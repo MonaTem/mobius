@@ -1179,7 +1179,7 @@ function messageFromBody(body: { [key: string]: any }) : ClientMessage {
 	return message;
 }
 
-export default async function prepare(compiledPath: string, sourcePath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean) {
+export default async function prepare(compiledPath: string, sourcePath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean, minify: boolean) {
 	const serverJSPath = path.join(compiledPath, "src/app.js");
 
 	const htmlPath = relativePath("../../public/index.html");
@@ -1449,7 +1449,7 @@ export default async function prepare(compiledPath: string, sourcePath: string, 
 			});
 
 			server.use("/fallback.js", express.static(path.join(compiledPath, "fallback.js")));
-			const clientScript = clientCompile("src/app.tsx", sourcePath);
+			const clientScript = clientCompile("src/app.tsx", sourcePath, minify);
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
 				try {
 					const code = await clientScript;
@@ -1476,6 +1476,7 @@ if (require.main === module) {
 		const args = commandLineArgs([
 			{ name: "port", type: Number, defaultValue: 3000 },
 			{ name: "base", type: String, defaultValue: process.cwd() },
+			{ name: "minify", type: Boolean, defaultValue: false },
 			{ name: "help", type: Boolean }
 		]);
 		if (args.help) {
@@ -1499,6 +1500,10 @@ if (require.main === module) {
 							description: "The base path of the app to serve"
 						},
 						{
+							name: "minify",
+							description: "Minify JavaScript code served to the browser",
+						},
+						{
 							name: "help",
 							description: "Prints this usage guide. Yahahah! You found me!"
 						}
@@ -1514,7 +1519,7 @@ if (require.main === module) {
 		const basePath = args.base as string;
 
 		const secrets = JSON.parse((await readFile(path.join(basePath, "secrets.json"))).toString());
-		const mobius = await prepare(path.join(basePath, "build"), basePath, secrets, true);
+		const mobius = await prepare(path.join(basePath, "build"), basePath, secrets, true, args.minify);
 
 		const server = express();
 

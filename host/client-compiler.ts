@@ -139,35 +139,44 @@ function fixTypeScriptExtendsWarning() {
 	};
 }
 
-export default async function(input: string, basePath: string) : Promise<string> {
-	const bundle = await rollup({
-		input: path.join(basePath, input),
-		plugins: [
-			includePaths({
-				include: {
-					"preact": path.join(__dirname, "../../node_modules/preact/dist/preact.esm.js")
-				},
-			}),
-			rollupTypeScript({
-				tsconfig: path.join(__dirname, "../../tsconfig.json"),
-				tsconfigOverride: {
-					compilerOptions: {
-						baseUrl: basePath,
-						paths: {
-							"*": [
-								path.join(__dirname, "../../client/*"),
-								path.join(__dirname, "../../common/*"),
-								path.join(__dirname, "../../types/*")
-							]
-						}
+export default async function(input: string, basePath: string, minify: boolean) : Promise<string> {
+	const plugins = [
+		includePaths({
+			include: {
+				"preact": path.join(__dirname, "../../node_modules/preact/dist/preact.esm.js")
+			},
+		}),
+		rollupTypeScript({
+			tsconfig: path.join(__dirname, "../../tsconfig.json"),
+			tsconfigOverride: {
+				compilerOptions: {
+					baseUrl: basePath,
+					paths: {
+						"*": [
+							path.join(__dirname, "../../client/*"),
+							path.join(__dirname, "../../common/*"),
+							path.join(__dirname, "../../types/*")
+						]
 					}
 				}
-			}) as any as Plugin,
-			rollupBabel({
-				babelrc: false,
-				plugins: [stripRedact(), rewriteForInStatements(babel), fixTypeScriptExtendsWarning()]
-			})
-		]
+			}
+		}) as any as Plugin,
+		rollupBabel({
+			babelrc: false,
+			plugins: [stripRedact(), rewriteForInStatements(babel), fixTypeScriptExtendsWarning()]
+		})
+	];
+	if (minify) {
+		plugins.push(require("rollup-plugin-closure-compiler-js")({
+			languageIn: "ES5",
+			languageOut: "ES3",
+			assumeFunctionWrapper: false,
+			rewritePolyfills: false
+		}) as Plugin);
+	}
+	const bundle = await rollup({
+		input: path.join(basePath, input),
+		plugins: plugins
 	});
 	const output = await bundle.generate({
 		format: "iife"
