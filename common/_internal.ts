@@ -26,6 +26,7 @@ function roundTripValue(obj: any, cycleDetection: any[]) : any {
 					case undefined:
 					case Object:
 						result = {};
+						ignore_nondeterminism:
 						for (var key in obj) {
 							if (Object.hasOwnProperty.call(obj, key)) {
 								result[key] = roundTripValue(obj[key], cycleDetection);
@@ -117,6 +118,7 @@ export function eventForException(channelId: number, error: any) : Event {
 		type = classNameForConstructor(errorClass);
 		serializedError = { message: roundTrip(error.message) };
 		let anyError : any = error;
+		ignore_nondeterminism:
 		for (let i in anyError) {
 			if (Object.hasOwnProperty.call(anyError, i)) {
 				serializedError[i] = roundTrip(anyError[i]);
@@ -139,6 +141,7 @@ export function parseValueEvent<T>(global: any, event: Event | undefined, resolv
 	if (type != 1 && /Error$/.test(type)) {
 		const ErrorType : typeof Error = global[type] || Error;
 		const error: Error = new ErrorType(value.message);
+		ignore_nondeterminism:
 		for (var i in value) {
 			if (Object.hasOwnProperty.call(value, i) && i != "message") {
 				(error as any)[i] = roundTrip(value[i]);

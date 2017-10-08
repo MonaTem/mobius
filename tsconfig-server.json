@@ -27,6 +27,7 @@
 		"strictNullChecks": true,
 		"noUnusedLocals": true,
 		"noImplicitThis": true,
+		"allowUnusedLabels": true,
 		"module": "commonjs",
 		"moduleResolution": "node",
 		"target": "es2017",

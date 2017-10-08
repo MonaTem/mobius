@@ -17,6 +17,7 @@ const preactOptions = preact.options as any;
 preactOptions.nodeRemoved = (node: PreactNode) => {
 	const c = node.__c;
 	if (c) {
+		ignore_nondeterminism:
 		for (let name in c) {
 			if (Object.hasOwnProperty.call(c, name)) {
 				c[name][2].close();

@@ -17,6 +17,7 @@
 		"strictNullChecks": true,
 		"noUnusedLocals": true,
 		"noImplicitThis": true,
+		"allowUnusedLabels": true,
 		"module": "ES6",
 		"moduleResolution": "node",
 		"target": "es5",

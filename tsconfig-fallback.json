@@ -14,6 +14,7 @@
 		"strictNullChecks": true,
 		"noUnusedLocals": true,
 		"noImplicitThis": true,
+		"allowUnusedLabels": true,
 		"module": "none",
 		"target": "es3",
 		"downlevelIteration": true,

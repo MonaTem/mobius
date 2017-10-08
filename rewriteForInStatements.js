@@ -4,6 +4,12 @@ module.exports = function({ types }) {
 			// Rewrite for (... in ...) into the equivalent source that iterates in a well-defined order
 			ForInStatement: {
 				exit(path) {
+					let ancestor = path;
+					while (ancestor = ancestor.parentPath) {
+						if (ancestor.isLabeledStatement() && ancestor.node.label.name === "ignore_nondeterminism") {
+							return;
+						}
+					}
 					const node = path.node;
 					const rightIdentifier = path.scope.generateUidIdentifier("right");
 					const keyIdentifier = path.scope.generateUidIdentifier("key");
