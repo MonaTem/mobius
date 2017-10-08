@@ -7,6 +7,9 @@
     "type": "git",
     "url": "git://github.com/rpetrich/mobius.git"
   },
+  "bin": {
+    "mobius": "build/host/index.js"
+  },
   "scripts": {
     "build": "make -j4",
     "clean": "make clean",
@@ -20,6 +23,7 @@
     "@types/babel-core": "^6.25.2",
     "@types/babel-types": "^6.25.1",
     "@types/body-parser": "^1.16.5",
+    "@types/command-line-args": "^4.0.1",
     "@types/diff-match-patch": "^1.0.31",
     "@types/express": "^4.0.37",
     "@types/jsdom": "^11.0.2",
@@ -32,6 +36,7 @@
     "babel-cli": "^6.26.0",
     "babel-core": "^6.26.0",
     "body-parser": "^1.18.2",
+    "command-line-args": "^4.0.7",
     "diff-match-patch": "^1.0.0",
     "diff-match-patch-node": "^0.9.1",
     "express": "^4.16.1",

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import * as path from "path";
 import * as fs from "fs";
 import * as rimrafAsync from "rimraf";
@@ -25,6 +26,8 @@ import { interceptGlobals, FakedGlobals } from "../common/determinism";
 import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "../common/_internal";
 
 import patchJSDOM from "./jsdom-patch";
+
+import * as commandLineArgs from "command-line-args";
 
 const relativePath = (relative: string) => path.join(__dirname, relative);
 
@@ -1470,8 +1473,15 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 
 if (require.main === module) {
 	(async () => {
-		const secrets = JSON.parse((await readFile(relativePath("../../secrets.json"))).toString());
-		const mobius = await prepare(relativePath("../../build/"), secrets, true);
+		const args = commandLineArgs([
+			{ name: "port", type: Number, defaultValue: 3000 },
+			{ name: "base", type: String, defaultValue: process.cwd() }
+		]);
+
+		const basePath = args.base as string;
+
+		const secrets = JSON.parse((await readFile(path.join(basePath, "secrets.json"))).toString());
+		const mobius = await prepare(path.join(basePath, "build"), secrets, true);
 
 		const server = express();
 
@@ -1480,9 +1490,9 @@ if (require.main === module) {
 
 		mobius.install(server);
 
-		server.use(express.static(relativePath("../../public")));
+		server.use(express.static(path.join(basePath, "public")));
 
-		const port = 3000;
+		const port = args.port;
 		const acceptSocket = server.listen(port, () => {
 			console.log(`Listening on port ${port}...`);
 		});

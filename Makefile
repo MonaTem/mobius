@@ -44,6 +44,7 @@ build/.server/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(HOST_FILES) $(COMMON_FI
 
 build/src/app.js: build/.server/src/app.js
 	node_modules/.bin/babel build/.server/ --out-dir build/
+	chmod +x build/host/index.js
 
 
 client: build/.client/client/mobius.js
