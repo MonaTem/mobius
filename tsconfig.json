@@ -1,16 +1,8 @@
 {
-	"include": [
-		"types/reduced-dom.d.ts",
-		"types/ambient.d.ts",
-		"src/*.tsx",
-		"src/*.ts",
-		"src/*.jsx",
-		"src/*.js"
-	],
 	"compilerOptions": {
-		"baseUrl": "./",
-		"outDir": "build/.client/src/",
 		"allowJs": false,
+		"declaration": true,
+		"declarationDir": "types",
 		"jsx": "react",
 		"jsxFactory": "dom.h",
 		"strict": true,
@@ -25,15 +17,8 @@
 		"types": [],
 		"lib": [
 			"es5",
+			"dom",
 			"es2015.promise"
-		],
-		"paths": {
-			"*": [
-				"src/*",
-				"types/*",
-				"api/client/*",
-				"api/*"
-			]
-		}
+		]
 	}
 }

@@ -1179,7 +1179,7 @@ function messageFromBody(body: { [key: string]: any }) : ClientMessage {
 	return message;
 }
 
-export default async function prepare(compiledPath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean) {
+export default async function prepare(compiledPath: string, sourcePath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean) {
 	const serverJSPath = path.join(compiledPath, "src/app.js");
 
 	const htmlPath = relativePath("../../public/index.html");
@@ -1449,7 +1449,7 @@ export default async function prepare(compiledPath: string, secrets: { [key: str
 			});
 
 			server.use("/fallback.js", express.static(path.join(compiledPath, "fallback.js")));
-			const clientScript = clientCompile("src/app.js", path.join(compiledPath, ".client"));
+			const clientScript = clientCompile("src/app.tsx", sourcePath);
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
 				try {
 					const code = await clientScript;
@@ -1475,13 +1475,46 @@ if (require.main === module) {
 	(async () => {
 		const args = commandLineArgs([
 			{ name: "port", type: Number, defaultValue: 3000 },
-			{ name: "base", type: String, defaultValue: process.cwd() }
+			{ name: "base", type: String, defaultValue: process.cwd() },
+			{ name: "help", type: Boolean }
 		]);
+		if (args.help) {
+			console.log(require("command-line-usage")([
+				{
+					header: "Mobius",
+					content: "Unified frontend and backend framework for building web apps"
+				},
+				{
+					header: "Options",
+					optionList: [
+						{
+							name: "port",
+							typeLabel: "[underline]{number}",
+							description: "The port number to listen on"
+
+						},
+						{
+							name: "base",
+							typeLabel: "[underline]{path}",
+							description: "The base path of the app to serve"
+						},
+						{
+							name: "help",
+							description: "Prints this usage guide. Yahahah! You found me!"
+						}
+					]
+				},
+				{
+					content: "Project home: [underline]{https://github.com/rpetrich/mobius}"
+				}
+			]));
+			process.exit(1);
+		}
 
 		const basePath = args.base as string;
 
 		const secrets = JSON.parse((await readFile(path.join(basePath, "secrets.json"))).toString());
-		const mobius = await prepare(path.join(basePath, "build"), secrets, true);
+		const mobius = await prepare(path.join(basePath, "build"), basePath, secrets, true);
 
 		const server = express();
 

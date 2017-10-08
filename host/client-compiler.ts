@@ -1,5 +1,5 @@
 import * as path from "path";
-import { rollup } from "rollup";
+import { rollup, Plugin } from "rollup";
 import { NodePath } from "babel-traverse";
 import { CallExpression, Identifier, ImportDeclaration, ImportSpecifier, Node, LogicalExpression } from "babel-types";
 import * as babel from "babel-core";
@@ -7,9 +7,11 @@ import * as types from "babel-types";
 import { pureBabylon as pure } from "side-effects-safe";
 import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
+import _rollupTypeScript from "rollup-plugin-typescript2";
 
 const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
+const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
 const rewriteForInStatements = require("../../rewriteForInStatements");
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
@@ -143,10 +145,24 @@ export default async function(input: string, basePath: string) : Promise<string>
 		plugins: [
 			includePaths({
 				include: {
-					"preact": "node_modules/preact/dist/preact.esm.js"
+					"preact": path.join(__dirname, "../../node_modules/preact/dist/preact.esm.js")
 				},
-				paths: [path.join(basePath, "src"), path.join(basePath, "common"), path.join(basePath, "client")]
 			}),
+			rollupTypeScript({
+				tsconfig: path.join(__dirname, "../../tsconfig.json"),
+				tsconfigOverride: {
+					compilerOptions: {
+						baseUrl: basePath,
+						paths: {
+							"*": [
+								path.join(__dirname, "../../client/*"),
+								path.join(__dirname, "../../common/*"),
+								path.join(__dirname, "../../types/*")
+							]
+						}
+					}
+				}
+			}) as any as Plugin,
 			rollupBabel({
 				babelrc: false,
 				plugins: [stripRedact(), rewriteForInStatements(babel), fixTypeScriptExtendsWarning()]
