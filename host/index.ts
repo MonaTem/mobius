@@ -1207,6 +1207,7 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 
 	// Render default state with noscript URL added
 	const defaultRenderedHTML = new PageRenderer(host.dom, host.noscript, host.metaRedirect).render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, { sessionID: "", localChannelCount: 0 }, "/?js=no");
+	const clientScript = await clientCompile(serverJSPath, sourcePath, minify);
 
 	return {
 		install(server: express.Express) {
@@ -1448,18 +1449,9 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 			});
 
 			server.use("/fallback.js", express.static(relativePath("../../fallback.js")));
-			const clientScript = clientCompile(serverJSPath, sourcePath, minify);
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
-				try {
-					const code = await clientScript;
-					response.set("Content-Type", "text/javascript");
-					response.send(code);
-				} catch (e) {
-					response.status(500);
-					response.set("Content-Type", "text/plain");
-					response.set("Content-Security-Policy", "frame-ancestors 'none'");
-					response.send(util.inspect(e));
-				}
+				response.set("Content-Type", "text/javascript");
+				response.send(clientScript);
 			});
 		},
 		async stop() {
