@@ -370,6 +370,7 @@ export function disconnect() {
 			websocket = undefined;
 		}
 		// Abandon pending channels
+		ignore_nondeterminism:
 		for (let channelId in pendingChannels) {
 			if (Object.hasOwnProperty.call(pendingChannels, channelId)) {
 				pendingChannels[channelId]();
