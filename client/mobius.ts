@@ -31,9 +31,7 @@ if (top != self) {
 }
 
 if (/\bMSIE [1-8]\b/.test(navigator.userAgent) || !window.addEventListener || typeof JSON == "undefined") {
-	const fallbackScript = document.createElement("script");
-	fallbackScript.src = "fallback.js";
-	document.head.appendChild(fallbackScript);
+insufficient_browser_throw:
 	throw "Insufficient browser support. Falling back to server-side rendering...";
 }
 

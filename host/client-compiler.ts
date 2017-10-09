@@ -1,7 +1,7 @@
 import * as path from "path";
 import { rollup, Plugin } from "rollup";
 import { NodePath } from "babel-traverse";
-import { CallExpression, Identifier, ImportDeclaration, ImportSpecifier, Node, LogicalExpression } from "babel-types";
+import { CallExpression, Identifier, ImportDeclaration, ImportSpecifier, Node, LabeledStatement, LogicalExpression } from "babel-types";
 import * as babel from "babel-core";
 import * as types from "babel-types";
 import { pureBabylon as pure } from "side-effects-safe";
@@ -139,6 +139,22 @@ function fixTypeScriptExtendsWarning() {
 	};
 }
 
+function rewriteInsufficientBrowserThrow() {
+	return {
+		visitor: {
+			LabeledStatement(path: NodePath<LabeledStatement>) {
+				if (path.node.label.name === "insufficient_browser_throw" && path.get("body").isThrowStatement()) {
+					path.replaceWithMultiple(babel.template(`
+						const fallbackScript = document.createElement("script");
+						fallbackScript.src = "/fallback.js";
+						document.head.appendChild(fallbackScript);
+						return;`)() as any as Node[]);
+				}
+			}
+		}
+	};
+}
+
 export default async function(input: string, basePath: string, minify: boolean) : Promise<string> {
 	const plugins = [
 		includePaths({
@@ -166,7 +182,7 @@ export default async function(input: string, basePath: string, minify: boolean) 
 		}) as any as Plugin,
 		rollupBabel({
 			babelrc: false,
-			plugins: [stripRedact(), rewriteForInStatements(babel), fixTypeScriptExtendsWarning()]
+			plugins: [stripRedact(), rewriteForInStatements(babel), fixTypeScriptExtendsWarning(), rewriteInsufficientBrowserThrow()]
 		})
 	];
 	if (minify) {
@@ -179,7 +195,10 @@ export default async function(input: string, basePath: string, minify: boolean) 
 	}
 	const bundle = await rollup({
 		input: path.join(__dirname, "../../client/main.js"),
-		plugins: plugins
+		plugins: plugins,
+		acorn: {
+			allowReturnOutsideFunction: true
+		}
 	});
 	const output = await bundle.generate({
 		format: "iife"
