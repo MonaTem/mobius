@@ -193,6 +193,9 @@ export default async function(input: string, basePath: string, minify: boolean) 
 							path.join(__dirname, "../../client/*"),
 							path.join(__dirname, "../../common/*"),
 							path.join(__dirname, "../../types/*")
+						],
+						"tslib": [
+							path.join(__dirname, "../../node_modules/tslib/tslib"),
 						]
 					}
 				}
