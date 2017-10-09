@@ -1180,7 +1180,7 @@ function messageFromBody(body: { [key: string]: any }) : ClientMessage {
 }
 
 export default async function prepare(sourcePath: string, sessionsPath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean, minify: boolean) {
-	const serverJSPath = path.join(sourcePath, "src/app.tsx");
+	const serverJSPath = path.join(sourcePath, "app.tsx");
 
 	const htmlPath = relativePath("../../public/index.html");
 	const htmlContents = readFile(htmlPath);
@@ -1463,9 +1463,10 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 
 if (require.main === module) {
 	(async () => {
+		const cwd = process.cwd();
 		const args = commandLineArgs([
 			{ name: "port", type: Number, defaultValue: 3000 },
-			{ name: "base", type: String, defaultValue: process.cwd() },
+			{ name: "base", type: String, defaultValue: cwd },
 			{ name: "minify", type: Boolean, defaultValue: false },
 			{ name: "help", type: Boolean }
 		]);
@@ -1506,7 +1507,7 @@ if (require.main === module) {
 			process.exit(1);
 		}
 
-		const basePath = args.base as string;
+		const basePath = path.resolve(cwd, args.base as string);
 
 		let secrets = {};
 		try {

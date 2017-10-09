@@ -7,7 +7,7 @@ all: host fallback
 minify: build/fallback.min.js all
 
 run: all
-	node --trace-warnings --inspect build/host/index.js
+	node --trace-warnings --inspect build/host/index.js --base sample-app
 
 clean:
 	rm -rf api/ build/ types/host/
