@@ -1516,7 +1516,11 @@ if (require.main === module) {
 
 		const basePath = args.base as string;
 
-		const secrets = JSON.parse((await readFile(path.join(basePath, "secrets.json"))).toString());
+		let secrets = {};
+		try {
+			secrets = JSON.parse((await readFile(path.join(basePath, "secrets.json"))).toString());
+		} catch (e) {
+		}
 		const mobius = await prepare(basePath, path.join(basePath, "build/sessions"), secrets, true, args.minify);
 
 		const server = express();
