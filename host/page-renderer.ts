@@ -44,7 +44,7 @@ export class PageRenderer {
 	clientIdInput?: HTMLInputElement;
 	messageIdInput?: HTMLInputElement;
 	hasServerChannelsInput?: HTMLInputElement;
-	constructor(dom: JSDOM, noscript: Element, metaRedirect: Element) {
+	constructor(dom: JSDOM, noscript: Element, metaRedirect: Element, clientURL: string) {
 		this.dom = dom;
 		this.document = (dom.window as Window).document;
 		this.body = this.document.body.cloneNode(true) as Element;
@@ -52,7 +52,7 @@ export class PageRenderer {
 		this.noscript = noscript;
 		this.metaRedirect = metaRedirect;
 		const clientScript = this.clientScript = this.document.createElement("script");
-		clientScript.src = "client.js";
+		clientScript.src = clientURL;
 		this.body.appendChild(clientScript);
 	}
 	render(mode: PageRenderMode, clientState: ClientState, sessionState: SessionState, noScriptURL?: string, bootstrapData?: BootstrapData) : string {

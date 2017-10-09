@@ -3,6 +3,7 @@ import * as path from "path";
 import * as fs from "fs";
 import * as rimrafAsync from "rimraf";
 import * as util from "util";
+import * as crypto from "crypto";
 const Module = require("module");
 
 import * as express from "express";
@@ -83,6 +84,7 @@ class Host {
 	sessions = new Map<string, Session>();
 	destroying: boolean = false;
 	scriptPath: string;
+	scriptURL: string;
 	serverModulePaths: string[];
 	modulePaths: string[];
 	internalModulePath: string;
@@ -96,7 +98,7 @@ class Host {
 	allowMultipleClientsPerSession: boolean;
 	sessionsPath: string;
 	preactModule: any;
-	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean) {
+	constructor(scriptPath: string, scriptURL: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean) {
 		this.destroying = false;
 		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;
 		this.secrets = secrets;
@@ -423,7 +425,7 @@ class Session {
 	constructor(host: Host, sessionID: string, request: express.Request) {
 		this.host = host;
 		this.sessionID = sessionID;
-		this.pageRenderer = new PageRenderer(this.host.dom, this.host.noscript, this.host.metaRedirect);
+		this.pageRenderer = new PageRenderer(this.host.dom, this.host.noscript, this.host.metaRedirect, this.host.scriptURL);
 		// Server-side version of the API
 		this.mobius = {
 			disconnect: () => this.destroy().catch(escape),
@@ -1203,11 +1205,12 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 	const serverModulePaths = [relativePath("../server")];
 	const modulePaths = serverModulePaths.concat([relativePath("../common")]);
 
-	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession);
+	const clientScript = await clientCompile(serverJSPath, sourcePath, minify);
+	const clientURL = "/" + crypto.createHash("sha1").update(clientScript).digest("hex").substr(16) + ".js";
+	const host = new Host(serverJSPath, clientURL, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession);
 
 	// Render default state with noscript URL added
-	const defaultRenderedHTML = new PageRenderer(host.dom, host.noscript, host.metaRedirect).render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, { sessionID: "", localChannelCount: 0 }, "/?js=no");
-	const clientScript = await clientCompile(serverJSPath, sourcePath, minify);
+	const defaultRenderedHTML = new PageRenderer(host.dom, host.noscript, host.metaRedirect, clientURL).render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, { sessionID: "", localChannelCount: 0 }, "/?js=no");
 
 	return {
 		install(server: express.Express) {
@@ -1451,6 +1454,12 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 			server.use("/fallback.js", express.static(relativePath("../../fallback.js")));
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
 				response.set("Content-Type", "text/javascript");
+				response.send(clientScript);
+			});
+			server.get(clientURL, async (request: express.Request, response: express.Response) => {
+				response.set("Content-Type", "text/javascript");
+				response.set("Cache-Control", "max-age=31536000");
+				response.set("Expires", "Sun, 17 Jan 2038 19:14:07 GMT");
 				response.send(clientScript);
 			});
 		},
