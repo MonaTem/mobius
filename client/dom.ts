@@ -1,7 +1,7 @@
 import { createClientChannel, createClientPromise } from "mobius";
 import { Channel } from "mobius-types";
 import * as preact from "preact";
-export { h, cloneElement, Component, AnyComponent, ComponentProps } from "preact";
+export { h, Component, AnyComponent, ComponentProps } from "preact";
 
 interface WrappedEvent {
 	value?: string;
