@@ -3,12 +3,7 @@
 rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
 scripts=$(call rwildcard, $1/, *.tsx) $(call rwildcard, $1/, *.ts)
 
-COMMON_FILES = $(call scripts, common)
-SERVER_FILES = $(call scripts, server)
-HOST_FILES = $(call scripts, host)
-SRC_FILES = $(call scripts, src)
-
-all: server fallback
+all: host fallback
 minify: build/fallback.min.js all
 
 run: all
@@ -21,19 +16,19 @@ cleaner: clean
 	rm -rf node_modules
 
 
-server: build/src/app.js
+host: build/host/index.js
 
 api/server:
 	mkdir -p api/server
 
-build/.server/:
-	mkdir -p build/.server
+build/.host/:
+	mkdir -p build/.host
 
-build/.server/src/app.js: $(SRC_FILES) $(SERVER_FILES) $(HOST_FILES) $(COMMON_FILES) api/server build/.server/ types/*.d.ts tsconfig-server.json
-	node_modules/.bin/tsc -p tsconfig-server.json
+build/.host/host/index.js: $(call scripts, host) $(call scripts, common) api/server build/.host/ types/*.d.ts tsconfig-host.json
+	node_modules/.bin/tsc -p tsconfig-host.json
 
-build/src/app.js: build/.server/src/app.js
-	node_modules/.bin/babel build/.server/ --out-dir build/
+build/host/index.js: build/.host/host/index.js
+	node_modules/.bin/babel build/.host/ --out-dir build/
 	chmod +x build/host/index.js
 
 

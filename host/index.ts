@@ -1179,13 +1179,12 @@ function messageFromBody(body: { [key: string]: any }) : ClientMessage {
 	return message;
 }
 
-export default async function prepare(compiledPath: string, sourcePath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean, minify: boolean) {
-	const serverJSPath = path.join(compiledPath, "src/app.js");
+export default async function prepare(sourcePath: string, sessionsPath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean, minify: boolean) {
+	const serverJSPath = path.join(sourcePath, "src/app.tsx");
 
 	const htmlPath = relativePath("../../public/index.html");
 	const htmlContents = readFile(htmlPath);
 
-	const sessionsPath = path.join(compiledPath, "sessions");
 	const gracefulPath = path.join(sessionsPath, ".graceful");
 
 	// Check if we can reuse existing sessions
@@ -1448,8 +1447,8 @@ export default async function prepare(compiledPath: string, sourcePath: string, 
 				}
 			});
 
-			server.use("/fallback.js", express.static(path.join(compiledPath, "fallback.js")));
-			const clientScript = clientCompile("src/app.tsx", sourcePath, minify);
+			server.use("/fallback.js", express.static(relativePath("../../fallback.js")));
+			const clientScript = clientCompile(serverJSPath, sourcePath, minify);
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
 				try {
 					const code = await clientScript;
@@ -1462,7 +1461,6 @@ export default async function prepare(compiledPath: string, sourcePath: string, 
 					response.send(util.inspect(e));
 				}
 			});
-			// server.use("/client.js", express.static(path.join(compiledPath, "client.js")));
 		},
 		async stop() {
 			await host.destroy();
@@ -1519,7 +1517,7 @@ if (require.main === module) {
 		const basePath = args.base as string;
 
 		const secrets = JSON.parse((await readFile(path.join(basePath, "secrets.json"))).toString());
-		const mobius = await prepare(path.join(basePath, "build"), basePath, secrets, true, args.minify);
+		const mobius = await prepare(basePath, path.join(basePath, "build/sessions"), secrets, true, args.minify);
 
 		const server = express();
 

@@ -1,6 +1,11 @@
 import * as vm from "vm";
 import { readFileSync } from "fs";
 import memoize from "./memoize";
+import * as ts from "typescript";
+import * as path from "path";
+import * as babel from "babel-core";
+
+const rewriteForInStatements = require("../../rewriteForInStatements");
 
 export interface SandboxModule {
 	exports: any,
@@ -25,9 +30,26 @@ declare global {
 	}
 }
 
+const compilerOptions = (() => {
+	const basePath = path.join(__dirname, "../..");
+	const fileName = "tsconfig-server.json";
+	const configFile = ts.readJsonConfigFile(path.join(basePath, fileName), (path: string) => readFileSync(path).toString());
+	const configObject = ts.convertToObject(configFile, []);
+	return ts.convertCompilerOptionsFromJson(configObject.compilerOptions, basePath, fileName).options;
+})();
+
 const sandboxedScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: string) => {
 	const scriptContents = readFileSync(scriptPath).toString();
-	return vm.runInThisContext("(function (self){with(self){return(function(self,global,require,document,request){" + scriptContents + "\n})(self,self.global,self.require,self.document,self.request)}})", {
+	const compiled = ts.transpileModule(scriptContents, {
+		fileName: scriptPath,
+		compilerOptions
+	});
+	const transformed = babel.transform(compiled.outputText, {
+		babelrc: false,
+		plugins: [rewriteForInStatements(babel)],
+		inputSourceMap: typeof compiled.sourceMapText == "string" ? JSON.parse(compiled.sourceMapText) : undefined
+	});
+	return vm.runInThisContext("(function (self){with(self){return(function(self,global,require,document,request){" + transformed.code + "\n})(self,self.global,self.require,self.document,self.request)}})", {
 		filename: scriptPath,
 		lineOffset: 0,
 		displayErrors: true

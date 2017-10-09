@@ -163,13 +163,13 @@ export default async function(input: string, basePath: string, minify: boolean) 
 			},
 		}),
 		rollupTypeScript({
-			tsconfig: path.join(__dirname, "../../tsconfig.json"),
+			tsconfig: path.join(__dirname, "../../tsconfig-client.json"),
 			tsconfigOverride: {
 				compilerOptions: {
 					baseUrl: basePath,
 					paths: {
 						"app": [
-							path.join(basePath, input)
+							input
 						],
 						"*": [
 							path.join(__dirname, "../../client/*"),
