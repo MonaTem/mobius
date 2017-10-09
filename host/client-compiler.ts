@@ -8,6 +8,7 @@ import { pureBabylon as pure } from "side-effects-safe";
 import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
+import * as ts from "typescript";
 
 const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
@@ -156,6 +157,14 @@ function rewriteInsufficientBrowserThrow() {
 }
 
 export default async function(input: string, basePath: string, minify: boolean) : Promise<string> {
+	// Workaround to allow TypeScript to union two folders. This is definitely not right, but it works :(
+	const parseJsonConfigFileContent = ts.parseJsonConfigFileContent;
+	(ts as any).parseJsonConfigFileContent = function(this: any, json: any, host: ts.ParseConfigHost, basePath2: string, existingOptions?: ts.CompilerOptions, configFileName?: string, resolutionStack?: ts.Path[], extraFileExtensions?: ReadonlyArray<ts.JsFileExtensionInfo>) : ts.ParsedCommandLine {
+		const result = parseJsonConfigFileContent.call(this, json, host, basePath2, existingOptions, configFileName, resolutionStack, extraFileExtensions);
+		const augmentedResult = parseJsonConfigFileContent.call(this, json, host, basePath, existingOptions, configFileName, resolutionStack, extraFileExtensions);
+		result.fileNames = result.fileNames.concat(augmentedResult.fileNames);
+		return result;
+	} as any;
 	const plugins = [
 		includePaths({
 			include: {
@@ -163,22 +172,31 @@ export default async function(input: string, basePath: string, minify: boolean) 
 			},
 		}),
 		rollupTypeScript({
+			cacheRoot: path.join(basePath, ".cache"),
+			include: [
+				path.join(basePath, "**/*.ts+(|x)"),
+				path.join(basePath, "*.ts+(|x)"),
+				path.join(__dirname, "../../**/*.ts+(|x)"),
+				path.join(__dirname, "../../*.ts+(|x)")
+			] as any,
 			tsconfig: path.join(__dirname, "../../tsconfig-client.json"),
 			tsconfigOverride: {
 				compilerOptions: {
 					baseUrl: basePath,
 					paths: {
 						"app": [
-							input
+							path.resolve(basePath, input)
 						],
 						"*": [
+							path.join(basePath, "client/*"),
+							path.join(basePath, "common/*"),
 							path.join(__dirname, "../../client/*"),
 							path.join(__dirname, "../../common/*"),
 							path.join(__dirname, "../../types/*")
 						]
 					}
 				}
-			}
+			},
 		}) as any as Plugin,
 		rollupBabel({
 			babelrc: false,
@@ -195,7 +213,7 @@ export default async function(input: string, basePath: string, minify: boolean) 
 	}
 	const bundle = await rollup({
 		input: path.join(__dirname, "../../client/main.js"),
-		plugins: plugins,
+		plugins,
 		acorn: {
 			allowReturnOutsideFunction: true
 		}
@@ -203,6 +221,8 @@ export default async function(input: string, basePath: string, minify: boolean) 
 	const output = await bundle.generate({
 		format: "iife"
 	});
+	// Cleanup some of the mess we made
+	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;
 	return output.code;
 }
 
