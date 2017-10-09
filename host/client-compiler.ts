@@ -146,7 +146,7 @@ function rewriteInsufficientBrowserThrow() {
 			LabeledStatement(path: NodePath<LabeledStatement>) {
 				if (path.node.label.name === "insufficient_browser_throw" && path.get("body").isThrowStatement()) {
 					path.replaceWithMultiple(babel.template(`
-						const fallbackScript = document.createElement("script");
+						var fallbackScript = document.createElement("script");
 						fallbackScript.src = "/fallback.js";
 						document.head.appendChild(fallbackScript);
 						return;`)() as any as Node[]);
