@@ -30,7 +30,7 @@
     "command-line-usage": "^4.0.1",
     "diff-match-patch": "^1.0.0",
     "diff-match-patch-node": "^0.9.1",
-    "express": "^4.16.1",
+    "express": "^4.16.2",
     "express-ws": "^3.0.0",
     "google-closure-compiler-js": "^20170910.0.1",
     "jsdom": "^11.3.0",
