@@ -4,43 +4,40 @@ rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst 
 scripts=$(call rwildcard, $1/, *.tsx) $(call rwildcard, $1/, *.ts)
 
 all: host fallback
-minify: build/fallback.min.js all
+minify: dist/fallback.min.js all
 
 run: all
-	node --trace-warnings --inspect build/host/index.js --base sample-app
+	node --trace-warnings --inspect dist/mobius.js --base sample-app
 
 clean:
-	rm -rf api/ build/ types/host/
+	rm -rf dist/ .rpt2_cache/
 
 cleaner: clean
 	rm -rf node_modules
 
 
-host: build/host/index.js
+host: dist/mobius.js
 
-api/server:
-	mkdir -p api/server
+dist/.host/:
+	mkdir -p mobius/.host
 
-build/.host/:
-	mkdir -p build/.host
-
-build/.host/host/index.js: $(call scripts, host) $(call scripts, common) api/server build/.host/ types/*.d.ts tsconfig-host.json
+dist/.host/mobius.js: $(call scripts, host) $(call scripts, common) mobius.ts dist/.host/ types/*.d.ts tsconfig-host.json
 	node_modules/.bin/tsc -p tsconfig-host.json
 
-build/host/index.js: build/.host/host/index.js
-	node_modules/.bin/babel build/.host/ --out-dir build/
-	chmod +x build/host/index.js
+dist/mobius.js: dist/.host/mobius.js
+	node_modules/.bin/babel dist/.host/ --out-dir dist/
+	chmod +x dist/mobius.js
 
 
-fallback: build/fallback.js
+fallback: dist/fallback.js
 
-build/:
-	mkdir -p build/
+dist/:
+	mkdir -p dist/
 
-build/diff-match-patch.js: build/
+dist/diff-match-patch.js: dist/
 	grep -v module.exports node_modules/diff-match-patch/index.js > $@
 
-build/fallback.js: mobius-fallback.ts build/diff-match-patch.js types/*.d.ts tsconfig-fallback.json build/
+dist/fallback.js: mobius-fallback.ts dist/diff-match-patch.js types/*.d.ts tsconfig-fallback.json dist/
 	node_modules/.bin/tsc -p tsconfig-fallback.json
 
 

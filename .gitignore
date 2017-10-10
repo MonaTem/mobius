@@ -1,8 +1,3 @@
 node_modules
-api/
-build/
-types/host/
-types/src/
-*.js.map
-*.min.js
+dist/
 .rpt2_cache

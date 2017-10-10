@@ -18,15 +18,14 @@ const diff_match_patch_node = new (require("diff-match-patch-node") as typeof di
 
 import { JsonValue, JsonMap, Channel } from "mobius-types";
 import * as mobius from "mobius";
-import { loadModule, SandboxModule } from "./sandbox";
-import { PageRenderer, PageRenderMode } from "./page-renderer";
-import clientCompile from "./client-compiler";
-// import memoize from "./memoize";
+import { loadModule, SandboxModule } from "./host/sandbox";
+import { PageRenderer, PageRenderMode } from "./host/page-renderer";
+import clientCompile from "./host/client-compiler";
 
-import { interceptGlobals, FakedGlobals } from "../common/determinism";
-import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "../common/_internal";
+import { interceptGlobals, FakedGlobals } from "./common/determinism";
+import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "./common/_internal";
 
-import patchJSDOM from "./jsdom-patch";
+import patchJSDOM from "./host/jsdom-patch";
 
 import * as commandLineArgs from "command-line-args";
 
@@ -115,7 +114,7 @@ class Host {
 		this.modulePaths = modulePaths;
 		// Client-side emulation
 		patchJSDOM(this.document);
-		const preactPath = Module._findPath("preact", [relativePath("../../node_modules")], false);
+		const preactPath = Module._findPath("preact", [relativePath("../node_modules")], false);
 		const preactModule = { exports: {}, paths: [] };
 		loadModule(preactPath, preactModule, { document: this.document }, (name: string) => {
 			throw new Error("Did not expect preact module to require other modules!");
@@ -1184,7 +1183,7 @@ function messageFromBody(body: { [key: string]: any }) : ClientMessage {
 export default async function prepare(sourcePath: string, sessionsPath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean, minify: boolean) {
 	const serverJSPath = path.join(sourcePath, "app.tsx");
 
-	const htmlPath = relativePath("../../public/index.html");
+	const htmlPath = relativePath("../public/index.html");
 	const htmlContents = readFile(htmlPath);
 
 	const gracefulPath = path.join(sessionsPath, ".graceful");
@@ -1202,8 +1201,8 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 		await unlink(gracefulPath);
 	}
 
-	const serverModulePaths = [relativePath("../server")];
-	const modulePaths = serverModulePaths.concat([relativePath("../common")]);
+	const serverModulePaths = [relativePath("server")];
+	const modulePaths = serverModulePaths.concat([relativePath("common")]);
 
 	const clientScript = await clientCompile(serverJSPath, sourcePath, minify);
 	const clientURL = "/" + crypto.createHash("sha1").update(clientScript).digest("hex").substr(16) + ".js";
@@ -1451,7 +1450,7 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 				}
 			});
 
-			server.use("/fallback.js", express.static(relativePath("../../fallback.js")));
+			server.use("/fallback.js", express.static(relativePath("../fallback.js")));
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
 				response.set("Content-Type", "text/javascript");
 				response.send(clientScript);

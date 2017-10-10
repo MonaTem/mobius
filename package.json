@@ -2,13 +2,13 @@
   "name": "mobius",
   "version": "0.1.0",
   "description": "Experiment for simpler web apps",
-  "main": "build/host/index.js",
+  "main": "dist/index.js",
   "repository": {
     "type": "git",
     "url": "git://github.com/rpetrich/mobius.git"
   },
   "bin": {
-    "mobius": "build/host/index.js"
+    "mobius": "dist/mobius.js"
   },
   "scripts": {
     "build": "make -j4",

@@ -6,17 +6,17 @@
 		"server/*.tsx",
 		"common/*.ts",
 		"common/*.tsx",
-		"host/*.ts"
+		"host/*.ts",
+		"mobius.ts"
 	],
 	"exclude": [
 		"node_modules/"
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
-		"outDir": "build/.host/",
+		"outDir": "dist/.host/",
 		"allowJs": false,
-		"declaration": true,
-		"declarationDir": "types",
+		"declaration": false,
 		"jsx": "react",
 		"jsxFactory": "dom.h",
 		"strict": true,

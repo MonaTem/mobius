@@ -1,14 +1,14 @@
 {
 	"include": [
 		"node_modules/set-dom/dist/set-dom.js",
-		"build/diff-match-patch.js",
+		"dist/diff-match-patch.js",
 		"mobius-fallback.ts"
 	],
 	"exclude": [
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
-		"outFile": "build/fallback.js",
+		"outFile": "dist/fallback.js",
 		"allowJs": true,
 		"strict": true,
 		"strictNullChecks": true,
