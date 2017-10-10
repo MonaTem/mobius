@@ -32,7 +32,6 @@
     "diff-match-patch-node": "^0.9.1",
     "express": "^4.16.2",
     "express-ws": "^3.0.0",
-    "google-closure-compiler-js": "^20170910.0.1",
     "jsdom": "^11.3.0",
     "mysql": "^2.15.0",
     "node-fetch": "^1.7.3",
