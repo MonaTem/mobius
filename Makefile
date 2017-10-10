@@ -10,7 +10,7 @@ run: all
 	node --trace-warnings --inspect dist/mobius.js --base sample-app
 
 clean:
-	rm -rf dist/ .rpt2_cache/ mobius-*.tgz
+	rm -rf dist/ mobius-*.tgz
 
 cleaner: clean
 	rm -rf node_modules
