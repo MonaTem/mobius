@@ -26,7 +26,7 @@ function ignoreEvent() {
 }
 
 preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
-	const listeners = node.__l;
+	const listeners = node._listeners;
 	if (listeners) {
 		const c = node.__c || (node.__c = {});
 		if (Object.hasOwnProperty.call(listeners, name)) {

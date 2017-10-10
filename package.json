@@ -13,28 +13,18 @@
   "scripts": {
     "build": "make -j4",
     "clean": "make clean",
-    "minify": "make minify -j4",
     "start": "make run -j4",
-    "install": "npm run-script build"
+    "prepare": "npm run-script build"
   },
   "author": "Ryan Petrich <rpetrich@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "@types/babel-core": "^6.25.2",
-    "@types/babel-types": "^6.25.1",
-    "@types/body-parser": "^1.16.5",
-    "@types/command-line-args": "^4.0.1",
-    "@types/diff-match-patch": "^1.0.31",
     "@types/express": "^4.0.37",
     "@types/jsdom": "^11.0.2",
     "@types/node": "^8.0.33",
     "@types/node-fetch": "^1.6.7",
-    "@types/qs": "^6.5.0",
-    "@types/rimraf": "^2.0.2",
-    "@types/rollup": "^0.41.1",
-    "@types/uuid": "^3.4.2",
-    "babel-cli": "^6.26.0",
     "babel-core": "^6.26.0",
+    "babel-plugin-transform-es2015-modules-commonjs": "^6.26.0",
     "body-parser": "^1.18.2",
     "command-line-args": "^4.0.7",
     "command-line-usage": "^4.0.1",
@@ -46,7 +36,6 @@
     "jsdom": "^11.3.0",
     "mysql": "^2.15.0",
     "node-fetch": "^1.7.3",
-    "preact": "https://github.com/rpetrich/preact/tarball/e974c1eae06beba969911cf81aea91910589b1d1",
     "rimraf": "^2.6.2",
     "rollup": "^0.50.0",
     "rollup-plugin-babel": "^3.0.2",
@@ -55,12 +44,24 @@
     "rollup-plugin-typescript2": "^0.7.0",
     "set-dom": "^7.4.5",
     "side-effects-safe": "0.0.1",
-    "source-map-support": "^0.5.0",
     "typescript": "^2.5.3",
     "uuid": "^3.1.0"
   },
   "optionalDependencies": {
     "bufferutil": "^3.0.2",
     "utf-8-validate": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/babel-core": "^6.25.2",
+    "@types/babel-types": "^6.25.1",
+    "@types/body-parser": "^1.16.5",
+    "@types/command-line-args": "^4.0.1",
+    "@types/diff-match-patch": "^1.0.31",
+    "@types/qs": "^6.5.0",
+    "@types/rimraf": "^2.0.2",
+    "@types/rollup": "^0.41.1",
+    "@types/uuid": "^3.4.2",
+    "babel-cli": "^6.26.0",
+    "preact": "https://github.com/rpetrich/preact/tarball/e974c1eae06beba969911cf81aea91910589b1d1"
   }
 }

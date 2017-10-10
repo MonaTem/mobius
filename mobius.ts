@@ -96,7 +96,6 @@ class Host {
 	secrets: JsonValue;
 	allowMultipleClientsPerSession: boolean;
 	sessionsPath: string;
-	preactModule: any;
 	constructor(scriptPath: string, scriptURL: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean) {
 		this.destroying = false;
 		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;
@@ -114,12 +113,6 @@ class Host {
 		this.modulePaths = modulePaths;
 		// Client-side emulation
 		patchJSDOM(this.document);
-		const preactPath = Module._findPath("preact", [relativePath("../node_modules")], false);
-		const preactModule = { exports: {}, paths: [] };
-		loadModule(preactPath, preactModule, { document: this.document }, (name: string) => {
-			throw new Error("Did not expect preact module to require other modules!");
-		});
-		this.preactModule = preactModule.exports;
 		// Session timeout
 		this.staleSessionTimeout = setInterval(() => {
 			const now = Date.now();
@@ -379,8 +372,10 @@ const bakedModules: { [moduleName: string]: (session: Session) => any } = {
 	document: (session: Session) => session.globalProperties.document,
 	head: (session: Session) => session.pageRenderer.head,
 	body: (session: Session) => session.pageRenderer.body,
-	preact: (session: Session) => session.host.preactModule,
 };
+
+// Hack so that Module._findPath will find TypeScript files
+Module._extensions[".ts"] = Module._extensions[".tsx"] = function() {}
 
 class Session {
 	host: Host;
@@ -1201,8 +1196,8 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 		await unlink(gracefulPath);
 	}
 
-	const serverModulePaths = [relativePath("server")];
-	const modulePaths = serverModulePaths.concat([relativePath("common")]);
+	const serverModulePaths = [relativePath("../server"), path.join(sourcePath, "server")];
+	const modulePaths = serverModulePaths.concat([relativePath("common"), relativePath("../common"), path.join(sourcePath, "common")]);
 
 	const clientScript = await clientCompile(serverJSPath, sourcePath, minify);
 	const clientURL = "/" + crypto.createHash("sha1").update(clientScript).digest("hex").substr(16) + ".js";

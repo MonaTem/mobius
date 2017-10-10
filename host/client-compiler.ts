@@ -168,7 +168,7 @@ export default async function(input: string, basePath: string, minify: boolean) 
 	const plugins = [
 		includePaths({
 			include: {
-				"preact": path.join(__dirname, "../../node_modules/preact/dist/preact.esm.js")
+				"preact": path.join(__dirname, "../common/preact")
 			},
 		}),
 		rollupTypeScript({
@@ -188,15 +188,15 @@ export default async function(input: string, basePath: string, minify: boolean) 
 							path.resolve(basePath, input)
 						],
 						"*": [
-							path.join(basePath, "client/*"),
-							path.join(basePath, "common/*"),
 							path.join(__dirname, "../../client/*"),
+							path.join(basePath, "client/*"),
 							path.join(__dirname, "../../common/*"),
+							path.join(basePath, "common/*"),
 							path.join(__dirname, "../../types/*")
 						],
 						"tslib": [
 							path.join(__dirname, "../../node_modules/tslib/tslib"),
-						]
+						],
 					}
 				}
 			},

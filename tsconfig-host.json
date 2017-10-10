@@ -1,11 +1,6 @@
 {
 	"include": [
 		"types/reduced-dom.d.ts",
-		"server/ambients.d.ts",
-		"server/*.ts",
-		"server/*.tsx",
-		"common/*.ts",
-		"common/*.tsx",
 		"host/*.ts",
 		"mobius.ts"
 	],
