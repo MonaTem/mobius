@@ -1,7 +1,7 @@
 import * as path from "path";
 import { rollup, Plugin } from "rollup";
 import { NodePath } from "babel-traverse";
-import { CallExpression, Identifier, ImportDeclaration, ImportSpecifier, Node, LabeledStatement, LogicalExpression } from "babel-types";
+import { BlockStatement, CallExpression, ForStatement, Identifier, ImportDeclaration, ImportSpecifier, Node, LabeledStatement, LogicalExpression, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as babel from "babel-core";
 import * as types from "babel-types";
 import { pureBabylon as pure } from "side-effects-safe";
@@ -67,8 +67,12 @@ function isUndefined(node: Node) {
 	return node.type == "Identifier" && (node as Identifier).name === "undefined";
 }
 
+function isPure(node: Node) {
+	return pure(node, { pureMembers: /./ });
+}
+
 function isPureOrRedacted(path: NodePath) {
-	if (pure(path.node, { pureMembers: /./ })) {
+	if (isPure(path.node)) {
 		return true;
 	}
 	if (path.isCallExpression()) {
@@ -157,6 +161,42 @@ function rewriteInsufficientBrowserThrow() {
 	};
 }
 
+function stripUnusedArgumentCopies() {
+	return {
+		visitor: {
+			ForStatement(path: NodePath<ForStatement>) {
+				const init = path.get("init");
+				const test = path.get("test");
+				const update = path.get("update");
+				const body = path.get("body");
+				if (init.isVariableDeclaration() && (init.node as VariableDeclaration).declarations.every(declarator => declarator.id.type == "Identifier" && (!declarator.init || isPure(declarator.init))) &&
+					isPure(test.node) &&
+					update.isUpdateExpression() && update.get("argument").isIdentifier() && ((update.node as UpdateExpression).argument as Identifier).name === ((init.node as VariableDeclaration).declarations[0].id as Identifier).name &&
+					body.isBlockStatement() && (body.node as BlockStatement).body.length == 1
+				) {
+					const bodyStatement = body.get("body.0");
+					if (bodyStatement.isExpressionStatement()) {
+						const expression = bodyStatement.get("expression");
+						if (expression.isAssignmentExpression()) {
+							const left = expression.get("left");
+							const right = expression.get("right");
+							if (left.isMemberExpression() && isPure(left.node) && left.get("object").isIdentifier() &&
+								right.isMemberExpression() && isPure(right.node) && right.get("object").isIdentifier() && (right.get("object").node as Identifier).name == "arguments"
+							) {
+								const binding = left.scope.getBinding((left.get("object").node as Identifier).name);
+								if (binding && binding.constant && binding.referencePaths.length == 1) {
+									// Since the only reference is to the assignment variable is the compiler-generated copy loop, we can remove it entirely
+									path.remove();
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	};
+}
+
 export default async function(input: string, basePath: string, minify: boolean) : Promise<string> {
 	// Workaround to allow TypeScript to union two folders. This is definitely not right, but it works :(
 	const parseJsonConfigFileContent = ts.parseJsonConfigFileContent;
@@ -204,7 +244,13 @@ export default async function(input: string, basePath: string, minify: boolean) 
 		}) as any as Plugin,
 		rollupBabel({
 			babelrc: false,
-			plugins: [stripRedact(), rewriteForInStatements(babel), fixTypeScriptExtendsWarning(), rewriteInsufficientBrowserThrow()]
+			plugins: [
+				stripRedact(),
+				rewriteForInStatements(babel),
+				fixTypeScriptExtendsWarning(),
+				rewriteInsufficientBrowserThrow(),
+				stripUnusedArgumentCopies()
+			]
 		})
 	];
 	if (minify) {
