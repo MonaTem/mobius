@@ -3,6 +3,9 @@ import * as dom from "dom";
 import { receive, send } from "broadcast";
 import * as sql from "sql";
 import { shareSession } from "mobius";
+import { secret } from "redact";
+
+const database = secret<sql.Credentials>("mysql", "localhost");
 
 class CollapsibleSection extends dom.Component<{ title: string }, { visible: boolean }> {
 	constructor(props: any, context: any) {
@@ -144,7 +147,7 @@ class NewItemWidget extends dom.Component<{}, { value: string }> {
 	}
 	onChange = (value: string) => this.setState({ value })
 	send = () => {
-		sql.modify("localhost", "INSERT INTO mobius_todo.items (text) VALUES (?)", [this.state.value]).then(result => {
+		sql.modify(database, "INSERT INTO mobius_todo.items (text) VALUES (?)", [this.state.value]).then(result => {
 			const message: DbRecordChange<Item> = {
 				operation: "create",
 				record: { id: result.insertId as number, text: this.state.value }
@@ -175,7 +178,7 @@ class ItemWidget extends dom.Component<{ item: Item }, { pendingText: string | u
 	save = () => {
 		if (typeof this.state.pendingText != "undefined") {
 			this.setState({ inProgress: true });
-			sql.modify("localhost", "UPDATE mobius_todo.items SET text = ? WHERE id = ?", [this.state.pendingText, this.props.item.id]).then(result => {
+			sql.modify(database, "UPDATE mobius_todo.items SET text = ? WHERE id = ?", [this.state.pendingText, this.props.item.id]).then(result => {
 				send("item-changes", {
 					operation: "modify",
 					record: { id: this.props.item.id, text: this.state.pendingText }
@@ -186,7 +189,7 @@ class ItemWidget extends dom.Component<{ item: Item }, { pendingText: string | u
 	}
 	delete = () => {
 		this.setState({ inProgress: true });
-		sql.modify("localhost", "DELETE FROM mobius_todo.items WHERE id = ?", [this.props.item.id]).then(result => {
+		sql.modify(database, "DELETE FROM mobius_todo.items WHERE id = ?", [this.props.item.id]).then(result => {
 			send("item-changes", {
 				operation: "delete",
 				record: this.props.item
@@ -214,7 +217,7 @@ class ListWidget<T extends DbRecord> extends dom.Component<{ fetch: () => Promis
 	}
 }
 
-const ItemsWidget = () => <ListWidget fetch={() => sql.query("localhost", "SELECT id, text FROM mobius_todo.items ORDER BY id DESC")} render={(item: Item) => <ItemWidget item={item} key={item.id}/>} topic="item-changes" />;
+const ItemsWidget = () => <ListWidget fetch={() => sql.query(database, "SELECT id, text FROM mobius_todo.items ORDER BY id DESC")} render={(item: Item) => <ItemWidget item={item} key={item.id}/>} topic="item-changes" />;
 
 class SharingWidget extends dom.Component<{}, { url?: string, error?: any }> {
 	constructor(props: any, context: any) {

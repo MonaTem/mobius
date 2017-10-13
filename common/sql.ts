@@ -3,10 +3,16 @@ import { Redacted } from "redact";
 
 export const query = execute;
 
+export interface Credentials {
+	host: string;
+	user: string;
+	password?: string;
+}
+
 export type Record = { [column: string] : any };
 
-export function modify(host: string | Redacted<string>, sql: string | Redacted<string>, params?: any[] | Redacted<any[]>) : Promise<{insertId?: number, affectedRows: number}> {
-	return execute(host, sql, params).then((results: Record[]) => {
+export function modify(credentials: Redacted<Credentials | undefined>, sql: string | Redacted<string>, params?: any[] | Redacted<any[]>) : Promise<{insertId?: number, affectedRows: number}> {
+	return execute(credentials, sql, params).then((results: Record[]) => {
 		const record = results[0];
 		if (!record) {
 			throw new Error("Did not receive a record describing the modify status!");

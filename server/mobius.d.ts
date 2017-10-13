@@ -11,5 +11,3 @@ export function createClientChannel<T extends Function>(callback: T): Channel;
 export function createServerChannel<T extends Function, U = void>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender?: boolean): Channel;
 export function coordinateValue<T extends JsonValue>(generator: () => T) : T;
 export function shareSession() : Promise<string>;
-
-export let secrets: { [key: string]: any };

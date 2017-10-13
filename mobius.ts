@@ -16,7 +16,7 @@ import { JSDOM } from "jsdom";
 import { diff_match_patch } from "diff-match-patch";
 const diff_match_patch_node = new (require("diff-match-patch-node") as typeof diff_match_patch);
 
-import { JsonValue, JsonMap, Channel } from "mobius-types";
+import { JsonValue, Channel } from "mobius-types";
 import * as mobius from "mobius";
 import { loadModule, SandboxModule } from "./host/sandbox";
 import { PageRenderer, PageRenderMode } from "./host/page-renderer";
@@ -372,6 +372,7 @@ const bakedModules: { [moduleName: string]: (session: Session) => any } = {
 	document: (session: Session) => session.globalProperties.document,
 	head: (session: Session) => session.pageRenderer.head,
 	body: (session: Session) => session.pageRenderer.body,
+	secrets: (session: Session) => session.host.secrets,
 };
 
 // Hack so that Module._findPath will find TypeScript files
@@ -423,7 +424,6 @@ class Session {
 		// Server-side version of the API
 		this.mobius = {
 			disconnect: () => this.destroy().catch(escape),
-			secrets: host.secrets as JsonMap,
 			dead: false,
 			createClientPromise: this.createClientPromise,
 			createServerPromise: this.createServerPromise,

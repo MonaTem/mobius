@@ -20,6 +20,7 @@ type RedactedExportData = { [exportName: string]: (boolean | undefined)[] };
 const redactions: { [moduleName: string]: RedactedExportData } = {
 	"redact": {
 		"redact": [true],
+		"secret": [true, true, true, true, true, true, true],
 	},
 	"sql": {
 		"query": [true, true, false],
