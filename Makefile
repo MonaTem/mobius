@@ -15,19 +15,21 @@ cleaner: clean
 	rm -rf node_modules
 
 
-preact: dist/common/preact.js
+preact: dist/common/preact.js dist/common/preact.d.ts
 
 dist/common/:
 	mkdir -p $@
 
-node_modules/preact/dist/preact.d.ts:
+node_modules/preact/dist/preact.esm.js: $(call rwildcard, node_modules/preact/src/, *.js)
 	# Global tools that preact requires be available
 	npm install -g npm-run-all rollup babel-cli jscodeshift gzip-size-cli rimraf
 	pushd node_modules/preact && npm version --allow-same-version 0.0.1 && npm install
 
-dist/common/preact.js: dist/common/ node_modules/preact/dist/preact.d.ts
-	cp node_modules/preact/dist/preact.d.ts dist/common/
-	cp node_modules/preact/dist/preact.esm.js dist/common/preact.js
+dist/common/preact.js: node_modules/preact/dist/preact.esm.js dist/common/
+	cp $< $@
+
+dist/common/preact.d.ts: node_modules/preact/src/preact.d.ts dist/common/
+	cp $< $@
 
 
 host: dist/mobius.js
