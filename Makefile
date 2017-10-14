@@ -1,10 +1,9 @@
-.PHONY: all run clean cleaner minify server app fallback
+.PHONY: all run clean cleaner host fallback preact
 
 rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
 scripts=$(call rwildcard, $1/, *.tsx) $(call rwildcard, $1/, *.ts)
 
-all: host fallback dist/common/preact.js
-minify: dist/fallback.min.js all
+all: host fallback preact
 
 run: all
 	node --trace-warnings --inspect dist/mobius.js --base sample-app
@@ -15,6 +14,8 @@ clean:
 cleaner: clean
 	rm -rf node_modules
 
+
+preact: dist/common/preact.js
 
 dist/common/:
 	mkdir -p $@
@@ -47,6 +48,3 @@ dist/diff-match-patch.js: dist/
 dist/fallback.js: mobius-fallback.ts dist/diff-match-patch.js types/*.d.ts tsconfig-fallback.json dist/
 	node_modules/.bin/tsc -p tsconfig-fallback.json
 
-
-%.min.js: %.js Makefile
-	node node_modules/.bin/google-closure-compiler-js --languageIn ES5 --languageOut ES3 --assumeFunctionWrapper true --rewritePolyfills false $< > $@
