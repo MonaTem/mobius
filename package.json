@@ -60,7 +60,6 @@
     "@types/rimraf": "^2.0.2",
     "@types/rollup": "^0.41.1",
     "@types/uuid": "^3.4.2",
-    "babel-cli": "^6.26.0",
     "preact": "https://github.com/rpetrich/preact/tarball/e974c1eae06beba969911cf81aea91910589b1d1"
   }
 }

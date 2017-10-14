@@ -31,14 +31,8 @@ dist/common/preact.js: dist/common/ node_modules/preact/dist/preact.d.ts
 
 host: dist/mobius.js
 
-dist/.host/:
-	mkdir -p mobius/.host
-
-dist/.host/mobius.js: $(call scripts, host) $(call scripts, common) mobius.ts dist/.host/ types/*.d.ts tsconfig-host.json
+dist/mobius.js: $(call scripts, host) $(call scripts, common) mobius.ts types/*.d.ts tsconfig-host.json
 	node_modules/.bin/tsc -p tsconfig-host.json
-
-dist/mobius.js: dist/.host/mobius.js
-	node_modules/.bin/babel dist/.host/ --out-dir dist/
 	chmod +x dist/mobius.js
 
 

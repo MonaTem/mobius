@@ -9,7 +9,7 @@
 	],
 	"compilerOptions": {
 		"baseUrl": "./",
-		"outDir": "dist/.host/",
+		"outDir": "dist/",
 		"allowJs": false,
 		"declaration": false,
 		"jsx": "react",

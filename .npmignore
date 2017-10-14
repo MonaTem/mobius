@@ -1,5 +1,3 @@
-.host
-.babelrc
 *.tgz
 Makefile
 tsconfig-host.json
