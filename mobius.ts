@@ -109,6 +109,7 @@ class Host {
 		this.metaRedirect.setAttribute("http-equiv", "refresh");
 		this.noscript.appendChild(this.metaRedirect);
 		this.scriptPath = scriptPath;
+		this.scriptURL = scriptURL;
 		this.serverModulePaths = serverModulePaths;
 		this.modulePaths = modulePaths;
 		// Client-side emulation
