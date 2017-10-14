@@ -28,7 +28,6 @@
     "body-parser": "^1.18.2",
     "command-line-args": "^4.0.7",
     "command-line-usage": "^4.0.1",
-    "diff-match-patch": "^1.0.0",
     "diff-match-patch-node": "^0.9.1",
     "express": "^4.16.2",
     "express-ws": "^3.0.0",
@@ -59,6 +58,7 @@
     "@types/rimraf": "^2.0.2",
     "@types/rollup": "^0.41.1",
     "@types/uuid": "^3.4.2",
+    "diff-match-patch": "^1.0.0",
     "preact": "https://github.com/rpetrich/preact/tarball/e974c1eae06beba969911cf81aea91910589b1d1",
     "set-dom": "^7.4.5"
   }
