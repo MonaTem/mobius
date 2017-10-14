@@ -2,6 +2,7 @@
 	"include": [
 		"types/reduced-dom.d.ts",
 		"host/*.ts",
+		"host/*.js",
 		"mobius.ts"
 	],
 	"exclude": [
@@ -10,7 +11,7 @@
 	"compilerOptions": {
 		"baseUrl": "./",
 		"outDir": "dist/",
-		"allowJs": false,
+		"allowJs": true,
 		"declaration": false,
 		"jsx": "react",
 		"jsxFactory": "dom.h",

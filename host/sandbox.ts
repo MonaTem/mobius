@@ -5,7 +5,7 @@ import * as ts from "typescript";
 import * as path from "path";
 import * as babel from "babel-core";
 
-const rewriteForInStatements = require("../../rewriteForInStatements");
+const rewriteForInStatements = require("./rewriteForInStatements");
 const convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs");
 
 export interface SandboxModule {
