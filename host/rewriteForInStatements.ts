@@ -1,15 +1,19 @@
-module.exports = function({ types }) {
+import { NodePath } from "babel-traverse";
+import { CallExpression, ForInStatement, Identifier, LabeledStatement, VariableDeclarator } from "babel-types";
+import * as types from "babel-types";
+
+export default function() {
 	return {
 		visitor: {
 			// Rewrite for (... in ...) into the equivalent source that iterates in a well-defined order
 			ForInStatement: {
-				exit(path) {
-					let ancestor = path;
+				exit(path: NodePath<ForInStatement>) {
+					let ancestor: NodePath = path;
 					while (ancestor = ancestor.parentPath) {
-						if (ancestor.isLabeledStatement() && ancestor.node.label.name === "ignore_nondeterminism") {
+						if (ancestor.isLabeledStatement() && (ancestor.node as LabeledStatement).label.name === "ignore_nondeterminism") {
 							return;
 						}
-						if (ancestor.isVariableDeclarator() && ancestor.get("id").isIdentifier() && ancestor.node.id.name == "__extends") {
+						if (ancestor.isVariableDeclarator() && ancestor.get("id").isIdentifier() && ((ancestor.node as VariableDeclarator).id as Identifier).name == "__extends") {
 							return;
 						}
 					}
@@ -41,7 +45,7 @@ module.exports = function({ types }) {
 			},
 			// Rewrite Object.keys(...) into Object.keys(...).sort()
 			CallExpression: {
-				exit(path) {
+				exit(path: NodePath<CallExpression>) {
 					const node = path.node;
 					const callee = node.callee;
 					if (callee.type == "MemberExpression" && callee.object.type == "Identifier" && callee.object.name == "Object") {

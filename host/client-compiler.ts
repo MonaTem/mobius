@@ -9,11 +9,11 @@ import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
 import * as ts from "typescript";
+import rewriteForInStatements from "./rewriteForInStatements";
 
 const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
-const rewriteForInStatements = require("./rewriteForInStatements");
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
 type RedactedExportData = { [exportName: string]: (boolean | undefined)[] };
@@ -246,7 +246,7 @@ export default async function(input: string, basePath: string, minify: boolean) 
 			babelrc: false,
 			plugins: [
 				stripRedact(),
-				rewriteForInStatements(babel),
+				rewriteForInStatements(),
 				fixTypeScriptExtendsWarning(),
 				rewriteInsufficientBrowserThrow(),
 				stripUnusedArgumentCopies()

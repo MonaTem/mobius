@@ -4,8 +4,8 @@ import memoize from "./memoize";
 import * as ts from "typescript";
 import * as path from "path";
 import * as babel from "babel-core";
+import rewriteForInStatements from "./rewriteForInStatements";
 
-const rewriteForInStatements = require("./rewriteForInStatements");
 const convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs");
 
 export interface SandboxModule {
@@ -47,7 +47,7 @@ const sandboxedScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: stri
 	}) : undefined;
 	const transformed = babel.transform(compiled ? compiled.outputText : scriptContents, {
 		babelrc: false,
-		plugins: [convertToCommonJS(), rewriteForInStatements(babel)],
+		plugins: [convertToCommonJS(), rewriteForInStatements()],
 		inputSourceMap: compiled && typeof compiled.sourceMapText == "string" ? JSON.parse(compiled.sourceMapText) : undefined
 	});
 	return vm.runInThisContext("(function (self){with(self){return(function(self,global,require,document,request){" + transformed.code + "\n})(self,self.global,self.require,self.document,self.request)}})", {
