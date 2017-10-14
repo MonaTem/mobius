@@ -42,16 +42,7 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 					const listener = tuple[1];
 					listener(event);
 				}, send => {
-					sender = (event: any) => {
-						const simpleEvent: any = {};
-						if ("value" in event.target) {
-							simpleEvent.value = event.target.value;
-						}
-						if ("keyCode" in event) {
-							simpleEvent.keyCode = event.keyCode;
-						}
-						send(simpleEvent);
-					}
+					sender = send;
 				}, undefined, name == "input", true);
 				tuple = c[name] = [sender as (event: any) => void, listener, channel];
 			}
@@ -91,4 +82,8 @@ export function style(href: string) : Promise<void> {
 		document.head.appendChild(link);
 	}
 	return result;
+}
+
+export function ref<T, V>(component: preact.Component<T, V>) : Element | null {
+	return (component as any).base as Element | null;
 }
