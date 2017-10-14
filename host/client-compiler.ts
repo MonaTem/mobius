@@ -10,6 +10,7 @@ import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
 import * as ts from "typescript";
 import rewriteForInStatements from "./rewriteForInStatements";
+import noGettersOrSetters from "./noGettersOrSetters";
 
 const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
@@ -248,6 +249,7 @@ export default async function(input: string, basePath: string, minify: boolean) 
 				stripRedact(),
 				rewriteForInStatements(),
 				fixTypeScriptExtendsWarning(),
+				noGettersOrSetters(),
 				rewriteInsufficientBrowserThrow(),
 				stripUnusedArgumentCopies()
 			]
