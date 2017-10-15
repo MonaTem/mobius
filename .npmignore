@@ -11,3 +11,4 @@ types/rollup-plugin-babel.d.ts
 types/rollup-plugin-includepaths.d.ts
 types/rollup.d.ts
 types/side-effects-safe.d.ts
+yarn.lock
