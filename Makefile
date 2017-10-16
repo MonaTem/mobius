@@ -6,7 +6,7 @@ scripts=$(call rwildcard, $1/, *.tsx) $(call rwildcard, $1/, *.ts)
 all: host fallback preact
 
 run: all
-	node --trace-warnings --inspect dist/mobius.js --base sample-app
+	node --trace-warnings --inspect dist/mobius.js --base sample-app --source-map
 
 clean:
 	rm -rf dist/ mobius-*.tgz

@@ -198,7 +198,12 @@ function stripUnusedArgumentCopies() {
 	};
 }
 
-export default async function(input: string, basePath: string, minify: boolean) : Promise<string> {
+interface CompilerOutput {
+	code: string;
+	map: string;
+}
+
+export default async function(input: string, basePath: string, minify: boolean) : Promise<CompilerOutput> {
 	// Workaround to allow TypeScript to union two folders. This is definitely not right, but it works :(
 	const parseJsonConfigFileContent = ts.parseJsonConfigFileContent;
 	(ts as any).parseJsonConfigFileContent = function(this: any, json: any, host: ts.ParseConfigHost, basePath2: string, existingOptions?: ts.CompilerOptions, configFileName?: string, resolutionStack?: ts.Path[], extraFileExtensions?: ReadonlyArray<ts.JsFileExtensionInfo>) : ts.ParsedCommandLine {
@@ -271,10 +276,14 @@ export default async function(input: string, basePath: string, minify: boolean) 
 		}
 	});
 	const output = await bundle.generate({
-		format: "iife"
+		format: "iife",
+		sourcemap: true
 	});
 	// Cleanup some of the mess we made
 	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;
-	return output.code;
+	return {
+		code: output.code,
+		map: output.map.toString(),
+	};
 }
 

@@ -1176,7 +1176,7 @@ function messageFromBody(body: { [key: string]: any }) : ClientMessage {
 	return message;
 }
 
-export default async function prepare(sourcePath: string, sessionsPath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean, minify: boolean) {
+export default async function prepare(sourcePath: string, sessionsPath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean, minify: boolean, sourceMaps: boolean) {
 	const serverJSPath = path.join(sourcePath, "app.tsx");
 
 	const htmlPath = relativePath("../public/index.html");
@@ -1201,7 +1201,7 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 	const modulePaths = serverModulePaths.concat([relativePath("common"), relativePath("../common"), path.join(sourcePath, "common")]);
 
 	const clientScript = await clientCompile(serverJSPath, sourcePath, minify);
-	const clientURL = "/" + crypto.createHash("sha1").update(clientScript).digest("hex").substr(16) + ".js";
+	const clientURL = "/" + crypto.createHash("sha1").update(clientScript.code).digest("hex").substr(16) + ".js";
 	const host = new Host(serverJSPath, clientURL, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession);
 
 	// Render default state with noscript URL added
@@ -1449,14 +1449,26 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 			server.use("/fallback.js", express.static(relativePath("../fallback.js")));
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
 				response.set("Content-Type", "text/javascript");
-				response.send(clientScript);
+				if (sourceMaps) {
+					response.set("SourceMap", "/client.js.map");
+				}
+				response.send(clientScript.code);
 			});
 			server.get(clientURL, async (request: express.Request, response: express.Response) => {
 				response.set("Content-Type", "text/javascript");
 				response.set("Cache-Control", "max-age=31536000");
 				response.set("Expires", "Sun, 17 Jan 2038 19:14:07 GMT");
-				response.send(clientScript);
+				if (sourceMaps) {
+					response.set("SourceMap", "/client.js.map");
+				}
+				response.send(clientScript.code);
 			});
+			if (sourceMaps) {
+				server.get("/client.js.map", async (request: express.Request, response: express.Response) => {
+					response.set("Content-Type", "application/json");
+					response.send(clientScript.map);
+				});
+			}
 		},
 		async stop() {
 			await host.destroy();
@@ -1472,6 +1484,7 @@ if (require.main === module) {
 			{ name: "port", type: Number, defaultValue: 3000 },
 			{ name: "base", type: String, defaultValue: cwd },
 			{ name: "minify", type: Boolean, defaultValue: false },
+			{ name: "source-map", type: Boolean, defaultValue: false },
 			{ name: "help", type: Boolean }
 		]);
 		if (args.help) {
@@ -1499,6 +1512,10 @@ if (require.main === module) {
 							description: "Minify JavaScript code served to the browser",
 						},
 						{
+							name: "source-map",
+							description: "Expose source maps for debugging in supported browsers",
+						},
+						{
 							name: "help",
 							description: "Prints this usage guide. Yahahah! You found me!"
 						}
@@ -1518,7 +1535,7 @@ if (require.main === module) {
 			secrets = JSON.parse((await readFile(path.join(basePath, "secrets.json"))).toString());
 		} catch (e) {
 		}
-		const mobius = await prepare(basePath, path.join(basePath, ".sessions"), secrets, true, args.minify);
+		const mobius = await prepare(basePath, path.join(basePath, ".sessions"), secrets, true, args.minify, args["source-map"]);
 
 		const server = express();
 

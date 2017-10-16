@@ -60,7 +60,7 @@ export interface BundleOptions {
 
 export interface GenerateOptions extends BundleOptions {
 	/** Whether to generate a sourcemap. If true, the return value from `bundle.generate(...)` will include a map property */
-	sourceMap?: boolean
+	sourcemap?: boolean
 	/**
 	 * The location of the generated bundle. If this is an absolute path, all the sources paths in the sourcemap will be relative to it.
 	 * The map.file property is the basename of sourceMapFile, as the location of the sourcemap is assumed to be adjacent to the bundle.
