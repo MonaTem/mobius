@@ -7,20 +7,23 @@ import { secret } from "redact";
 
 const database = secret<sql.Credentials>("mysql", "localhost");
 
-class CollapsibleSection extends dom.Component<{ title: string }, { visible: boolean }> {
-	constructor(props: any, context: any) {
-		super(props, context);
-		this.state = { visible: false };
-	}
+class CollapsibleSection extends dom.Component<{ title: string }, { visible?: boolean }> {
 	render() {
 		if (this.state.visible) {
-			return <div><h2 class="active"><button onClick={this.hide}>{this.props.title}</button></h2><div>{this.props.children}</div></div>
+			return <div>
+				<h2 class="active">
+					<button onClick={() => this.setState({ visible: false })}>{this.props.title}</button>
+				</h2>
+				<div>{this.props.children}</div>
+			</div>
 		} else {
-			return <div><h2 class="inactive"><button onClick={this.show}>{this.props.title}</button></h2></div>
+			return <div>
+				<h2 class="inactive">
+					<button onClick={() => this.setState({ visible: true })}>{this.props.title}</button>
+				</h2>
+			</div>
 		}
 	}
-	show = () => this.setState({ visible: true })
-	hide = () => this.setState({ visible: false })
 }
 
 
@@ -48,16 +51,16 @@ class RandomWidget extends dom.Component<{}, { value: string }> {
 
 
 class TextField extends dom.Component<{ value: string, placeholder?: string, onChange: (value: string) => void, onEnter: () => void }, { value: string }> {
-	onChange = (event: any) => {
+	onChange(event: any) {
 		this.props.onChange(event.value as string);
 	}
-	onKeyPress = (event: any) => {
+	onKeyPress(event: any) {
 		if (event.keyCode == 13 && this.props.onEnter) {
 			this.props.onEnter();
 		}
 	}
 	render() {
-		return <input placeholder={this.props.placeholder || ""} value={this.props.value} onChange={this.onChange} onInput={this.onChange} onKeyPress={this.props.onEnter ? this.onKeyPress : undefined}/>
+		return <input placeholder={this.props.placeholder || ""} value={this.props.value} onChange={this.onChange.bind(this)} onInput={this.onChange.bind(this)} onKeyPress={this.props.onEnter ? this.onKeyPress : undefined}/>
 	}
 }
 
@@ -140,13 +143,15 @@ class NewItemWidget extends dom.Component<{}, { value: string }> {
 	render() {
 		return (
 			<div>
-				<TextField placeholder="New Item" value={this.state.value} onChange={this.onChange} onEnter={this.send} />
+				<TextField placeholder="New Item" value={this.state.value} onChange={this.onChange.bind(this)} onEnter={this.send.bind(this)} />
 				<button onClick={this.send}>Add</button>
 			</div>
 		);
 	}
-	onChange = (value: string) => this.setState({ value })
-	send = () => {
+	onChange(value: string) {
+		this.setState({ value });
+	}
+	send() {
 		sql.modify(database, "INSERT INTO mobius_todo.items (text) VALUES (?)", [this.state.value]).then(result => {
 			const message: DbRecordChange<Item> = {
 				operation: "create",
@@ -166,16 +171,16 @@ class ItemWidget extends dom.Component<{ item: Item }, { pendingText: string | u
 	render() {
 		return (
 			<div>
-				<TextField value={typeof this.state.pendingText != "undefined" ? this.state.pendingText : this.props.item.text} onChange={this.setPendingText} onEnter={this.save}/>
-				<button onClick={this.save} class={typeof this.state.pendingText != "undefined" ? "save-dirty" : "save-clean"} disabled={this.state.inProgress}>Save</button>
-				<button onClick={this.delete} disabled={this.state.inProgress}>Delete</button>
+				<TextField value={typeof this.state.pendingText != "undefined" ? this.state.pendingText : this.props.item.text} onChange={this.setPendingText.bind(this)} onEnter={this.save.bind(this)}/>
+				<button onClick={this.save.bind(this)} class={typeof this.state.pendingText != "undefined" ? "save-dirty" : "save-clean"} disabled={this.state.inProgress}>Save</button>
+				<button onClick={this.delete.bind(this)} disabled={this.state.inProgress}>Delete</button>
 			</div>
 		);
 	}
-	setPendingText = (pendingText: string) => {
+	setPendingText(pendingText: string) {
 		this.setState({ pendingText : pendingText != this.props.item.text ? pendingText : undefined })
 	}
-	save = () => {
+	save() {
 		if (typeof this.state.pendingText != "undefined") {
 			this.setState({ inProgress: true });
 			sql.modify(database, "UPDATE mobius_todo.items SET text = ? WHERE id = ?", [this.state.pendingText, this.props.item.id]).then(result => {
@@ -187,7 +192,7 @@ class ItemWidget extends dom.Component<{ item: Item }, { pendingText: string | u
 			}).catch(e => console.log(e));
 		}
 	}
-	delete = () => {
+	delete() {
 		this.setState({ inProgress: true });
 		sql.modify(database, "DELETE FROM mobius_todo.items WHERE id = ?", [this.props.item.id]).then(result => {
 			send("item-changes", {

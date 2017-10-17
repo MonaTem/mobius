@@ -15,6 +15,7 @@ import noGettersOrSetters from "./noGettersOrSetters";
 const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
+const optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
 type RedactedExportData = { [exportName: string]: (boolean | undefined)[] };
@@ -251,6 +252,7 @@ export default async function(input: string, basePath: string, minify: boolean) 
 		rollupBabel({
 			babelrc: false,
 			plugins: [
+				optimizeClosuresInRender(babel),
 				stripRedact(),
 				rewriteForInStatements(),
 				fixTypeScriptExtendsWarning(),

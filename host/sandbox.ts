@@ -7,6 +7,7 @@ import * as babel from "babel-core";
 import rewriteForInStatements from "./rewriteForInStatements";
 
 const convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs");
+const optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
 
 export interface SandboxModule {
 	exports: any,
@@ -47,7 +48,11 @@ const sandboxedScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: stri
 	}) : undefined;
 	const transformed = babel.transform(compiled ? compiled.outputText : scriptContents, {
 		babelrc: false,
-		plugins: [convertToCommonJS(), rewriteForInStatements()],
+		plugins: [
+			convertToCommonJS(),
+			optimizeClosuresInRender(babel),
+			rewriteForInStatements()
+		],
 		inputSourceMap: compiled && typeof compiled.sourceMapText == "string" ? JSON.parse(compiled.sourceMapText) : undefined
 	});
 	return vm.runInThisContext("(function (self){with(self){return(function(self,global,require,document,request){" + transformed.code + "\n})(self,self.global,self.require,self.document,self.request)}})", {
