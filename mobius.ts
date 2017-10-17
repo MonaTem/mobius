@@ -1168,7 +1168,21 @@ function messageFromBody(body: { [key: string]: any }) : ClientMessage {
 	return message;
 }
 
-export default async function prepare(sourcePath: string, sessionsPath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean, minify: boolean, sourceMaps: boolean, hostname?: string) {
+interface Config {
+	sourcePath: string;
+	secrets: { [key: string]: any };
+	sessionsPath?: string;
+	allowMultipleClientsPerSession?: boolean;
+	minify?: boolean;
+	sourceMaps?: boolean;
+	hostname?: string;
+}
+
+function defaultSessionPath(sourcePath: string) {
+	return path.join(sourcePath, ".sessions");
+}
+
+export default async function prepare({ sourcePath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, hostname }: Config) {
 	const serverJSPath = path.join(sourcePath, "app.tsx");
 
 	const htmlPath = relativePath("../public/index.html");
@@ -1538,7 +1552,13 @@ if (require.main === module) {
 			secrets = JSON.parse((await readFile(path.join(basePath, "secrets.json"))).toString());
 		} catch (e) {
 		}
-		const mobius = await prepare(basePath, path.join(basePath, ".sessions"), secrets, true, args.minify, args["source-map"]);
+		const mobius = await prepare({
+			sourcePath: basePath,
+			secrets,
+			minify: args.minify as boolean,
+			sourceMaps: args["source-map"] as boolean,
+			hostname: args.hostname as string | undefined
+		});
 
 		const server = express();
 
