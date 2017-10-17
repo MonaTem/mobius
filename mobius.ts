@@ -1439,6 +1439,9 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 
 			server.use("/fallback.js", express.static(relativePath("../fallback.js")));
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
+				if (simulatedLatency) {
+					await delay(simulatedLatency);
+				}
 				response.set("Content-Type", "text/javascript");
 				if (sourceMaps) {
 					response.set("SourceMap", "/client.js.map");
@@ -1446,6 +1449,9 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 				response.send(clientScript.code);
 			});
 			server.get(clientURL, async (request: express.Request, response: express.Response) => {
+				if (simulatedLatency) {
+					await delay(simulatedLatency);
+				}
 				response.set("Content-Type", "text/javascript");
 				response.set("Cache-Control", "max-age=31536000");
 				response.set("Expires", "Sun, 17 Jan 2038 19:14:07 GMT");
