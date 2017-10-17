@@ -608,9 +608,6 @@ function createRawServerChannel(callback: (event?: Event) => void) : Channel {
 	if (!insideCallback) {
 		throw new Error("Unable to create server channel in this context!");
 	}
-	if (dead) {
-		throw disconnectedError();
-	}
 	// Expect that the server will run some code in parallel that provides data
 	pendingChannelCount++;
 	let channelId = ++remoteChannelCounter;
@@ -669,23 +666,39 @@ export function flush() : Promise<void> {
 	return resolvedPromise;
 }
 
-// APIs for client/, not to be used inside src/
-export const createServerPromise: <T extends JsonValue | void>(...args: any[]) => Promise<T> = <T extends JsonValue | void>() => new Promise<T>((resolve, reject) => {
-	const channel = createRawServerChannel(event => {
-		channel.close();
-		if (event) {
-			parseValueEvent(self, event, resolve as (value: JsonValue) => void, reject);
+export const createServerPromise: <T extends JsonValue | void>(fallback?: () => Promise<T> | T) => Promise<T> = <T extends JsonValue | void>(fallback?: () => Promise<T> | T) => new Promise<T>((resolve, reject) => {
+	if (dead) {
+		if (fallback) {
+			resolve(fallback());
 		} else {
 			reject(disconnectedError());
 		}
-	});
+	} else {
+		const channel = createRawServerChannel(event => {
+			channel.close();
+			if (event) {
+				parseValueEvent(self, event, resolve as (value: JsonValue) => void, reject);
+			} else if (fallback) {
+				try {
+					resolve(fallback());
+				} catch(e) {
+					reject(e);
+				}
+			} else {
+				reject(disconnectedError());
+			}
+		});
+	}
 });
 
-export const synchronize = createServerPromise as () => Promise<void>;
+export const synchronize = () => createServerPromise<void>();
 
 export function createServerChannel<T extends Function>(callback: T, onAbort?: () => void): Channel {
 	if (!("call" in callback)) {
 		throw new TypeError("callback is not a function!");
+	}
+	if (dead) {
+		throw disconnectedError();
 	}
 	const channel = createRawServerChannel(event => {
 		if (event) {

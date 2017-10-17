@@ -1,11 +1,11 @@
-import { createClientPromise } from "mobius";
+import { createServerPromise } from "mobius";
 
 export function set(key: string, value: string) {
 	document.cookie = encodeURIComponent(key) + "=" + encodeURIComponent(value);
 }
 
 export function all() : Promise<Readonly<{[key: string]: string}>> {
-	return createClientPromise<Readonly<{[key: string]: string}>>(() => {
+	return createServerPromise<Readonly<{[key: string]: string}>>(() => {
 		var result: {[key: string]: string} = {};
 		var list = document.cookie.split(/;\s*/g);
 		for (var i = 0; i < list.length; i++) {

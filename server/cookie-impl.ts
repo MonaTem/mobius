@@ -1,4 +1,4 @@
-import { createClientPromise } from "mobius";
+import { createServerPromise } from "mobius";
 
 var cachedCookies: {[key: string]: string};
 function populateCachedCookies() : {[key: string]: string} {
@@ -15,10 +15,12 @@ function populateCachedCookies() : {[key: string]: string} {
 	}
 	return cachedCookies = result;
 }
+
 export function set(key: string, value: string) {
 	populateCachedCookies()[key] = value;
 	require("setCookie")(key, value);
 }
+
 export async function all() : Promise<Readonly<{[key: string]: string}>> {
-	return createClientPromise(populateCachedCookies);
+	return createServerPromise(populateCachedCookies);
 }
