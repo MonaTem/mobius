@@ -21,6 +21,7 @@ import * as mobius from "mobius";
 import { loadModule, SandboxModule } from "./host/sandbox";
 import { PageRenderer, PageRenderMode } from "./host/page-renderer";
 import clientCompile from "./host/client-compiler";
+import * as csrf from "./host/csrf";
 
 import { interceptGlobals, FakedGlobals } from "./common/determinism";
 import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "./common/_internal";
@@ -1140,15 +1141,6 @@ function noCache(response: express.Response) {
 	response.header("Pragma", "no-cache");
 }
 
-function isRequestSameSite(request: express.Request) : boolean {
-	const origin = request.headers['origin'];
-	if (typeof origin == "string") {
-		return origin.replace(/^\w+:\/\//, "") === request.headers['host'];
-	} else {
-		return false;
-	}
-}
-
 async function topFrameHTML(response: express.Response, html: string) {
 	if (simulatedLatency) {
 		await delay(simulatedLatency);
@@ -1176,7 +1168,7 @@ function messageFromBody(body: { [key: string]: any }) : ClientMessage {
 	return message;
 }
 
-export default async function prepare(sourcePath: string, sessionsPath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean, minify: boolean, sourceMaps: boolean) {
+export default async function prepare(sourcePath: string, sessionsPath: string, secrets: { [key: string]: any }, allowMultipleClientsPerSession: boolean, minify: boolean, sourceMaps: boolean, hostname?: string) {
 	const serverJSPath = path.join(sourcePath, "app.tsx");
 
 	const htmlPath = relativePath("../public/index.html");
@@ -1251,7 +1243,7 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 					// Render the DOM into HTML source
 					const html = session.pageRenderer.render(PageRenderMode.IncludeForm, client, session, undefined, bootstrapData);
 					client.applyCookies(response);
-					await topFrameHTML(response, html);
+					return topFrameHTML(response, html);
 				} catch (e) {
 					if (simulatedLatency) {
 						await delay(simulatedLatency);
@@ -1266,6 +1258,7 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 
 			server.post("/", async (request, response) => {
 				try {
+					csrf.validate(request, hostname);
 					const body = request.body;
 					const message = messageFromBody(body);
 					if (message.destroy) {
@@ -1377,9 +1370,7 @@ export default async function prepare(sourcePath: string, sessionsPath: string, 
 			(server as any).ws("/", async (ws: any, request: express.Request) => {
 				// WebSockets protocol implementation
 				try {
-					if (!isRequestSameSite(request)) {
-						throw new Error("Only same-site web sockets are permitted!");
-					}
+					csrf.validate(request, hostname);
 					let closed = false;
 					ws.on("error", () => {
 						ws.close();
@@ -1485,6 +1476,7 @@ if (require.main === module) {
 			{ name: "base", type: String, defaultValue: cwd },
 			{ name: "minify", type: Boolean, defaultValue: false },
 			{ name: "source-map", type: Boolean, defaultValue: false },
+			{ name: "hostname", type: String },
 			{ name: "help", type: Boolean }
 		]);
 		if (args.help) {
@@ -1514,6 +1506,11 @@ if (require.main === module) {
 						{
 							name: "source-map",
 							description: "Expose source maps for debugging in supported browsers",
+						},
+						{
+							name: "hostname",
+							typeLabel: "[underline]{name}",
+							description: "Public hostname to serve content from; used to validate CSRF if set",
 						},
 						{
 							name: "help",
@@ -1547,8 +1544,10 @@ if (require.main === module) {
 		server.use(express.static(path.join(basePath, "public")));
 
 		const port = args.port;
+		const hostname = args.hostname;
 		const acceptSocket = server.listen(port, () => {
-			console.log(`Listening on port ${port}...`);
+			const publicURL = typeof hostname == "string" ? "http://" + hostname : "http://localhost:" + port;
+			console.log(`Serving ${basePath} on ${publicURL}`);
 		});
 
 		// Graceful shutdown
