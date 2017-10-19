@@ -85,6 +85,7 @@ class Host {
 	destroying: boolean = false;
 	scriptPath: string;
 	scriptURL: string;
+	hostname?: string;
 	serverModulePaths: string[];
 	modulePaths: string[];
 	internalModulePath: string;
@@ -97,7 +98,7 @@ class Host {
 	secrets: JsonValue;
 	allowMultipleClientsPerSession: boolean;
 	sessionsPath: string;
-	constructor(scriptPath: string, scriptURL: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean) {
+	constructor(scriptPath: string, scriptURL: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, hostname?: string) {
 		this.destroying = false;
 		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;
 		this.secrets = secrets;
@@ -113,6 +114,7 @@ class Host {
 		this.scriptURL = scriptURL;
 		this.serverModulePaths = serverModulePaths;
 		this.modulePaths = modulePaths;
+		this.hostname = hostname;
 		// Client-side emulation
 		patchJSDOM(this.document);
 		// Session timeout
@@ -970,7 +972,7 @@ class Session {
 			}
 			this.sharingEnabled = true;
 			const request: express.Request = this.request;
-			return request.protocol + "://" + request.get("host") + request.url.replace(/(\.websocket)?\?.*$/, "") + "?sessionID=" + this.sessionID;
+			return request.protocol + "://" + (this.host.hostname || request.get("host")) + request.url.replace(/(\.websocket)?\?.*$/, "") + "?sessionID=" + this.sessionID;
 		});
 		const result = await server;
 		// Dummy channel that stays open
@@ -1208,7 +1210,7 @@ export default async function prepare({ sourcePath, sessionsPath = defaultSessio
 
 	const clientScript = await clientCompile(serverJSPath, sourcePath, minify);
 	const clientURL = "/" + crypto.createHash("sha1").update(clientScript.code).digest("hex").substr(16) + ".js";
-	const host = new Host(serverJSPath, clientURL, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession);
+	const host = new Host(serverJSPath, clientURL, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, hostname);
 
 	// Render default state with noscript URL added
 	const defaultRenderedHTML = new PageRenderer(host.dom, host.noscript, host.metaRedirect, clientURL).render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, { sessionID: "", localChannelCount: 0 }, "/?js=no");
