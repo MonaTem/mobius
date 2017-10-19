@@ -372,9 +372,9 @@ const bakedModules: { [moduleName: string]: (session: Session) => any } = {
 Module._extensions[".ts"] = Module._extensions[".tsx"] = function() {}
 
 // Lazy version of loadModule so that the sandbox module is loaded on first use
-let loadModuleLazy: typeof loadModule = (path, module, globalProperties, require) => {
+let loadModuleLazy: typeof loadModule = (path, module, globalProperties, require_) => {
 	loadModuleLazy = require("./host/sandbox").loadModule as typeof loadModule;
-	return loadModuleLazy(path, module, globalProperties, require);
+	return loadModuleLazy(path, module, globalProperties, require_);
 }
 
 class Session {
