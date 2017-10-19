@@ -12,11 +12,6 @@ import * as ts from "typescript";
 import rewriteForInStatements from "./rewriteForInStatements";
 import noGettersOrSetters from "./noGettersOrSetters";
 
-const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
-const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
-const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
-const optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
-
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
 type RedactedExportData = { [exportName: string]: (boolean | undefined)[] };
 const redactions: { [moduleName: string]: RedactedExportData } = {
@@ -205,6 +200,11 @@ interface CompilerOutput {
 }
 
 export default async function(input: string, basePath: string, minify: boolean) : Promise<CompilerOutput> {
+	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
+	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
+	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
+	const optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
+
 	// Workaround to allow TypeScript to union two folders. This is definitely not right, but it works :(
 	const parseJsonConfigFileContent = ts.parseJsonConfigFileContent;
 	(ts as any).parseJsonConfigFileContent = function(this: any, json: any, host: ts.ParseConfigHost, basePath2: string, existingOptions?: ts.CompilerOptions, configFileName?: string, resolutionStack?: ts.Path[], extraFileExtensions?: ReadonlyArray<ts.JsFileExtensionInfo>) : ts.ParsedCommandLine {

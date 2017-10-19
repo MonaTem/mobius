@@ -6,8 +6,8 @@ import * as path from "path";
 import * as babel from "babel-core";
 import rewriteForInStatements from "./rewriteForInStatements";
 
-const convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs");
-const optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
+let convertToCommonJS: any;
+let optimizeClosuresInRender: any;
 
 export interface SandboxModule {
 	exports: any,
@@ -41,6 +41,12 @@ const compilerOptions = (() => {
 })();
 
 const sandboxedScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: string) => {
+	if (!convertToCommonJS) {
+		convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs");
+	}
+	if (!optimizeClosuresInRender) {
+		optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
+	}
 	const scriptContents = readFileSync(scriptPath).toString();
 	const compiled = /\.(j|t)s(|x)$/.test(scriptPath) ? ts.transpileModule(scriptContents, {
 		fileName: scriptPath,

@@ -1,11 +1,11 @@
 import { NodePath } from "babel-traverse";
 import { CallExpression, ForInStatement, Identifier, LabeledStatement, Program, VariableDeclarator } from "babel-types";
 import * as types from "babel-types";
-const template = require("babel-template");
 
 export default function() {
 	let requiresSortHelper = false;
 	let requiresForInHelper = false;
+	const template = require("babel-template");
 	return {
 		visitor: {
 			// Rewrite for (... in ...) into the equivalent source that iterates in a well-defined order
