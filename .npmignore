@@ -3,7 +3,7 @@ Makefile
 tsconfig-host.json
 tsconfig-fallback.json
 host/*.ts
-mobius.ts
+./mobius.ts
 mobius-fallback.ts
 sample-app
 types/ambient.d.ts
