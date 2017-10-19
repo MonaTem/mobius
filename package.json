@@ -18,6 +18,10 @@
   },
   "author": "Ryan Petrich <rpetrich@gmail.com>",
   "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/rpetrich/mobius/issues"
+  },
+  "homepage": "https://github.com/rpetrich/mobius#readme",
   "dependencies": {
     "@types/express": "^4.0.37",
     "@types/jsdom": "^11.0.2",
