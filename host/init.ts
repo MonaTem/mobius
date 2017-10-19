@@ -27,7 +27,7 @@ export default async function init(basePath: string) {
 		}
 		const gitIgnorePath = path.resolve(basePath, ".gitignore");
 		if (!await exists(gitIgnorePath)) {
-			await writeFile(gitIgnorePath, `.cache\n.sessions\n`);
+			await writeFile(gitIgnorePath, `node_modules\n.cache\n.sessions\n`);
 		}
 		const publicPath = path.resolve(basePath, "public");
 		if (!await exists(publicPath)) {
