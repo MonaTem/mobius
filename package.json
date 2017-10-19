@@ -1,5 +1,5 @@
 {
-  "name": "mobius",
+  "name": "mobius-js",
   "version": "0.1.0",
   "description": "Experiment for simpler web apps",
   "main": "dist/index.js",
