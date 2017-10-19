@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 import * as path from "path";
 import * as fs from "fs";
-import * as rimrafAsync from "rimraf";
 import * as util from "util";
 import * as crypto from "crypto";
 const Module = require("module");
 
 import * as express from "express";
 import * as bodyParser from "body-parser";
-const expressWs = require("express-ws");
 
 import * as uuid from "uuid";
 import { JSDOM } from "jsdom";
@@ -38,7 +36,6 @@ const mkdir = util.promisify(fs.mkdir);
 const unlink = util.promisify(fs.unlink);
 const stat = util.promisify(fs.stat);
 const exists = (path: string) => new Promise<boolean>(resolve => fs.exists(path, resolve));
-const rimraf = util.promisify(rimrafAsync);
 
 const resolvedPromise: Promise<void> = Promise.resolve();
 
@@ -104,7 +101,7 @@ class Host {
 		this.secrets = secrets;
 		this.sessionsPath = sessionsPath;
 		this.htmlSource = htmlSource;
-		this.dom = new JSDOM(htmlSource);
+		this.dom = new (require("jsdom").JSDOM)(htmlSource) as JSDOM;
 		this.document = (this.dom.window as Window).document as Document;
 		this.noscript = this.document.createElement("noscript");
 		this.metaRedirect = this.document.createElement("meta");
@@ -382,6 +379,12 @@ const bakedModules: { [moduleName: string]: (session: Session) => any } = {
 // Hack so that Module._findPath will find TypeScript files
 Module._extensions[".ts"] = Module._extensions[".tsx"] = function() {}
 
+// Lazy version of loadModule so that the sandbox module is loaded on first use
+let loadModuleLazy: typeof loadModule = (path, module, globalProperties, require) => {
+	loadModuleLazy = require("./host/sandbox").loadModule as typeof loadModule;
+	return loadModuleLazy(path, module, globalProperties, require);
+}
+
 class Session {
 	host: Host;
 	sessionID: string;
@@ -476,7 +479,7 @@ class Session {
 	}
 
 	loadModule(path: string, newModule: SandboxModule, allowNodeModules: boolean) {
-		loadModule(path, newModule, this.globalProperties, (name: string) => {
+		loadModuleLazy(path, newModule, this.globalProperties, (name: string) => {
 			const bakedModule = bakedModules[name];
 			if (bakedModule) {
 				return bakedModule(this);
@@ -1199,6 +1202,7 @@ export default async function prepare({ sourcePath, sessionsPath = defaultSessio
 	} catch (e) {
 	}
 	if (lastGraceful < (await stat(serverJSPath)).mtimeMs) {
+		const rimraf = util.promisify(require("rimraf")) as (path: string) => Promise<void>;
 		await rimraf(sessionsPath);
 		await mkdir(sessionsPath);
 	} else {
@@ -1208,7 +1212,7 @@ export default async function prepare({ sourcePath, sessionsPath = defaultSessio
 	const serverModulePaths = [relativePath("../server"), path.join(sourcePath, "server")];
 	const modulePaths = serverModulePaths.concat([relativePath("common"), relativePath("../common"), path.join(sourcePath, "common")]);
 
-	const clientScript = await clientCompile(serverJSPath, sourcePath, minify);
+	const clientScript = await (require("./host/client-compiler").default as typeof clientCompile)(serverJSPath, sourcePath, minify);
 	const clientURL = "/" + crypto.createHash("sha1").update(clientScript.code).digest("hex").substr(16) + ".js";
 	const host = new Host(serverJSPath, clientURL, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, hostname);
 
@@ -1382,7 +1386,7 @@ export default async function prepare({ sourcePath, sessionsPath = defaultSessio
 				};
 			});
 
-			expressWs(server);
+			require("express-ws")(server);
 			(server as any).ws("/", async (ws: any, request: express.Request) => {
 				// WebSockets protocol implementation
 				try {
@@ -1453,7 +1457,7 @@ export default async function prepare({ sourcePath, sessionsPath = defaultSessio
 				}
 			});
 
-			server.use("/fallback.js", express.static(relativePath("../fallback.js")));
+			server.use("/fallback.js", (require("express") as typeof express).static(relativePath("../fallback.js")));
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
 				if (simulatedLatency) {
 					await delay(simulatedLatency);
@@ -1562,14 +1566,15 @@ if (require.main === module) {
 			hostname: args.hostname as string | undefined
 		});
 
-		const server = express();
+		const expressAsync = require("express") as typeof express;
+		const server = expressAsync();
 
 		server.disable("x-powered-by");
 		server.disable("etag");
 
 		mobius.install(server);
 
-		server.use(express.static(path.join(basePath, "public")));
+		server.use(expressAsync.static(path.join(basePath, "public")));
 
 		const port = args.port;
 		const hostname = args.hostname;
