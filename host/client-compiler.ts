@@ -1,4 +1,5 @@
 import { resolve } from "path";
+import { packageRelative } from "./fileUtils";
 import { rollup, Plugin } from "rollup";
 import { NodePath } from "babel-traverse";
 import { existsSync } from "fs";
@@ -240,7 +241,7 @@ export default async function(input: string, basePath: string, minify: boolean) 
 	const plugins = [
 		includePaths({
 			include: {
-				"preact": resolve(__dirname, "../common/preact")
+				"preact": packageRelative("dist/common/preact")
 			},
 		}),
 		rollupTypeScript({
@@ -248,10 +249,10 @@ export default async function(input: string, basePath: string, minify: boolean) 
 			include: [
 				resolve(basePath, "**/*.ts+(|x)"),
 				resolve(basePath, "*.ts+(|x)"),
-				resolve(__dirname, "../../**/*.ts+(|x)"),
-				resolve(__dirname, "../../*.ts+(|x)")
+				packageRelative("**/*.ts+(|x)"),
+				packageRelative("*.ts+(|x)")
 			] as any,
-			tsconfig: resolve(__dirname, "../../tsconfig-client.json"),
+			tsconfig: packageRelative("tsconfig-client.json"),
 			tsconfigOverride: {
 				compilerOptions: {
 					baseUrl: basePath,
@@ -260,14 +261,14 @@ export default async function(input: string, basePath: string, minify: boolean) 
 							resolve(basePath, input)
 						],
 						"*": [
-							resolve(__dirname, "../../client/*"),
+							packageRelative("client/*"),
 							resolve(basePath, "client/*"),
-							resolve(__dirname, "../../common/*"),
+							packageRelative("common/*"),
 							resolve(basePath, "common/*"),
-							resolve(__dirname, "../../types/*")
+							packageRelative("types/*")
 						],
 						"tslib": [
-							resolve(__dirname, "../../node_modules/tslib/tslib"),
+							packageRelative("node_modules/tslib/tslib"),
 						],
 					}
 				}
@@ -296,7 +297,7 @@ export default async function(input: string, basePath: string, minify: boolean) 
 		}) as Plugin);
 	}
 	const bundle = await rollup({
-		input: resolve(__dirname, "../../client/main.js"),
+		input: packageRelative("client/main.js"),
 		plugins,
 		acorn: {
 			allowReturnOutsideFunction: true
