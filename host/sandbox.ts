@@ -2,7 +2,7 @@ import * as vm from "vm";
 import { readFileSync } from "fs";
 import memoize from "./memoize";
 import * as ts from "typescript";
-import * as path from "path";
+import { packageRelative } from "./fileUtils";
 import * as babel from "babel-core";
 import rewriteForInStatements from "./rewriteForInStatements";
 
@@ -33,11 +33,10 @@ declare global {
 }
 
 const compilerOptions = (() => {
-	const basePath = path.join(__dirname, "../..");
 	const fileName = "tsconfig-server.json";
-	const configFile = ts.readJsonConfigFile(path.join(basePath, fileName), (path: string) => readFileSync(path).toString());
+	const configFile = ts.readJsonConfigFile(packageRelative(fileName), (path: string) => readFileSync(path).toString());
 	const configObject = ts.convertToObject(configFile, []);
-	return ts.convertCompilerOptionsFromJson(configObject.compilerOptions, basePath, fileName).options;
+	return ts.convertCompilerOptionsFromJson(configObject.compilerOptions, packageRelative("./"), fileName).options;
 })();
 
 const sandboxedScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: string) => {
