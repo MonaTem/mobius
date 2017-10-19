@@ -20,6 +20,7 @@ import { loadModule, SandboxModule } from "./host/sandbox";
 import { PageRenderer, PageRenderMode } from "./host/page-renderer";
 import clientCompile from "./host/client-compiler";
 import * as csrf from "./host/csrf";
+import { packageRelative, readFile, writeFile, mkdir, unlink, rimraf, stat, exists, readJSON } from "./host/fileUtils";
 
 import { interceptGlobals, FakedGlobals } from "./common/determinism";
 import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "./common/_internal";
@@ -27,15 +28,6 @@ import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEve
 import patchJSDOM from "./host/jsdom-patch";
 
 import * as commandLineArgs from "command-line-args";
-
-const relativePath = (relative: string) => path.join(__dirname, relative);
-
-const readFile = util.promisify(fs.readFile);
-const writeFile = util.promisify(fs.writeFile);
-const mkdir = util.promisify(fs.mkdir);
-const unlink = util.promisify(fs.unlink);
-const stat = util.promisify(fs.stat);
-const exists = (path: string) => new Promise<boolean>(resolve => fs.exists(path, resolve));
 
 const resolvedPromise: Promise<void> = Promise.resolve();
 
@@ -1187,10 +1179,20 @@ function defaultSessionPath(sourcePath: string) {
 	return path.join(sourcePath, ".sessions");
 }
 
-export default async function prepare({ sourcePath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, hostname }: Config) {
-	const serverJSPath = path.join(sourcePath, "app.tsx");
+export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, hostname }: Config) {
+	let serverJSPath: string;
+	const packagePath = path.resolve(sourcePath, "package.json");
+	if (await exists(packagePath)) {
+		serverJSPath = path.resolve(sourcePath, (await readJSON(packagePath)).main);
+	} else {
+		const foundPath = Module._findPath("app", [sourcePath]);
+		if (!foundPath) {
+			throw new Error("Could not find app.ts or app.tsx in " + sourcePath);
+		}
+		serverJSPath = foundPath;
+	}
 
-	const htmlPath = relativePath("../public/index.html");
+	const htmlPath = packageRelative("public/index.html");
 	const htmlContents = readFile(htmlPath);
 
 	const gracefulPath = path.join(sessionsPath, ".graceful");
@@ -1202,15 +1204,14 @@ export default async function prepare({ sourcePath, sessionsPath = defaultSessio
 	} catch (e) {
 	}
 	if (lastGraceful < (await stat(serverJSPath)).mtimeMs) {
-		const rimraf = util.promisify(require("rimraf")) as (path: string) => Promise<void>;
 		await rimraf(sessionsPath);
 		await mkdir(sessionsPath);
 	} else {
 		await unlink(gracefulPath);
 	}
 
-	const serverModulePaths = [relativePath("../server"), path.join(sourcePath, "server")];
-	const modulePaths = serverModulePaths.concat([relativePath("common"), relativePath("../common"), path.join(sourcePath, "common")]);
+	const serverModulePaths = [packageRelative("server"), path.join(sourcePath, "server")];
+	const modulePaths = serverModulePaths.concat([packageRelative("common"), packageRelative("dist/common"), path.join(sourcePath, "common")]);
 
 	const clientScript = await (require("./host/client-compiler").default as typeof clientCompile)(serverJSPath, sourcePath, minify);
 	const clientURL = "/" + crypto.createHash("sha1").update(clientScript.code).digest("hex").substr(16) + ".js";
@@ -1457,7 +1458,7 @@ export default async function prepare({ sourcePath, sessionsPath = defaultSessio
 				}
 			});
 
-			server.use("/fallback.js", (require("express") as typeof express).static(relativePath("../fallback.js")));
+			server.use("/fallback.js", (require("express") as typeof express).static(packageRelative("dist/fallback.js")));
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
 				if (simulatedLatency) {
 					await delay(simulatedLatency);
@@ -1494,7 +1495,7 @@ export default async function prepare({ sourcePath, sessionsPath = defaultSessio
 	};
 }
 
-if (require.main === module) {
+export default function main() {
 	(async () => {
 		const cwd = process.cwd();
 		const args = commandLineArgs([
@@ -1503,6 +1504,7 @@ if (require.main === module) {
 			{ name: "minify", type: Boolean, defaultValue: false },
 			{ name: "source-map", type: Boolean, defaultValue: false },
 			{ name: "hostname", type: String },
+			{ name: "init", type: Boolean, defaultValue: false },
 			{ name: "help", type: Boolean }
 		]);
 		if (args.help) {
@@ -1514,6 +1516,10 @@ if (require.main === module) {
 				{
 					header: "Options",
 					optionList: [
+						{
+							name: "init",
+							description: "Initialize a new mobius project"
+						},
 						{
 							name: "port",
 							typeLabel: "[underline]{number}",
@@ -1551,11 +1557,23 @@ if (require.main === module) {
 			process.exit(1);
 		}
 
+		if (args.init) {
+			try {
+				await require("./host/init").default(args.base);
+			} catch (e) {
+				if (e instanceof Error && e.message === "canceled") {
+					process.exit(1);
+				}
+				throw e;
+			}
+			process.exit(0);
+		}
+
 		const basePath = path.resolve(cwd, args.base as string);
 
 		let secrets = {};
 		try {
-			secrets = JSON.parse((await readFile(path.join(basePath, "secrets.json"))).toString());
+			secrets = await readJSON(path.join(basePath, "secrets.json"));
 		} catch (e) {
 		}
 		const mobius = await prepare({
@@ -1607,4 +1625,8 @@ if (require.main === module) {
 		});
 
 	})().catch(escape);
+}
+
+if (require.main === module) {
+	main();
 }
