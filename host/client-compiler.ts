@@ -1,7 +1,8 @@
-import * as path from "path";
+import { resolve } from "path";
 import { rollup, Plugin } from "rollup";
 import { NodePath } from "babel-traverse";
-import { BlockStatement, CallExpression, ForStatement, Identifier, ImportDeclaration, ImportSpecifier, Node, LabeledStatement, LogicalExpression, UpdateExpression, VariableDeclaration } from "babel-types";
+import { existsSync } from "fs";
+import { BlockStatement, CallExpression, ForStatement, Identifier, ImportDeclaration, ImportSpecifier, Node, LabeledStatement, LogicalExpression, StringLiteral, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as babel from "babel-core";
 import * as types from "babel-types";
 import { pureBabylon as pure } from "side-effects-safe";
@@ -194,6 +195,29 @@ function stripUnusedArgumentCopies() {
 	};
 }
 
+function verifyStylePaths(basePath: string) {
+	return {
+		visitor: {
+			CallExpression: {
+				exit(path: NodePath<CallExpression>) {
+					const args = path.node.arguments;
+					if (args.length === 1 && args[0].type === "StringLiteral") {
+						const binding = importBindingForPath(path);
+						if (binding && binding.module === "dom" && binding.export === "style") {
+							const value = (args[0] as StringLiteral).value;
+							if (!/^\w+:/.test(value)) {
+								if (!existsSync(resolve(basePath, value.replace(/^\/+/, "")))) {
+									throw path.buildCodeFrameError(`Referenced a style path that does not exist: ${path.getSource()}`);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 interface CompilerOutput {
 	code: string;
 	map: string;
@@ -216,34 +240,34 @@ export default async function(input: string, basePath: string, minify: boolean) 
 	const plugins = [
 		includePaths({
 			include: {
-				"preact": path.join(__dirname, "../common/preact")
+				"preact": resolve(__dirname, "../common/preact")
 			},
 		}),
 		rollupTypeScript({
-			cacheRoot: path.join(basePath, ".cache"),
+			cacheRoot: resolve(basePath, ".cache"),
 			include: [
-				path.join(basePath, "**/*.ts+(|x)"),
-				path.join(basePath, "*.ts+(|x)"),
-				path.join(__dirname, "../../**/*.ts+(|x)"),
-				path.join(__dirname, "../../*.ts+(|x)")
+				resolve(basePath, "**/*.ts+(|x)"),
+				resolve(basePath, "*.ts+(|x)"),
+				resolve(__dirname, "../../**/*.ts+(|x)"),
+				resolve(__dirname, "../../*.ts+(|x)")
 			] as any,
-			tsconfig: path.join(__dirname, "../../tsconfig-client.json"),
+			tsconfig: resolve(__dirname, "../../tsconfig-client.json"),
 			tsconfigOverride: {
 				compilerOptions: {
 					baseUrl: basePath,
 					paths: {
 						"app": [
-							path.resolve(basePath, input)
+							resolve(basePath, input)
 						],
 						"*": [
-							path.join(__dirname, "../../client/*"),
-							path.join(basePath, "client/*"),
-							path.join(__dirname, "../../common/*"),
-							path.join(basePath, "common/*"),
-							path.join(__dirname, "../../types/*")
+							resolve(__dirname, "../../client/*"),
+							resolve(basePath, "client/*"),
+							resolve(__dirname, "../../common/*"),
+							resolve(basePath, "common/*"),
+							resolve(__dirname, "../../types/*")
 						],
 						"tslib": [
-							path.join(__dirname, "../../node_modules/tslib/tslib"),
+							resolve(__dirname, "../../node_modules/tslib/tslib"),
 						],
 					}
 				}
@@ -254,6 +278,7 @@ export default async function(input: string, basePath: string, minify: boolean) 
 			plugins: [
 				optimizeClosuresInRender(babel),
 				stripRedact(),
+				verifyStylePaths(resolve(basePath, "public")),
 				rewriteForInStatements(),
 				fixTypeScriptExtendsWarning(),
 				noGettersOrSetters(),
@@ -271,7 +296,7 @@ export default async function(input: string, basePath: string, minify: boolean) 
 		}) as Plugin);
 	}
 	const bundle = await rollup({
-		input: path.join(__dirname, "../../client/main.js"),
+		input: resolve(__dirname, "../../client/main.js"),
 		plugins,
 		acorn: {
 			allowReturnOutsideFunction: true
