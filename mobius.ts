@@ -1214,7 +1214,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 	const modulePaths = serverModulePaths.concat([packageRelative("common"), packageRelative("dist/common"), path.join(sourcePath, "common")]);
 
 	const clientScript = await (require("./host/client-compiler").default as typeof clientCompile)(serverJSPath, sourcePath, minify);
-	const clientURL = "/" + crypto.createHash("sha1").update(clientScript.code).digest("hex").substr(16) + ".js";
+	const clientURL = "/client-" + crypto.createHash("sha1").update(clientScript.code).digest("hex").substr(16) + ".js";
 	const host = new Host(serverJSPath, clientURL, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, hostname);
 
 	// Render default state with noscript URL added
