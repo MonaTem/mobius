@@ -1074,3 +1074,5 @@ interceptGlobals(window, () => insideCallback && !dead, coordinateValue, <T exte
 		}
 	}
 });
+
+(window as any)._mobius = true;

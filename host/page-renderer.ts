@@ -37,6 +37,7 @@ export class PageRenderer {
 	noscript: Element;
 	metaRedirect: Element;
 	clientScript: HTMLScriptElement;
+	fallbackScript: HTMLScriptElement;
 	bootstrapScript?: HTMLScriptElement;
 	formNode?: HTMLFormElement;
 	postbackInput?: HTMLInputElement;
@@ -54,6 +55,9 @@ export class PageRenderer {
 		const clientScript = this.clientScript = this.document.createElement("script");
 		clientScript.src = clientURL;
 		this.body.appendChild(clientScript);
+		const fallbackScript = this.fallbackScript = this.document.createElement("script");
+		fallbackScript.textContent = `window._mobius||document.write('<script src="/fallback.js"><\\/script>')`;
+		this.body.appendChild(fallbackScript);
 	}
 	render(mode: PageRenderMode, clientState: ClientState, sessionState: SessionState, noScriptURL?: string, bootstrapData?: BootstrapData) : string {
 		const document = this.document;
@@ -124,6 +128,7 @@ export class PageRenderer {
 			siblingNode = document.createTextNode("");
 			this.clientScript.parentNode!.insertBefore(siblingNode, this.clientScript);
 			this.clientScript.parentNode!.removeChild(this.clientScript);
+			this.fallbackScript.parentNode!.removeChild(this.fallbackScript);
 		} else if (bootstrapData) {
 			bootstrapScript = this.bootstrapScript;
 			if (!bootstrapScript) {
@@ -173,6 +178,7 @@ export class PageRenderer {
 			}
 			if (mode >= PageRenderMode.IncludeFormAndStripScript) {
 				if (siblingNode) {
+					siblingNode.parentNode!.insertBefore(this.fallbackScript, siblingNode);
 					siblingNode.parentNode!.insertBefore(this.clientScript, siblingNode);
 					siblingNode.parentNode!.removeChild(siblingNode);
 				}

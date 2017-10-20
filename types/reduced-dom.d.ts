@@ -18,6 +18,7 @@ interface Node extends EventTarget {
 	replaceChild<T extends Node>(newChild: Node, oldChild: T): T;
 	removeChild<T extends Node>(oldChild: T): T;
 	cloneNode(deep?: boolean): Node;
+	textContent: string;
 }
 
 interface CharacterData extends Node {
