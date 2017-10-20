@@ -5,6 +5,7 @@ import * as ts from "typescript";
 import { packageRelative } from "./fileUtils";
 import * as babel from "babel-core";
 import rewriteForInStatements from "./rewriteForInStatements";
+import noImpureGetters from "./noImpureGetters";
 
 let convertToCommonJS: any;
 let optimizeClosuresInRender: any;
@@ -56,7 +57,8 @@ const sandboxedScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: stri
 		plugins: [
 			convertToCommonJS(),
 			optimizeClosuresInRender(babel),
-			rewriteForInStatements()
+			rewriteForInStatements(),
+			noImpureGetters(),
 		],
 		inputSourceMap: compiled && typeof compiled.sourceMapText == "string" ? JSON.parse(compiled.sourceMapText) : undefined
 	});
