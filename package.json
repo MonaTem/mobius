@@ -25,10 +25,10 @@
   "dependencies": {
     "@types/express": "^4.0.37",
     "@types/jsdom": "^11.0.2",
-    "@types/node": "^8.0.34",
+    "@types/node": "^8.0.46",
     "@types/node-fetch": "^1.6.7",
     "babel-core": "^6.26.0",
-    "babel-plugin-optimize-closures-in-render": "^0.2.0",
+    "babel-plugin-optimize-closures-in-render": "^0.2.1",
     "babel-plugin-transform-es2015-modules-commonjs": "^6.26.0",
     "body-parser": "^1.18.2",
     "command-line-args": "^4.0.7",
@@ -63,7 +63,7 @@
     "@types/qs": "^6.5.0",
     "@types/rimraf": "^2.0.2",
     "@types/rollup": "^0.41.1",
-    "@types/uuid": "^3.4.2",
+    "@types/uuid": "^3.4.3",
     "diff-match-patch": "^1.0.0",
     "preact": "https://github.com/rpetrich/preact/tarball/5537021206ffbb6e1fe9c84ed0569f0d44ce80a0",
     "set-dom": "^7.4.5"
