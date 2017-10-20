@@ -12,7 +12,7 @@ import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
 import * as ts from "typescript";
 import rewriteForInStatements from "./rewriteForInStatements";
-import noGettersOrSetters from "./noGettersOrSetters";
+import noImpureGetters from "./noImpureGetters";
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
 type RedactedExportData = { [exportName: string]: (boolean | undefined)[] };
@@ -278,7 +278,7 @@ export default async function(input: string, basePath: string, minify: boolean) 
 				verifyStylePaths(resolve(basePath, "public")),
 				rewriteForInStatements(),
 				fixTypeScriptExtendsWarning(),
-				noGettersOrSetters(),
+				noImpureGetters(),
 				rewriteInsufficientBrowserThrow(),
 				stripUnusedArgumentCopies()
 			]
