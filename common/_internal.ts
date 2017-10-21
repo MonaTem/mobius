@@ -1,4 +1,4 @@
-import { JsonValue } from "mobius-types";
+import { JsonMap, JsonValue } from "mobius-types";
 
 function classNameForConstructor(constructor: any): string {
 	const name = constructor.name as string | undefined;
@@ -71,6 +71,34 @@ function roundTripValue(obj: any, cycleDetection: any[]) : any {
 
 export function roundTrip<T extends JsonValue | void>(obj: T) : T {
 	return typeof obj == "undefined" ? obj : roundTripValue(obj, []) as T;
+}
+
+export function stripDefaults<T extends JsonMap>(obj: T, defaults: Partial<T>) : Partial<T> {
+	const result: Partial<T> = {};
+	ignore_nondeterminism:
+	for (var i in obj) {
+		if (Object.hasOwnProperty.call(obj, i) && obj[i] !== (defaults as T)[i]) {
+			result[i] = obj[i];
+		}
+	}
+	return result;
+}
+
+export function restoreDefaults<T extends JsonMap, U extends JsonMap>(obj: T, defaults: U) : T | U {
+	const result: Partial<T | U> = {};
+	ignore_nondeterminism:
+	for (var i in defaults) {
+		if (!(i in obj) && Object.hasOwnProperty.call(defaults, i)) {
+			result[i] = defaults[i];
+		}
+	}
+	ignore_nondeterminism:
+	for (var j in obj) {
+		if (Object.hasOwnProperty.call(obj, j)) {
+			result[j] = obj[j];
+		}
+	}
+	return result as T | U;
 }
 
 export type Event = [number] | [number, any] | [number, any, any];

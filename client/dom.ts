@@ -1,16 +1,14 @@
 import { createClientChannel, createClientPromise } from "mobius";
 import { Channel } from "mobius-types";
+import { defaultEventProperties } from "_dom";
+import { stripDefaults, restoreDefaults } from "_internal";
 import * as preact from "preact";
 export { h, Component, AnyComponent, ComponentProps } from "preact";
-
-interface WrappedEvent {
-	value?: string;
-}
 
 type PreactNode = Node & {
 	_listeners?: { [ event: string ]: (event: any) => void },
 	__l?: { [ event: string ]: (event: any) => void },
-	__c?: { [ event: string ]: [(event: any) => void, (event: WrappedEvent) => void, Channel] }
+	__c?: { [ event: string ]: [(event: any) => void, (event: any) => void, Channel] }
 };
 
 const preactOptions = preact.options as any;
@@ -38,13 +36,12 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 				tuple[1] = listener;
 			} else {
 				let sender: any;
-				const channel = createClientChannel((event: WrappedEvent) => {
-					const listener = tuple[1];
-					listener(event);
+				const channel = createClientChannel((event: any) => {
+					tuple[1](restoreDefaults(event, defaultEventProperties));
 				}, send => {
 					sender = send;
 				}, undefined, name == "input", true);
-				tuple = c[name] = [sender as (event: any) => void, listener, channel];
+				tuple = c[name] = [(event: any) => sender(stripDefaults(event, defaultEventProperties)), listener, channel];
 			}
 			listeners[name] = tuple[0];
 		} else if (Object.hasOwnProperty.call(c, name)) {

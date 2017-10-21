@@ -1,5 +1,7 @@
 import { createClientChannel, createClientPromise } from "mobius";
 import { Channel } from "mobius-types";
+import { defaultEventProperties } from "_dom";
+import { stripDefaults, restoreDefaults } from "_internal";
 import * as preact from "preact";
 export { h, Component, AnyComponent, ComponentProps } from "preact";
 
@@ -36,8 +38,8 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 			if (tuple) {
 				tuple[1] = listener;
 			} else {
-				const channel = createClientChannel(function() {
-					return tuple[1].apply(null, arguments);
+				const channel = createClientChannel((event: any) => {
+					tuple[1](restoreDefaults(event, defaultEventProperties));
 				});
 				if (node.nodeName == "INPUT" || node.nodeName == "TEXTAREA") {
 					switch (name) {
