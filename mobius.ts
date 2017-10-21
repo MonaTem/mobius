@@ -66,14 +66,13 @@ function emptyFunction() {
 
 interface MobiusGlobalProperties {
 	document: Document,
-	request: express.Request,
+	request?: express.Request,
 }
 
 class Host {
 	sessions = new Map<string, Session>();
 	destroying: boolean = false;
 	scriptPath: string;
-	scriptURL: string;
 	hostname?: string;
 	serverModulePaths: string[];
 	modulePaths: string[];
@@ -87,7 +86,7 @@ class Host {
 	secrets: JsonValue;
 	allowMultipleClientsPerSession: boolean;
 	sessionsPath: string;
-	constructor(scriptPath: string, scriptURL: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, hostname?: string) {
+	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, hostname?: string) {
 		this.destroying = false;
 		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;
 		this.secrets = secrets;
@@ -100,7 +99,6 @@ class Host {
 		this.metaRedirect.setAttribute("http-equiv", "refresh");
 		this.noscript.appendChild(this.metaRedirect);
 		this.scriptPath = scriptPath;
-		this.scriptURL = scriptURL;
 		this.serverModulePaths = serverModulePaths;
 		this.modulePaths = modulePaths;
 		this.hostname = hostname;
@@ -384,7 +382,7 @@ class Session {
 	// Script context
 	modules = new Map<string, SandboxModule>();
 	mobius: typeof mobius;
-	request: express.Request;
+	request?: express.Request;
 	hasRun: boolean = false;
 	pageRenderer: PageRenderer;
 	globalProperties: MobiusGlobalProperties & FakedGlobals;
@@ -416,10 +414,10 @@ class Session {
 	bootstrappingPromise?: Promise<void>;
 	// Session sharing
 	sharingEnabled?: true;
-	constructor(host: Host, sessionID: string, request: express.Request) {
+	constructor(host: Host, sessionID: string, request?: express.Request) {
 		this.host = host;
 		this.sessionID = sessionID;
-		this.pageRenderer = new PageRenderer(this.host.dom, this.host.noscript, this.host.metaRedirect, this.host.scriptURL);
+		this.pageRenderer = new PageRenderer(this.host.dom, this.host.noscript, this.host.metaRedirect);
 		// Server-side version of the API
 		this.mobius = {
 			disconnect: () => this.destroy().catch(escape),
@@ -593,7 +591,7 @@ class Session {
 		}
 		return --this.localChannelCount;
 	}
-	waitForPrerender() : Promise<void> {
+	prerenderContent() : Promise<void> {
 		if (this.prerenderCompleted) {
 			return this.prerenderCompleted;
 		}
@@ -834,6 +832,9 @@ class Session {
 				return reject(new Error("Unable to create client promise in this context!"));
 			}
 			if (this.dead) {
+				if (fallback) {
+					return resolve(fallback());
+				}
 				return reject(disconnectedError());
 			}
 			const channel = this.createRawClientChannel(event => {
@@ -966,8 +967,11 @@ class Session {
 				throw new Error("Sharing has been disabled!");
 			}
 			this.sharingEnabled = true;
-			const request: express.Request = this.request;
-			return request.protocol + "://" + (this.host.hostname || request.get("host")) + request.url.replace(/(\.websocket)?\?.*$/, "") + "?sessionID=" + this.sessionID;
+			const request = this.request;
+			if (request) {
+				return `${request.protocol}://${this.host.hostname || request.get("host")}${request.url.replace(/(\.websocket)?\?.*$/, "")}?sessionID=${this.sessionID}`;
+			}
+			throw new Error("Session does not have a request to load sharing URL from!");
 		});
 		const result = await server;
 		// Dummy channel that stays open
@@ -1191,9 +1195,9 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 		}
 		serverJSPath = foundPath;
 	}
+	const asyncClientScript = clientCompile(serverJSPath, sourcePath, minify);
 
-	const htmlPath = packageRelative("public/index.html");
-	const htmlContents = readFile(htmlPath);
+	const htmlContents = readFile(packageRelative("public/index.html"));
 
 	const gracefulPath = path.join(sessionsPath, ".graceful");
 
@@ -1213,12 +1217,16 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 	const serverModulePaths = [packageRelative("server"), path.join(sourcePath, "server")];
 	const modulePaths = serverModulePaths.concat([packageRelative("common"), packageRelative("dist/common"), path.join(sourcePath, "common")]);
 
-	const clientScript = await (require("./host/client-compiler").default as typeof clientCompile)(serverJSPath, sourcePath, minify);
-	const clientURL = "/client-" + crypto.createHash("sha1").update(clientScript.code).digest("hex").substr(16) + ".js";
-	const host = new Host(serverJSPath, clientURL, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, hostname);
-
 	// Render default state with noscript URL added
-	const defaultRenderedHTML = new PageRenderer(host.dom, host.noscript, host.metaRedirect, clientURL).render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, { sessionID: "", localChannelCount: 0 }, "/?js=no");
+	console.log("Rendering initial page...");
+	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, hostname);
+	const initialPageSession = new Session(host, "initial-render");
+	await initialPageSession.destroy();
+	initialPageSession.updateOpenServerChannelStatus(true);
+	await initialPageSession.prerenderContent();
+	const clientScript = await asyncClientScript;
+	const clientURL = "/client-" + crypto.createHash("sha1").update(clientScript.code).digest("hex").substr(16) + ".js";
+	const defaultRenderedHTML = initialPageSession.pageRenderer.render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, { sessionID: "initial-render", localChannelCount: 0 }, clientURL, "/?js=no");
 
 	return {
 		install(server: express.Express) {
@@ -1249,7 +1257,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 					session.updateOpenServerChannelStatus(true);
 					// Prerendering was enabled, wait for content to be ready
 					client.outgoingMessageId++;
-					await session.waitForPrerender();
+					await session.prerenderContent();
 					// Read bootstrap data
 					const queuedLocalEvents = await session.readAllEvents() || client.queuedLocalEvents;
 					const bootstrapData: BootstrapData = { sessionID: session.sessionID, channels: Array.from(session.pendingChannels.keys()) };
@@ -1262,7 +1270,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 					}
 					client.incomingMessageId++;
 					// Render the DOM into HTML source
-					const html = session.pageRenderer.render(PageRenderMode.IncludeForm, client, session, undefined, bootstrapData);
+					const html = session.pageRenderer.render(PageRenderMode.IncludeForm, client, session, clientURL, undefined, bootstrapData);
 					client.applyCookies(response);
 					return topFrameHTML(response, html);
 				} catch (e) {
@@ -1337,10 +1345,10 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 							await client.dequeueEvents();
 						} else {
 							// Wait for content to be ready
-							await session.waitForPrerender();
+							await session.prerenderContent();
 						}
 						// Render the DOM into HTML source
-						const html = session.pageRenderer.render(PageRenderMode.IncludeFormAndStripScript, client, session);
+						const html = session.pageRenderer.render(PageRenderMode.IncludeFormAndStripScript, client, session, clientURL);
 						let responseContent = html;
 						if (isJavaScript) {
 							if (client.lastSentFormHTML) {

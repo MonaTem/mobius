@@ -45,7 +45,7 @@ export class PageRenderer {
 	clientIdInput?: HTMLInputElement;
 	messageIdInput?: HTMLInputElement;
 	hasServerChannelsInput?: HTMLInputElement;
-	constructor(dom: JSDOM, noscript: Element, metaRedirect: Element, clientURL: string) {
+	constructor(dom: JSDOM, noscript: Element, metaRedirect: Element) {
 		this.dom = dom;
 		this.document = (dom.window as Window).document;
 		this.body = this.document.body.cloneNode(true) as Element;
@@ -53,13 +53,12 @@ export class PageRenderer {
 		this.noscript = noscript;
 		this.metaRedirect = metaRedirect;
 		const clientScript = this.clientScript = this.document.createElement("script");
-		clientScript.src = clientURL;
 		this.body.appendChild(clientScript);
 		const fallbackScript = this.fallbackScript = this.document.createElement("script");
 		fallbackScript.textContent = `window._mobius||document.write('<script src="/fallback.js"><\\/script>')`;
 		this.body.appendChild(fallbackScript);
 	}
-	render(mode: PageRenderMode, clientState: ClientState, sessionState: SessionState, noScriptURL?: string, bootstrapData?: BootstrapData) : string {
+	render(mode: PageRenderMode, clientState: ClientState, sessionState: SessionState, clientURL: string, noScriptURL?: string, bootstrapData?: BootstrapData) : string {
 		const document = this.document;
 		let bootstrapScript: HTMLScriptElement | undefined;
 		let textNode: Node | undefined;
@@ -139,6 +138,7 @@ export class PageRenderer {
 			bootstrapScript.appendChild(textNode);
 			this.clientScript.parentNode!.insertBefore(bootstrapScript, this.clientScript);
 		}
+		this.clientScript.src = clientURL;
 		if (noScriptURL) {
 			this.metaRedirect.setAttribute("content", "0; url=" + noScriptURL);
 			this.head.appendChild(this.noscript);
