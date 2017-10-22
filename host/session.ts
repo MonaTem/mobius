@@ -1,7 +1,6 @@
-import { PageRenderer } from "./page-renderer";
-import { loadModule, SandboxModule } from "./sandbox";
-import { Host } from "./host";
 import { Client } from "./client";
+import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
+import { loadModule, SandboxModule } from "./sandbox";
 import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
 
@@ -10,11 +9,12 @@ import { JsonValue, Channel } from "mobius-types";
 import * as mobiusModule from "mobius";
 
 import { interceptGlobals, FakedGlobals } from "../common/determinism";
-import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, disconnectedError, Event } from "../common/_internal";
-
-import { Request } from "express";
+import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, disconnectedError, BootstrapData, Event } from "../common/_internal";
 
 import { createWriteStream } from "fs";
+import { fork, ChildProcess } from "child_process";
+import { Request } from "express";
+import { JSDOM } from "jsdom";
 
 const resolvedPromise: Promise<void> = Promise.resolve();
 
@@ -44,31 +44,208 @@ const enum ArchiveStatus {
 	Full
 };
 
-const bakedModules: { [moduleName: string]: (session: Session) => any } = {
-	mobius: (session: Session) => session.mobius,
-	request: (session: Session) => session.request,
-	setCookie: (session: Session) => session.setCookie.bind(session),
-	document: (session: Session) => session.globalProperties.document,
-	head: (session: Session) => session.pageRenderer.head,
-	body: (session: Session) => session.pageRenderer.body,
-	secrets: (session: Session) => session.host.secrets,
+export interface Host {
+	allowMultipleClientsPerSession: boolean;
+	document: Document;
+	secrets: JsonValue;
+	serverModulePaths: string[];
+	modulePaths: string[];
+	scriptPath: string;
+	hostname?: string;
+	dom: JSDOM;
+	noscript: Element;
+	metaRedirect: Element;
+	sessions: Map<string, MasterSession>;
+	pathForSessionId(sessionID: string): string;
+}
+
+export interface ClientBootstrap {
+	queuedLocalEvents?: Event[];
+	clientID: number;
+}
+
+export abstract class MasterSession {
+	sessionID: string;
+	clients = new Map<number, Client>();
+	currentClientID: number = 0;
+	sharingEnabled: boolean = false;
+	lastMessageTime: number = Date.now();
+	constructor(sessionID: string) {
+		this.sessionID = sessionID;
+	}
+	abstract destroy() : Promise<void>;
+	abstract destroyIfExhausted() : Promise<void>;
+	abstract archiveEvents(includeTrailer: boolean) : Promise<void>;
+	abstract unarchiveEvents() : Promise<void>;
+	abstract processEvents(events: Event[], noJavaScript?: boolean) : Promise<void>;
+	abstract receivedRequest(request: Request) : void;
+	abstract prerenderContent() : Promise<void>;
+	abstract updateOpenServerChannelStatus(newValue: boolean) : void;
+	abstract hasLocalChannels() : boolean;
+	abstract render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string>;
+	abstract valueForFormField(name: string) : Promise<string | undefined>;
+	newClient(request: Request) {
+		const newClientId = this.currentClientID++;
+		if ((newClientId == 0) || this.sharingEnabled) {
+			const result = new Client(this, request, newClientId);
+			this.clients.set(newClientId, result);
+			this.receivedRequest(request);
+			return result;
+		}
+		throw new Error("Multiple clients attached to the same session are not supported!");
+	}
+	hasCapableClient() {
+		for (const client of this.clients) {
+			if (client[1].clientIsActive) {
+				return true;
+			}
+		}
+		return false;
+	}
+}
+
+export class InProcessSession extends MasterSession {
+	worker: WorkerSession;
+	host: Host;
+	request?: Request;
+	constructor(sessionID: string, host: Host, request?: Request) {
+		super(sessionID);
+		this.host = host;
+		this.request = request;
+		this.worker = new WorkerSession(host, this, sessionID, new PageRenderer(host.dom, host.noscript, host.metaRedirect));
+	}
+	destroy() {
+		return this.worker.destroy();
+	}
+	destroyIfExhausted() : Promise<void> {
+		return this.worker.destroyIfExhausted();
+	}
+	archiveEvents(includeTrailer: boolean) {
+		return this.worker.archiveEvents(includeTrailer);
+	}
+	unarchiveEvents() {
+		return this.worker.unarchiveEvents();
+	}
+	processEvents(events: Event[], noJavaScript?: boolean) {
+		return this.worker.processEvents(events, noJavaScript);
+	}
+	receivedRequest(request: Request) {
+		this.request = request;
+	}
+	prerenderContent() : Promise<void> {
+		return this.worker.prerenderContent();
+	}
+	updateOpenServerChannelStatus(newValue: boolean) {
+		this.worker.updateOpenServerChannelStatus(newValue);
+	}
+	hasLocalChannels() {
+		return this.worker.localChannelCount !== 0;
+	}
+	async render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string> {
+		return await this.worker.pageRenderer.render(mode, client, this.worker, clientURL, noScriptURL, bootstrap ? await this.worker.generateBootstrapData(client) : undefined);
+	}
+	async valueForFormField(name: string) : Promise<string | undefined> {
+		const element = this.worker.pageRenderer.body.querySelector("[name=\"" + name + "\"]");
+		if (element) {
+			switch (element.nodeName) {
+				case "INPUT":
+				case "TEXTAREA":
+					return (element as HTMLInputElement).value;
+			}
+		}
+	}
+	// ClientCallbacks
+	async synchronizeChannels() : Promise<void> {
+		const promises : Promise<void>[] = [];
+		for (let client of this.clients.values()) {
+			promises.push(client.synchronizeChannels());
+		}
+		await Promise.all(promises);
+	}
+	scheduleSynchronize() {
+		for (const client of this.clients.values()) {
+			client.scheduleSynchronize();
+		}
+	}
+	async sessionWasDestroyed() {
+		const promises : Promise<void>[] = [];
+		for (const client of this.clients.values()) {
+			promises.push(client.destroy());
+		}
+		await Promise.all(promises);
+		this.host.sessions.delete(this.sessionID);
+	}
+	sendEvent(event: Event) {
+		for (const client of this.clients.values()) {
+			client.sendEvent(event);
+		}
+	}
+	setCookie(key: string, value: string) {
+		for (const client of this.clients.values()) {
+			client.setCookie(key, value);
+		}
+	}
+}
+
+export abstract class OutOfProcessSession extends MasterSession {
+	process: ChildProcess;
+	constructor(sessionID: string, process: ChildProcess) {
+		super(sessionID);
+		this.process = process;		
+	}
+}
+
+export function createSessionGroup(host: Host, workerCount: number) {
+	if (workerCount <= 0) {
+		return (sessionID: string, request: Request) => new InProcessSession(sessionID, host, request);
+	}
+	const workers: ChildProcess[] = [];
+	for (let i = 0; i < workerCount; i++) {
+		workers[i] = fork(require.resolve("./session"));
+	}
+	// let currentWorker = 0;
+	return (sessionID: string, request: Request) => {
+		throw new Error("Not supported yet!");
+		// const result = new OutOfProcessSession(sessionID, workers[currentWorker]);
+		// if ((++currentWorker) === workerCount) {
+		// 	currentWorker = 0;
+		// }
+		// return result;
+	}
+}
+
+const bakedModules: { [moduleName: string]: (session: WorkerSession) => any } = {
+	mobius: (session: WorkerSession) => session.mobius,
+	request: (session: WorkerSession) => session.clients.request,
+	setCookie: (session: WorkerSession) => session.clients.setCookie.bind(session.clients),
+	document: (session: WorkerSession) => session.globalProperties.document,
+	head: (session: WorkerSession) => session.pageRenderer.head,
+	body: (session: WorkerSession) => session.pageRenderer.body,
+	secrets: (session: WorkerSession) => session.host.secrets,
 };
 
-export class Session {
+interface ClientCallbacks {
+	request?: Request;
+	synchronizeChannels() : Promise<void>;
+	scheduleSynchronize() : void;
+	sendEvent(event: Event) : void;
+	setCookie(key: string, value: string) : void;
+	sessionWasDestroyed() : Promise<void>;
+	hasCapableClient() : boolean;
+}
+
+export class WorkerSession {
 	host: Host;
+	clients: ClientCallbacks;
 	sessionID: string;
 	dead: boolean = false;
 	// Script context
 	modules = new Map<string, SandboxModule>();
 	mobius: typeof mobiusModule;
-	request?: Request;
 	hasRun: boolean = false;
 	pageRenderer: PageRenderer;
 	globalProperties: MobiusGlobalProperties & FakedGlobals;
 	Math: typeof Math;
-	clients = new Map<number, Client>();
-	currentClientID: number = 0;
-	lastMessageTime: number = Date.now();
 	// Local channels
 	localChannelCounter: number = 0;
 	localChannels = new Map<number, (event?: Event) => void>();
@@ -93,10 +270,11 @@ export class Session {
 	bootstrappingPromise?: Promise<void>;
 	// Session sharing
 	sharingEnabled?: true;
-	constructor(host: Host, sessionID: string, request?: Request) {
+	constructor(host: Host, clients: ClientCallbacks, sessionID: string, pageRenderer: PageRenderer) {
 		this.host = host;
+		this.clients = clients;
 		this.sessionID = sessionID;
-		this.pageRenderer = new PageRenderer(this.host.dom, this.host.noscript, this.host.metaRedirect);
+		this.pageRenderer = pageRenderer;
 		// Server-side version of the API
 		this.mobius = {
 			disconnect: () => this.destroy().catch(escape),
@@ -111,40 +289,19 @@ export class Session {
 				if (this.dead) {
 					throw disconnectedError();
 				}
-				this.scheduleSynchronize();
+				this.clients.scheduleSynchronize();
 				return resolvedPromise;
 			},
 			shareSession: this.shareSession
 		};
-		this.request = request;
 		const globalProperties: MobiusGlobalProperties & Partial<FakedGlobals> = {
 			document: this.host.document,
-			request: this.request
+			request: this.clients.request
 		};
 		this.globalProperties = interceptGlobals(globalProperties, () => this.insideCallback, this.coordinateValue, this.createServerChannel);
 		if (this.host.allowMultipleClientsPerSession) {
 			this.recentEvents = [];
 		}
-	}
-
-	newClient(request: Request) {
-		const newClientId = this.currentClientID++;
-		if (this.sharingEnabled || (newClientId == 0)) {
-			const result = new Client(this, request, newClientId);
-			this.request = request;
-			this.clients.set(newClientId, result);
-			return result;
-		}
-		throw new Error("Multiple clients attached to the same session are not supported!");
-	}
-
-	hasCapableClient() {
-		for (const client of this.clients) {
-			if (client[1].clientIsActive) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	loadModule(path: string, newModule: SandboxModule, allowNodeModules: boolean) {
@@ -194,9 +351,7 @@ export class Session {
 		if (this.recentEvents) {
 			this.recentEvents.push(event);
 		}
-		for (const client of this.clients.values()) {
-			client.sendEvent(event);
-		}
+		this.clients.sendEvent(event);
 	}
 
 	dispatchClientEvent(event: Event) {
@@ -242,12 +397,6 @@ export class Session {
 		}
 		this.updateOpenServerChannelStatus(this.localChannelCount != 0);
 		this.currentEvents = undefined;
-	}
-
-	scheduleSynchronize() {
-		for (const client of this.clients.values()) {
-			client.scheduleSynchronize();
-		}
 	}
 
 	enterLocalChannel(delayPrerender: boolean = true) : number {
@@ -422,7 +571,7 @@ export class Session {
 				resolvedPromise.then(escaping(() => {
 					if (session.exitLocalChannel(includedInPrerender) == 0) {
 						// If this was the last server channel, reevaluate queued events so the session can be potentially collected
-						session.scheduleSynchronize();
+						session.clients.scheduleSynchronize();
 					}
 				}));
 				if (onClose) {
@@ -499,7 +648,7 @@ export class Session {
 					channelId = -1;
 					if ((--session.pendingChannelCount) == 0) {
 						// If this was the last client channel, reevaluate queued events so the session can be potentially collected
-						session.scheduleSynchronize();
+						session.clients.scheduleSynchronize();
 					}
 				}
 			}
@@ -525,7 +674,7 @@ export class Session {
 					reject(disconnectedError());
 				}
 			});
-			if (!this.hasCapableClient() && !this.bootstrappingPromise) {
+			if (!this.clients.hasCapableClient() && !this.bootstrappingPromise) {
 				this.enterLocalChannel(true);
 				this.dispatchingAPIImplementation++;
 				const promise = fallback ? new Promise<T>(resolve => resolve(fallback())) : Promise.reject(new Error("Browser does not support client-side rendering!"))
@@ -646,7 +795,7 @@ export class Session {
 				throw new Error("Sharing has been disabled!");
 			}
 			this.sharingEnabled = true;
-			const request = this.request;
+			const request = this.clients.request;
 			if (request) {
 				return `${request.protocol}://${this.host.hostname || request.get("host")}${request.url.replace(/(\.websocket)?\?.*$/, "")}?sessionID=${this.sessionID}`;
 			}
@@ -656,12 +805,6 @@ export class Session {
 		// Dummy channel that stays open
 		this.createServerChannel(emptyFunction, emptyFunction, undefined, false);
 		return result;
-	}
-
-	setCookie(key: string, value: string) {
-		for (const client of this.clients.values()) {
-			client.setCookie(key, value);
-		}
 	}
 
 	async destroy() {
@@ -678,10 +821,7 @@ export class Session {
 				pair[1]();
 			}
 			this.localChannels.clear();
-			for (const client of this.clients.values()) {
-				await client.destroy();
-			}
-			this.host.sessions.delete(this.sessionID);
+			await this.clients.sessionWasDestroyed();
 		}
 	}
 
@@ -708,14 +848,14 @@ export class Session {
 		}
 		// Actually archive
 		await (this.archivingEvents = (async () => {
-			// Determine where to write and whether or not this is a fresh session
 			const path = this.host.pathForSessionId(this.sessionID);
+			// Determine where to write and whether or not this is a fresh session
 			const freshFile = this.archiveStatus != ArchiveStatus.Partial || !(await exists(path));
 			// Prepare events
 			let unarchivedEvents: (Event | boolean)[] | undefined;
 			if (this.archiveStatus == ArchiveStatus.Full) {
 				try {
-					unarchivedEvents = (await Session.readArchivedSession(this.host.pathForSessionId(this.sessionID))).events;
+					unarchivedEvents = (await WorkerSession.readArchivedSession(this.host.pathForSessionId(this.sessionID))).events;
 				} catch (e) {
 				}
 			}
@@ -766,7 +906,7 @@ export class Session {
 			if (this.archivingEvents) {
 				await this.archivingEvents;
 			}
-			archivedEvents = (await Session.readArchivedSession(this.host.pathForSessionId(this.sessionID))).events;
+			archivedEvents = (await WorkerSession.readArchivedSession(this.host.pathForSessionId(this.sessionID))).events;
 		} while (this.archivingEvents);
 		const recentEvents = this.recentEvents;
 		if (!recentEvents) {
@@ -775,12 +915,15 @@ export class Session {
 		return archivedEvents ? archivedEvents.concat(recentEvents) : recentEvents;
 	}
 
-	async restoreFromArchive(archive: ArchivedSession) : Promise<void> {
+
+	async unarchiveEvents() : Promise<void> {
+		const path = this.host.pathForSessionId(this.sessionID);
+		const archive = await WorkerSession.readArchivedSession(path);
 		this.bootstrappingChannels = new Set<number>(archive.channels);
 		let completedBootstrapping: () => void;
 		this.bootstrappingPromise = new Promise<void>(resolve => completedBootstrapping = resolve);
 		// Read each event and dispatch the appropriate event in order
-		const events = archive.events;
+		const events = archive.events!;
 		this.currentEvents = events;
 		const firstEvent = events[0];
 		if (typeof firstEvent == "boolean") {
@@ -812,6 +955,20 @@ export class Session {
 		this.bootstrappingChannels = undefined;
 		this.bootstrappingPromise = undefined;
 		completedBootstrapping!();
+	}
+
+	async generateBootstrapData(client: ClientBootstrap) : Promise<BootstrapData> {
+		const queuedLocalEvents = await this.readAllEvents() || client.queuedLocalEvents;
+		const result: BootstrapData = { sessionID: this.sessionID, channels: Array.from(this.pendingChannels.keys()) };
+		if (queuedLocalEvents) {
+			// TODO: Do this in such a way that we aren't mutating client directly
+			client.queuedLocalEvents = undefined;
+			result.events = queuedLocalEvents;
+		}
+		if (client.clientID) {
+			result.clientID = client.clientID;
+		}
+		return result;
 	}
 };
 

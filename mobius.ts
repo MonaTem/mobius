@@ -11,7 +11,7 @@ import { diff_match_patch } from "diff-match-patch";
 const diff_match_patch_node = new (require("diff-match-patch-node") as typeof diff_match_patch);
 
 import { Host } from "./host/host";
-import { Session } from "./host/session";
+import { InProcessSession, MasterSession } from "./host/session";
 import { Client } from "./host/client";
 import { PageRenderMode } from "./host/page-renderer";
 import clientCompile from "./host/client-compiler";
@@ -19,7 +19,7 @@ import { escape } from "./host/event-loop";
 import * as csrf from "./host/csrf";
 import { packageRelative, readFile, writeFile, mkdir, unlink, rimraf, stat, exists, readJSON } from "./host/fileUtils";
 
-import { serializeMessageAsText, deserializeMessageFromText, Event, ClientMessage, BootstrapData } from "./common/_internal";
+import { serializeMessageAsText, deserializeMessageFromText, ClientMessage } from "./common/_internal";
 
 import * as commandLineArgs from "command-line-args";
 
@@ -113,13 +113,14 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 	// Render default state with noscript URL added
 	console.log("Rendering initial page...");
 	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, hostname);
-	const initialPageSession = new Session(host, "initial-render");
-	await initialPageSession.destroy();
-	initialPageSession.updateOpenServerChannelStatus(true);
+
+	const initialPageSession = new InProcessSession("initial-render", host);
+	await initialPageSession.worker.destroy();
+	initialPageSession.worker.updateOpenServerChannelStatus(true);
 	await initialPageSession.prerenderContent();
 	const clientScript = await asyncClientScript;
 	const clientURL = "/client-" + crypto.createHash("sha1").update(clientScript.code).digest("hex").substr(16) + ".js";
-	const defaultRenderedHTML = initialPageSession.pageRenderer.render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, { sessionID: "initial-render", localChannelCount: 0 }, clientURL, "/?js=no");
+	const defaultRenderedHTML = await initialPageSession.render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, clientURL, "/?js=no");
 
 	return {
 		install(server: express.Express) {
@@ -131,7 +132,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 			server.get("/", async (request, response) => {
 				try {
 					const sessionID = request.query.sessionID;
-					let session: Session;
+					let session: MasterSession;
 					let client: Client;
 					if (sessionID) {
 						// Joining existing session
@@ -151,19 +152,9 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 					// Prerendering was enabled, wait for content to be ready
 					client.outgoingMessageId++;
 					await session.prerenderContent();
-					// Read bootstrap data
-					const queuedLocalEvents = await session.readAllEvents() || client.queuedLocalEvents;
-					const bootstrapData: BootstrapData = { sessionID: session.sessionID, channels: Array.from(session.pendingChannels.keys()) };
-					if (queuedLocalEvents) {
-						client.queuedLocalEvents = undefined;
-						bootstrapData.events = queuedLocalEvents;
-					}
-					if (client.clientID) {
-						bootstrapData.clientID = client.clientID;
-					}
+					// Render the DOM into HTML source with bootstrap data applied
+					const html = await session.render(PageRenderMode.IncludeForm, client, clientURL, undefined, true);
 					client.incomingMessageId++;
-					// Render the DOM into HTML source
-					const html = session.pageRenderer.render(PageRenderMode.IncludeForm, client, session, clientURL, undefined, bootstrapData);
 					client.applyCookies(response);
 					return topFrameHTML(response, html);
 				} catch (e) {
@@ -203,45 +194,17 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 					}
 					if (postback) {
 						const isJavaScript = postback == "js";
-						// JavaScript is disabled, emulate events from form POST
-						const session = client.session;
-						const inputEvents: Event[] = [];
-						const buttonEvents: Event[] = [];
-						message.noJavaScript = true;
-						for (let key in body) {
-							if (!Object.hasOwnProperty.call(body, key)) {
-								continue;
-							}
-							const match = key.match(/^channelID(\d+)$/);
-							if (match && Object.hasOwnProperty.call(body, key)) {
-								const element = session.pageRenderer.body.querySelector("[name=\"" + key + "\"]");
-								if (element) {
-									const event: Event = [-match[1], { value: body[key] }];
-									switch (element.nodeName) {
-										case "INPUT":
-											if ((element as HTMLInputElement).value != body[key]) {
-												inputEvents.unshift(event);
-											}
-											break;
-										case "BUTTON":
-											buttonEvents.unshift(event);
-											break;
-									}
-								}
-							}
-						}
-						message.events = message.events.concat(inputEvents.concat(buttonEvents));
-						// Process the faked message normally
-						await client.receiveMessage(message);
+						// Process the fallback message
+						await client.receiveFallbackMessage(message, body);
 						if (isJavaScript) {
 							// Wait for events to be ready
 							await client.dequeueEvents();
 						} else {
 							// Wait for content to be ready
-							await session.prerenderContent();
+							await client.session.prerenderContent();
 						}
 						// Render the DOM into HTML source
-						const html = session.pageRenderer.render(PageRenderMode.IncludeFormAndStripScript, client, session, clientURL);
+						const html = await client.session.render(PageRenderMode.IncludeFormAndStripScript, client, clientURL);
 						let responseContent = html;
 						if (isJavaScript) {
 							if (client.lastSentFormHTML) {
@@ -329,15 +292,12 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 							const keepGoing = await client.dequeueEvents();
 							processingEvents = false;
 							if (!closed) {
-								const message = client.produceMessage(!keepGoing);
+								closed = !keepGoing || !(await client.session.hasLocalChannels());
+								const message = client.produceMessage(closed);
 								if (lastOutgoingMessageId == message.messageID) {
 									delete message.messageID;
 								}
 								lastOutgoingMessageId = client.outgoingMessageId;
-								if (client.session.localChannelCount == 0 || !keepGoing) {
-									message.close = true;
-									closed = true;
-								}
 								const serialized = serializeMessageAsText(message);
 								if (simulatedLatency) {
 									await delay(simulatedLatency);

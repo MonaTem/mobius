@@ -1,11 +1,11 @@
-import { Session } from "./session";
+import { MasterSession } from "./session";
 import { defer } from "./event-loop";
 import { Event, ServerMessage, ClientMessage } from "../common/_internal";
 
 import { Request, Response } from "express";
 
 export class Client {
-	session: Session;
+	session: MasterSession;
 	request: Request;
 	clientID: number;
 	incomingMessageId: number = 0;
@@ -19,7 +19,7 @@ export class Client {
 	pendingCookies?: [string, string][];
 	clientIsActive?: true;
 
-	constructor(session: Session, request: Request, clientID: number) {
+	constructor(session: MasterSession, request: Request, clientID: number) {
 		this.session = session;
 		this.request = request;
 		this.clientID = clientID;
@@ -68,6 +68,28 @@ export class Client {
 		return this.processMessage(message);
 	}
 
+	async receiveFallbackMessage(message: ClientMessage, body: { [key: string]: string}) : Promise<void> {
+		// JavaScript is disabled, emulate events from form POST
+		const inputEvents: Event[] = [];
+		const buttonEvents: Event[] = [];
+		message.noJavaScript = true;
+		for (let key in body) {
+			if (!Object.hasOwnProperty.call(body, key)) {
+				continue;
+			}
+			const match = key.match(/^channelID(\d+)$/);
+			if (match && Object.hasOwnProperty.call(body, key)) {
+				const value = await this.session.valueForFormField(key);
+				if (value === undefined || value !== body[key]) {
+					const event: Event = [-match[1], { value: body[key] }];
+					inputEvents.unshift(event);
+				}
+			}
+		}
+		message.events = message.events.concat(inputEvents.concat(buttonEvents));
+		return await this.receiveMessage(message);
+	}
+
 	produceMessage(close: boolean) : Partial<ServerMessage> {
 		const result: Partial<ServerMessage> = { messageID: this.outgoingMessageId++ };
 		if (close) {
@@ -80,7 +102,7 @@ export class Client {
 		return result;
 	}
 
-	dequeueEvents() : Promise<true | void> {
+	async dequeueEvents() : Promise<true | void> {
 		return new Promise<true | void>((resolve, reject) => {
 			// Wait until events are ready, a new event handler comes in, or no more local channels exist
 			const oldResolve = this.queuedLocalEventsResolve;
@@ -92,7 +114,7 @@ export class Client {
 					resolve(true);
 					return;
 				}
-			} else if (this.session.localChannelCount) {
+			} else if (this.session.hasLocalChannels()) {
 				this.queuedLocalEventsResolve = resolve;
 				if (oldResolve) {
 					oldResolve(undefined);

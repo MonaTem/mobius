@@ -1,4 +1,4 @@
-import { ArchivedSession, Session } from "./session";
+import { MasterSession, createSessionGroup } from "./session";
 import { escape } from "./event-loop";
 import { exists } from "./fileUtils";
 
@@ -15,9 +15,8 @@ import * as path from "path";
 
 import * as uuid from "uuid/v4";
 
-
 export class Host {
-	sessions = new Map<string, Session>();
+	sessions = new Map<string, MasterSession>();
 	destroying: boolean = false;
 	scriptPath: string;
 	hostname?: string;
@@ -33,6 +32,7 @@ export class Host {
 	secrets: JsonValue;
 	allowMultipleClientsPerSession: boolean;
 	sessionsPath: string;
+	constructSession: (sessionID: string, request: Request) => MasterSession;
 	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, hostname?: string) {
 		this.destroying = false;
 		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;
@@ -49,6 +49,7 @@ export class Host {
 		this.serverModulePaths = serverModulePaths;
 		this.modulePaths = modulePaths;
 		this.hostname = hostname;
+		this.constructSession = createSessionGroup(this, 0);
 		// Client-side emulation
 		patchJSDOM(this.document);
 		// Session timeout
@@ -73,20 +74,19 @@ export class Host {
 		}
 		if (!this.destroying) {
 			if (this.allowMultipleClientsPerSession) {
-				let archive;
 				try {
-					archive = await Session.readArchivedSession(this.pathForSessionId(sessionID));
-				} catch (e) {
-				}
-				if (archive) {
-					session = new Session(this, sessionID, request);
+					session = this.constructSession(sessionID, request);
+					await session.unarchiveEvents();
 					this.sessions.set(sessionID, session);
-					await session.restoreFromArchive(archive as ArchivedSession);
 					return session;
+				} catch (e) {
+					if (!allowNewSession) {
+						throw e;
+					}
 				}
 			}
 			if (allowNewSession) {
-				session = new Session(this, sessionID, request);
+				session = this.constructSession(sessionID, request);
 				session.newClient(request);
 				this.sessions.set(sessionID, session);
 				return session;
@@ -105,7 +105,7 @@ export class Host {
 			throw new Error("Client ID is not valid: " + message.clientID);
 		}
 		client.request = request;
-		session.request = request;
+		session.receivedRequest(request);
 		return client;
 	}
 	async newClient(request: Request) {
@@ -115,7 +115,7 @@ export class Host {
 		for (;;) {
 			const sessionID = uuid();
 			if (!this.sessions.has(sessionID) && (!this.allowMultipleClientsPerSession || !await exists(this.pathForSessionId(sessionID)))) {
-				const session = new Session(this, sessionID, request);
+				const session = this.constructSession(sessionID, request);
 				this.sessions.set(sessionID, session);
 				return session.newClient(request);
 			}
