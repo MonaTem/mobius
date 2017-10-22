@@ -11,7 +11,7 @@ import { diff_match_patch } from "diff-match-patch";
 const diff_match_patch_node = new (require("diff-match-patch-node") as typeof diff_match_patch);
 
 import { Host } from "./host/host";
-import { MasterSession } from "./host/session";
+import { Session } from "./host/session";
 import { Client } from "./host/client";
 import { PageRenderMode } from "./host/page-renderer";
 import clientCompile from "./host/client-compiler";
@@ -132,7 +132,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 			server.get("/", async (request, response) => {
 				try {
 					const sessionID = request.query.sessionID;
-					let session: MasterSession;
+					let session: Session;
 					let client: Client;
 					if (sessionID) {
 						// Joining existing session

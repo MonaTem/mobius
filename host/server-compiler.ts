@@ -62,7 +62,7 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(scriptPath:
 		],
 		inputSourceMap: compiled && typeof compiled.sourceMapText == "string" ? JSON.parse(compiled.sourceMapText) : undefined
 	});
-	return vm.runInThisContext("(function (self){with(self){return(function(self,global,require,document,request){" + transformed.code + "\n})(self,self.global,self.require,self.document,self.request)}})", {
+	return vm.runInThisContext("(function (self){with(self){return(function(self,global,require,document){" + transformed.code + "\n})(self,self.global,self.require,self.document)}})", {
 		filename: scriptPath,
 		lineOffset: 0,
 		displayErrors: true

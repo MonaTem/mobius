@@ -1,11 +1,11 @@
-import { MasterSession } from "./session";
+import { Session } from "./session";
 import { defer } from "./event-loop";
 import { Event, ServerMessage, ClientMessage } from "../common/_internal";
 
 import { Request, Response } from "express";
 
 export class Client {
-	session: MasterSession;
+	session: Session;
 	request: Request;
 	clientID: number;
 	incomingMessageId: number = 0;
@@ -19,7 +19,7 @@ export class Client {
 	pendingCookies?: [string, string][];
 	clientIsActive?: true;
 
-	constructor(session: MasterSession, request: Request, clientID: number) {
+	constructor(session: Session, request: Request, clientID: number) {
 		this.session = session;
 		this.request = request;
 		this.clientID = clientID;

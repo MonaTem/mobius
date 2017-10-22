@@ -1,4 +1,4 @@
-import { MasterSession, createSessionGroup } from "./session";
+import { Session, createSessionGroup } from "./session";
 import { escape } from "./event-loop";
 import { exists } from "./fileUtils";
 
@@ -16,7 +16,7 @@ import * as path from "path";
 import * as uuid from "uuid/v4";
 
 export class Host {
-	sessions = new Map<string, MasterSession>();
+	sessions = new Map<string, Session>();
 	destroying: boolean = false;
 	scriptPath: string;
 	hostname?: string;
@@ -32,7 +32,7 @@ export class Host {
 	secrets: JsonValue;
 	allowMultipleClientsPerSession: boolean;
 	sessionsPath: string;
-	constructSession: (sessionID: string, request?: Request) => MasterSession;
+	constructSession: (sessionID: string, request?: Request) => Session;
 	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, hostname?: string) {
 		this.destroying = false;
 		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;
