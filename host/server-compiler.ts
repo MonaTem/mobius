@@ -10,16 +10,16 @@ import noImpureGetters from "./noImpureGetters";
 let convertToCommonJS: any;
 let optimizeClosuresInRender: any;
 
-export interface SandboxModule {
+export interface ServerModule {
 	exports: any,
 	paths: string[]
 }
 
-interface SandboxGlobal {
+interface ServerModuleGlobal {
 	self: this,
 	global: this | NodeJS.Global,
 	require: (name: string) => any,
-	module: SandboxModule,
+	module: ServerModule,
 	exports: any,
 	Object?: typeof Object,
 	Array?: typeof Array
@@ -40,7 +40,7 @@ const compilerOptions = (() => {
 	return ts.convertCompilerOptionsFromJson(configObject.compilerOptions, packageRelative("./"), fileName).options;
 })();
 
-const sandboxedScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: string) => {
+const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(scriptPath: string) => {
 	if (!convertToCommonJS) {
 		convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs");
 	}
@@ -69,8 +69,8 @@ const sandboxedScriptAtPath = memoize(<T extends SandboxGlobal>(scriptPath: stri
 	}) as (global: T) => void;
 });
 
-export function loadModule<T>(path: string, module: SandboxModule, globalProperties: T, require: (name: string) => any) {
-	const moduleGlobal: SandboxGlobal & T = Object.create(global);
+export function loadModule<T>(path: string, module: ServerModule, globalProperties: T, require: (name: string) => any) {
+	const moduleGlobal: ServerModuleGlobal & T = Object.create(global);
 	Object.assign(moduleGlobal, globalProperties);
 	moduleGlobal.self = moduleGlobal;
 	moduleGlobal.global = global;

@@ -32,7 +32,7 @@ export class Host {
 	secrets: JsonValue;
 	allowMultipleClientsPerSession: boolean;
 	sessionsPath: string;
-	constructSession: (sessionID: string, request: Request) => MasterSession;
+	constructSession: (sessionID: string, request?: Request) => MasterSession;
 	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, hostname?: string) {
 		this.destroying = false;
 		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;

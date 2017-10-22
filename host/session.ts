@@ -1,6 +1,6 @@
 import { Client } from "./client";
 import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
-import { loadModule, SandboxModule } from "./sandbox";
+import { loadModule, ServerModule } from "./server-compiler";
 import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
 
@@ -20,7 +20,7 @@ const resolvedPromise: Promise<void> = Promise.resolve();
 
 // Lazy version of loadModule so that the sandbox module is loaded on first use
 let loadModuleLazy: typeof loadModule = (path, module, globalProperties, require_) => {
-	loadModuleLazy = require("./sandbox").loadModule as typeof loadModule;
+	loadModuleLazy = require("./server-compiler").loadModule as typeof loadModule;
 	return loadModuleLazy(path, module, globalProperties, require_);
 }
 
@@ -197,14 +197,14 @@ export abstract class OutOfProcessSession extends MasterSession {
 
 export function createSessionGroup(host: Host, workerCount: number) {
 	if (workerCount <= 0) {
-		return (sessionID: string, request: Request) => new InProcessSession(sessionID, host, request);
+		return (sessionID: string, request?: Request) => new InProcessSession(sessionID, host, request);
 	}
 	const workers: ChildProcess[] = [];
 	for (let i = 0; i < workerCount; i++) {
 		workers[i] = fork(require.resolve("./session"));
 	}
 	// let currentWorker = 0;
-	return (sessionID: string, request: Request) => {
+	return (sessionID: string, request?: Request) => {
 		throw new Error("Not supported yet!");
 		// const result = new OutOfProcessSession(sessionID, workers[currentWorker]);
 		// if ((++currentWorker) === workerCount) {
@@ -240,7 +240,7 @@ export class WorkerSession {
 	sessionID: string;
 	dead: boolean = false;
 	// Script context
-	modules = new Map<string, SandboxModule>();
+	modules = new Map<string, ServerModule>();
 	mobius: typeof mobiusModule;
 	hasRun: boolean = false;
 	pageRenderer: PageRenderer;
@@ -304,7 +304,7 @@ export class WorkerSession {
 		}
 	}
 
-	loadModule(path: string, newModule: SandboxModule, allowNodeModules: boolean) {
+	loadModule(path: string, newModule: ServerModule, allowNodeModules: boolean) {
 		loadModuleLazy(path, newModule, this.globalProperties, (name: string) => {
 			const bakedModule = bakedModules[name];
 			if (bakedModule) {
@@ -316,7 +316,7 @@ export class WorkerSession {
 				if (existingModule) {
 					return existingModule.exports;
 				}
-				const subModule: SandboxModule = {
+				const subModule: ServerModule = {
 					exports: {},
 					paths: newModule.paths
 				};

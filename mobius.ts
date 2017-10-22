@@ -11,7 +11,7 @@ import { diff_match_patch } from "diff-match-patch";
 const diff_match_patch_node = new (require("diff-match-patch-node") as typeof diff_match_patch);
 
 import { Host } from "./host/host";
-import { InProcessSession, MasterSession } from "./host/session";
+import { MasterSession } from "./host/session";
 import { Client } from "./host/client";
 import { PageRenderMode } from "./host/page-renderer";
 import clientCompile from "./host/client-compiler";
@@ -114,13 +114,13 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 	console.log("Rendering initial page...");
 	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, hostname);
 
-	const initialPageSession = new InProcessSession("initial-render", host);
-	await initialPageSession.worker.destroy();
-	initialPageSession.worker.updateOpenServerChannelStatus(true);
+	const initialPageSession = host.constructSession("initial-render");
+	initialPageSession.updateOpenServerChannelStatus(true);
 	await initialPageSession.prerenderContent();
 	const clientScript = await asyncClientScript;
 	const clientURL = "/client-" + crypto.createHash("sha1").update(clientScript.code).digest("hex").substr(16) + ".js";
 	const defaultRenderedHTML = await initialPageSession.render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, clientURL, "/?js=no");
+	await initialPageSession.destroy();
 
 	return {
 		install(server: express.Express) {
