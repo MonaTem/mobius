@@ -71,6 +71,9 @@ class InProcessClients implements SessionClients {
 			client.setCookie(key, value);
 		}
 	}
+	async cookieHeader() {
+		return this.request ? this.request.headers["cookie"].toString() || "" : "";
+	}
 	async getBaseURL(options: HostSandboxOptions) {
 		return generateBaseURL(options, this.request);
 	}
@@ -126,6 +129,9 @@ class WorkerSandboxClient implements SessionSandboxClient {
 	}
 	setCookie(key: string, value: string) {
 		return this.send("setCookie", [key, value]);
+	}
+	cookieHeader() {
+		return this.send<string>("cookieHeader");
 	}
 	getBaseURL(options: HostSandboxOptions) {
 		return this.send<string>("getBaseURL", [options]);

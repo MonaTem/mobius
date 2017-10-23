@@ -61,6 +61,16 @@ export interface ClientBootstrap {
 const bakedModules: { [moduleName: string]: (sandbox: LocalSessionSandbox) => any } = {
 	mobius: (sandbox: LocalSessionSandbox) => sandbox.mobius,
 	setCookie: (sandbox: LocalSessionSandbox) => sandbox.client.setCookie.bind(sandbox.client),
+	allCookies: (sandbox: LocalSessionSandbox) => async () => {
+		const result: {[key: string]: string} = {};
+		for (let entry of (await sandbox.client.cookieHeader()).split(/;\s*/g)) {
+			let split : string[] = entry.split(/=/);
+			if (split.length > 1) {
+				result[decodeURIComponent(split[0])] = decodeURIComponent(split[1]);
+			}
+		}
+		return result;
+	},
 	document: (sandbox: LocalSessionSandbox) => sandbox.globalProperties.document,
 	head: (sandbox: LocalSessionSandbox) => sandbox.pageRenderer.head,
 	body: (sandbox: LocalSessionSandbox) => sandbox.pageRenderer.body,
@@ -74,6 +84,7 @@ export interface SessionSandboxClient {
 	scheduleSynchronize() : Promise<void>;
 	sendEvent(event: Event) : Promise<void>;
 	setCookie(key: string, value: string) : Promise<void>;
+	cookieHeader() : Promise<string>;
 	sessionWasDestroyed() : Promise<void>;
 	getBaseURL(options: HostSandboxOptions) : Promise<string>;
 }
