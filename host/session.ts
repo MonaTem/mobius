@@ -1,6 +1,7 @@
 import { Client } from "./client";
 import { ClientState, PageRenderMode } from "./page-renderer";
 import { ClientBootstrap, HostSandbox, HostSandboxOptions, LocalSessionSandbox, SessionSandbox, SessionSandboxClient } from "./session-sandbox";
+import { escape } from "./event-loop";
 import { peek, Redacted } from "../server/redact";
 
 import { eventForException, eventForValue, roundTrip, parseValueEvent, Event } from "../common/_internal";
@@ -195,34 +196,34 @@ function isEvent(message: CommandMessage | Event | BroadcastMessage) : message i
 }
 
 function constructBroadcastModule() {
-	const topics = new Map<string, ((message: JsonValue) => void)[]>();
+	const topics = new Map<string, Set<(message: JsonValue) => void>>();
 	return {
 		send(topic: string | Redacted<string>, message: JsonValue | Redacted<JsonValue | JsonArray | JsonMap>) {
 			const observers = topics.get(peek(topic));
 			if (observers) {
 				const peekedMessage = peek(message);
-				observers.slice(0).forEach(async (observer) => observer(roundTrip(peekedMessage)));
+				for (let observer of observers.values()) {
+					try {
+						observer(roundTrip(peekedMessage));
+					} catch (e) {
+						escape(e);
+					}
+				}
 			}
 		},
 		addListener(topic: string, callback: (message: JsonValue) => void) : void {
 			const topicName = peek(topic);
 			let observers = topics.get(topicName);
 			if (!observers) {
-				topics.set(topicName, observers = []);
+				topics.set(topicName, observers = new Set<(message: JsonValue) => void>());
 			}
-			observers.push(callback);
+			observers.add(callback);
 		},
 		removeListener(topic: string, callback: (message: JsonValue) => void) : void {
 			const topicName = peek(topic);
 			const observers = topics.get(topicName);
-			if (observers) {
-				const index = observers.indexOf(callback);
-				if (index != -1) {
-					observers.splice(index, 1);
-				}
-				if (observers.length === 0) {
-					topics.delete(topicName);
-				}
+			if (observers && observers.delete(callback) && observers.size === 0) {
+				topics.delete(topicName);
 			}
 		}
 	};
