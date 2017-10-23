@@ -121,6 +121,8 @@ export interface BootstrapData {
 	clientID?: number;
 	events?: (Event | boolean)[];
 	channels?: number[];
+	x?: number;
+	y?: number;
 }
 
 

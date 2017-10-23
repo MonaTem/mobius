@@ -331,6 +331,9 @@ if (bootstrapData.sessionID) {
 		bootstrappingChannels = undefined;
 		// Swap the prerendered DOM element out for the one with mounted components
 		document.body.removeChild(serverRenderedHostElement);
+		if ("x" in bootstrapData && "y" in bootstrapData) {
+			window.scrollTo(bootstrapData.x, bootstrapData.y);
+		}
 		clientRenderedHostElement.style.display = null;
 	}).then(didExitCallback).then(synchronizeChannels);
 } else {
@@ -373,7 +376,7 @@ export function disconnect() {
 			for (var i in pendingLocalChannels) {
 				channels.push(((i as any) as number) | 0);
 			}
-			const replacementBootstrap: BootstrapData = { sessionID, clientID, events: allEvents, channels };
+			const replacementBootstrap: BootstrapData = { sessionID, clientID, events: allEvents, channels, x: window.scrollX || window.pageXOffset, y: window.scrollY || window.pageYOffset };
 			history.replaceState(replacementBootstrap, document.title, location.href);
 		}
 		// Forcefully tear down WebSocket
