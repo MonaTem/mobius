@@ -2,6 +2,7 @@
 import * as path from "path";
 import * as util from "util";
 import * as crypto from "crypto";
+import { cpus } from "os";
 const Module = require("module");
 
 import * as express from "express";
@@ -70,13 +71,14 @@ interface Config {
 	minify?: boolean;
 	sourceMaps?: boolean;
 	hostname?: string;
+	workers?: number;
 }
 
 function defaultSessionPath(sourcePath: string) {
 	return path.join(sourcePath, ".sessions");
 }
 
-export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, hostname }: Config) {
+export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname }: Config) {
 	let serverJSPath: string;
 	const packagePath = path.resolve(sourcePath, "package.json");
 	if (await exists(packagePath)) {
@@ -88,7 +90,6 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 		}
 		serverJSPath = foundPath;
 	}
-	const asyncClientScript = clientCompile(serverJSPath, sourcePath, minify);
 
 	const htmlContents = readFile(packageRelative("public/index.html"));
 
@@ -112,11 +113,13 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 
 	// Render default state with noscript URL added
 	console.log("Rendering initial page...");
-	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, hostname);
+	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, workers, hostname);
 
 	const initialPageSession = host.constructSession("initial-render");
 	initialPageSession.updateOpenServerChannelStatus(true);
-	await initialPageSession.prerenderContent();
+	const prerender = initialPageSession.prerenderContent();
+	const asyncClientScript = clientCompile(serverJSPath, sourcePath, minify);
+	await prerender;
 	const clientScript = await asyncClientScript;
 	const clientURL = "/client-" + crypto.createHash("sha1").update(clientScript.code).digest("hex").substr(16) + ".js";
 	const defaultRenderedHTML = await initialPageSession.render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, clientURL, "/?js=no");
@@ -137,7 +140,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 					if (sessionID) {
 						// Joining existing session
 						session = await host.sessionFromId(sessionID, request, false);
-						client = session.newClient(request);
+						client = session.client.newClient(session, request);
 						client.incomingMessageId++;
 					} else {
 						// Not prerendering or joining a session, just return the original source with the noscript added
@@ -225,7 +228,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 						response.set("Content-Security-Policy", "frame-ancestors 'none'");
 						response.send(responseContent);
 					} else {
-						client.clientIsActive = true;
+						client.becameActive();
 						// Dispatch the events contained in the message
 						await client.receiveMessage(message);
 						// Wait for events to be ready
@@ -266,7 +269,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 					// Get the startup message contained in the WebSocket URL (avoid extra round trip to send events when websocket is opened)
 					const startMessage = messageFromBody(request.query);
 					const client = await host.clientFromMessage(startMessage, request, true);
-					client.clientIsActive = true;
+					client.becameActive();
 					// Track what the last sent/received message IDs are so we can avoid transmitting them
 					let lastIncomingMessageId = startMessage.messageID;
 					let lastOutgoingMessageId = -1;
@@ -359,11 +362,13 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 export default function main() {
 	(async () => {
 		const cwd = process.cwd();
+		const cpuCount = cpus().length;
 		const args = commandLineArgs([
 			{ name: "port", type: Number, defaultValue: 3000 },
 			{ name: "base", type: String, defaultValue: cwd },
 			{ name: "minify", type: Boolean, defaultValue: false },
 			{ name: "source-map", type: Boolean, defaultValue: false },
+			{ name: "workers", type: Number, defaultValue: cpuCount },
 			{ name: "hostname", type: String },
 			{ name: "init", type: Boolean, defaultValue: false },
 			{ name: "help", type: Boolean }
@@ -406,6 +411,11 @@ export default function main() {
 							description: "Public hostname to serve content from; used to validate CSRF if set",
 						},
 						{
+							name: "workers",
+							typeLabel: "[underline]{number}",
+							description: `Number or workers to use (defaults to number of CPUs: ${cpuCount})`,
+						},
+						{
 							name: "help",
 							description: "Prints this usage guide. Yahahah! You found me!"
 						}
@@ -442,7 +452,8 @@ export default function main() {
 			secrets,
 			minify: args.minify as boolean,
 			sourceMaps: args["source-map"] as boolean,
-			hostname: args.hostname as string | undefined
+			hostname: args.hostname as string | undefined,
+			workers: args.workers as number
 		});
 
 		const expressAsync = require("express") as typeof express;

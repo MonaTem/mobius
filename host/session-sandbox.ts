@@ -1,4 +1,4 @@
-import { PageRenderer } from "./page-renderer";
+import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
 import { loadModule, ServerModule } from "./server-compiler";
 import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
@@ -10,22 +10,44 @@ import { interceptGlobals, FakedGlobals } from "../common/determinism";
 import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, disconnectedError, BootstrapData, Event } from "../common/_internal";
 
 import { JSDOM } from "jsdom";
+import patchJSDOM from "./jsdom-patch";
 
 import { createWriteStream } from "fs";
+import * as path from "path";
 
-export interface Host {
+export interface HostSandboxOptions {
+	htmlSource: string;
 	allowMultipleClientsPerSession: boolean;
-	document: Document;
 	secrets: JsonValue;
 	serverModulePaths: string[];
 	modulePaths: string[];
 	scriptPath: string;
+	sessionsPath: string;
 	hostname?: string;
+}
+
+export function archivePathForSessionId(sessionsPath: string, sessionID: string) {
+	return path.join(sessionsPath, encodeURIComponent(sessionID) + ".json");
+}
+
+export class HostSandbox {
+	options: HostSandboxOptions;
 	dom: JSDOM;
+	document: Document;
 	noscript: Element;
 	metaRedirect: Element;
-	pathForSessionId(sessionID: string): string;
+	constructor(options: HostSandboxOptions) {
+		this.options = options;
+		this.dom = new (require("jsdom").JSDOM)(options.htmlSource) as JSDOM;
+		this.document = (this.dom.window as Window).document as Document;
+		patchJSDOM(this.document);
+		this.noscript = this.document.createElement("noscript");
+		this.metaRedirect = this.document.createElement("meta");
+		this.metaRedirect.setAttribute("http-equiv", "refresh");
+		this.noscript.appendChild(this.metaRedirect);
+	}
 }
+
 
 export interface ClientBootstrap {
 	queuedLocalEvents?: Event[];
@@ -33,24 +55,23 @@ export interface ClientBootstrap {
 }
 
 
-const bakedModules: { [moduleName: string]: (sandbox: SessionSandbox) => any } = {
-	mobius: (sandbox: SessionSandbox) => sandbox.mobius,
-	setCookie: (sandbox: SessionSandbox) => sandbox.clients.setCookie.bind(sandbox.clients),
-	document: (sandbox: SessionSandbox) => sandbox.globalProperties.document,
-	head: (sandbox: SessionSandbox) => sandbox.pageRenderer.head,
-	body: (sandbox: SessionSandbox) => sandbox.pageRenderer.body,
-	secrets: (sandbox: SessionSandbox) => sandbox.host.secrets,
+const bakedModules: { [moduleName: string]: (sandbox: LocalSessionSandbox) => any } = {
+	mobius: (sandbox: LocalSessionSandbox) => sandbox.mobius,
+	setCookie: (sandbox: LocalSessionSandbox) => sandbox.client.setCookie.bind(sandbox.client),
+	document: (sandbox: LocalSessionSandbox) => sandbox.globalProperties.document,
+	head: (sandbox: LocalSessionSandbox) => sandbox.pageRenderer.head,
+	body: (sandbox: LocalSessionSandbox) => sandbox.pageRenderer.body,
+	secrets: (sandbox: LocalSessionSandbox) => sandbox.host.options.secrets,
 };
 
 
-interface ClientCallbacks {
+export interface SessionSandboxClient {
 	synchronizeChannels() : Promise<void>;
-	scheduleSynchronize() : void;
-	sendEvent(event: Event) : void;
-	setCookie(key: string, value: string) : void;
+	scheduleSynchronize() : Promise<void>;
+	sendEvent(event: Event) : Promise<void>;
+	setCookie(key: string, value: string) : Promise<void>;
 	sessionWasDestroyed() : Promise<void>;
-	hasCapableClient() : boolean;
-	getBaseURL() : Promise<string>;
+	getBaseURL(options: HostSandboxOptions) : Promise<string>;
 }
 
 
@@ -83,10 +104,23 @@ Module._extensions[".ts"] = Module._extensions[".tsx"] = function() {}
 
 const resolvedPromise: Promise<void> = Promise.resolve();
 
+export interface SessionSandbox {
+	destroy() : Promise<void>;
+	destroyIfExhausted() : Promise<void>;
+	archiveEvents(includeTrailer: boolean) : Promise<void>;
+	unarchiveEvents() : Promise<void>;
+	processEvents(events: Event[], noJavaScript?: boolean) : Promise<void>;
+	prerenderContent() : Promise<void>;
+	updateOpenServerChannelStatus(newValue: boolean) : Promise<void>;
+	hasLocalChannels() : Promise<boolean>;
+	render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string>;
+	valueForFormField(name: string) : Promise<string | undefined>;
+	becameActive() : Promise<void>;
+}
 
-export class SessionSandbox {
-	host: Host;
-	clients: ClientCallbacks;
+export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandboxClient> implements SessionSandbox {
+	host: HostSandbox;
+	client: T;
 	sessionID: string;
 	dead: boolean = false;
 	// Script context
@@ -120,11 +154,12 @@ export class SessionSandbox {
 	bootstrappingPromise?: Promise<void>;
 	// Session sharing
 	sharingEnabled?: true;
-	constructor(host: Host, clients: ClientCallbacks, sessionID: string, pageRenderer: PageRenderer) {
+	hasActiveClient?: true;
+	constructor(host: HostSandbox, client: T, sessionID: string) {
 		this.host = host;
-		this.clients = clients;
+		this.client = client;
 		this.sessionID = sessionID;
-		this.pageRenderer = pageRenderer;
+		this.pageRenderer = new PageRenderer(host.dom, host.noscript, host.metaRedirect);
 		// Server-side version of the API
 		this.mobius = {
 			disconnect: () => this.destroy().catch(escape),
@@ -139,7 +174,7 @@ export class SessionSandbox {
 				if (this.dead) {
 					throw disconnectedError();
 				}
-				this.clients.scheduleSynchronize();
+				this.client.scheduleSynchronize();
 				return resolvedPromise;
 			},
 			shareSession: this.shareSession
@@ -148,7 +183,7 @@ export class SessionSandbox {
 			document: this.host.document
 		};
 		this.globalProperties = interceptGlobals(globalProperties, () => this.insideCallback, this.coordinateValue, this.createServerChannel);
-		if (this.host.allowMultipleClientsPerSession) {
+		if (this.host.options.allowMultipleClientsPerSession) {
 			this.recentEvents = [];
 		}
 	}
@@ -170,7 +205,7 @@ export class SessionSandbox {
 					paths: newModule.paths
 				};
 				this.modules.set(modulePath, subModule);
-				this.loadModule(modulePath, subModule, !!Module._findPath(name, this.host.serverModulePaths));
+				this.loadModule(modulePath, subModule, !!Module._findPath(name, this.host.options.serverModulePaths));
 				return subModule.exports;
 			}
 			const result = require(name);
@@ -189,9 +224,9 @@ export class SessionSandbox {
 		if (!this.hasRun) {
 			this.hasRun = true;
 			this.enteringCallback();
-			this.loadModule(this.host.scriptPath, {
+			this.loadModule(this.host.options.scriptPath, {
 				exports: {},
-				paths: this.host.modulePaths
+				paths: this.host.options.modulePaths
 			}, false);
 		}
 	}
@@ -200,7 +235,7 @@ export class SessionSandbox {
 		if (this.recentEvents) {
 			this.recentEvents.push(event);
 		}
-		this.clients.sendEvent(event);
+		this.client.sendEvent(event);
 	}
 
 	dispatchClientEvent(event: Event) {
@@ -226,7 +261,7 @@ export class SessionSandbox {
 		}
 	}
 
-	updateOpenServerChannelStatus(newValue: boolean) {
+	async updateOpenServerChannelStatus(newValue: boolean) {
 		if (this.hadOpenServerChannel != newValue) {
 			this.hadOpenServerChannel = newValue;
 			if (this.recentEvents) {
@@ -237,17 +272,20 @@ export class SessionSandbox {
 
 	async processEvents(events: Event[], noJavaScript?: boolean) : Promise<void> {
 		// Read each event and dispatch the appropriate event in order
-		this.updateOpenServerChannelStatus(noJavaScript ? true : (this.localChannelCount != 0));
+		await this.updateOpenServerChannelStatus(noJavaScript ? true : (this.localChannelCount != 0));
 		this.currentEvents = events;
 		this.run();
 		for (let event of events) {
 			this.dispatchClientEvent(event);
 			await defer();
 		}
-		this.updateOpenServerChannelStatus(this.localChannelCount != 0);
+		await this.updateOpenServerChannelStatus(this.localChannelCount != 0);
 		this.currentEvents = undefined;
 	}
 
+	async hasLocalChannels() {
+		return this.localChannelCount !== 0;
+	}
 	enterLocalChannel(delayPrerender: boolean = true) : number {
 		if (delayPrerender) {
 			++this.prerenderChannelCount;
@@ -420,7 +458,7 @@ export class SessionSandbox {
 				resolvedPromise.then(escaping(() => {
 					if (session.exitLocalChannel(includedInPrerender) == 0) {
 						// If this was the last server channel, reevaluate queued events so the session can be potentially collected
-						session.clients.scheduleSynchronize();
+						session.client.scheduleSynchronize();
 					}
 				}));
 				if (onClose) {
@@ -497,7 +535,7 @@ export class SessionSandbox {
 					channelId = -1;
 					if ((--session.pendingChannelCount) == 0) {
 						// If this was the last client channel, reevaluate queued events so the session can be potentially collected
-						session.clients.scheduleSynchronize();
+						session.client.scheduleSynchronize();
 					}
 				}
 			}
@@ -523,7 +561,7 @@ export class SessionSandbox {
 					reject(disconnectedError());
 				}
 			});
-			if (!this.clients.hasCapableClient() && !this.bootstrappingPromise) {
+			if (!this.hasActiveClient && !this.bootstrappingPromise) {
 				this.enterLocalChannel(true);
 				this.dispatchingAPIImplementation++;
 				const promise = fallback ? new Promise<T>(resolve => resolve(fallback())) : Promise.reject(new Error("Browser does not support client-side rendering!"))
@@ -640,11 +678,11 @@ export class SessionSandbox {
 	shareSession = async () => {
 		// Server promise so that client can confirm that sharing is enabled
 		const server = this.createServerPromise(async () => {
-			if (!this.host.allowMultipleClientsPerSession) {
+			if (!this.host.options.allowMultipleClientsPerSession) {
 				throw new Error("Sharing has been disabled!");
 			}
 			this.sharingEnabled = true;
-			return await this.clients.getBaseURL() + "?sessionID=" + this.sessionID;
+			return await this.client.getBaseURL(this.host.options) + "?sessionID=" + this.sessionID;
 		});
 		const result = await server;
 		// Dummy channel that stays open
@@ -657,7 +695,6 @@ export class SessionSandbox {
 			this.dead = true;
 			this.mobius.dead = true;
 			await this.archiveEvents(true);
-			// await unlink(this.host.pathForSessionId(this.sessionID));
 			for (const pair of this.pendingChannels) {
 				pair[1]();
 			}
@@ -666,7 +703,7 @@ export class SessionSandbox {
 				pair[1]();
 			}
 			this.localChannels.clear();
-			await this.clients.sessionWasDestroyed();
+			await this.client.sessionWasDestroyed();
 		}
 	}
 
@@ -693,14 +730,14 @@ export class SessionSandbox {
 		}
 		// Actually archive
 		await (this.archivingEvents = (async () => {
-			const path = this.host.pathForSessionId(this.sessionID);
+			const path = archivePathForSessionId(this.host.options.sessionsPath, this.sessionID);
 			// Determine where to write and whether or not this is a fresh session
 			const freshFile = this.archiveStatus != ArchiveStatus.Partial || !(await exists(path));
 			// Prepare events
 			let unarchivedEvents: (Event | boolean)[] | undefined;
 			if (this.archiveStatus == ArchiveStatus.Full) {
 				try {
-					unarchivedEvents = (await SessionSandbox.readArchivedSession(this.host.pathForSessionId(this.sessionID))).events;
+					unarchivedEvents = (await LocalSessionSandbox.readArchivedSession(path)).events;
 				} catch (e) {
 				}
 			}
@@ -746,12 +783,13 @@ export class SessionSandbox {
 		if (this.archiveStatus == ArchiveStatus.None) {
 			return this.recentEvents;
 		}
+		const path = archivePathForSessionId(this.host.options.sessionsPath, this.sessionID);
 		let archivedEvents: (Event | boolean)[] | undefined;
 		do {
 			if (this.archivingEvents) {
 				await this.archivingEvents;
 			}
-			archivedEvents = (await SessionSandbox.readArchivedSession(this.host.pathForSessionId(this.sessionID))).events;
+			archivedEvents = (await LocalSessionSandbox.readArchivedSession(path)).events;
 		} while (this.archivingEvents);
 		const recentEvents = this.recentEvents;
 		if (!recentEvents) {
@@ -762,8 +800,8 @@ export class SessionSandbox {
 
 
 	async unarchiveEvents() : Promise<void> {
-		const path = this.host.pathForSessionId(this.sessionID);
-		const archive = await SessionSandbox.readArchivedSession(path);
+		const path = archivePathForSessionId(this.host.options.sessionsPath, this.sessionID);
+		const archive = await LocalSessionSandbox.readArchivedSession(path);
 		this.bootstrappingChannels = new Set<number>(archive.channels);
 		let completedBootstrapping: () => void;
 		this.bootstrappingPromise = new Promise<void>(resolve => completedBootstrapping = resolve);
@@ -772,12 +810,12 @@ export class SessionSandbox {
 		this.currentEvents = events;
 		const firstEvent = events[0];
 		if (typeof firstEvent == "boolean") {
-			this.updateOpenServerChannelStatus(firstEvent);
+			await this.updateOpenServerChannelStatus(firstEvent);
 		}
 		this.run();
 		for (let event of events) {
 			if (typeof event == "boolean") {
-				this.updateOpenServerChannelStatus(event);
+				await this.updateOpenServerChannelStatus(event);
 				continue;
 			}
 			const channelId = event[0];
@@ -814,6 +852,25 @@ export class SessionSandbox {
 			result.clientID = client.clientID;
 		}
 		return result;
+	}
+
+	async render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string> {
+		return await this.pageRenderer.render(mode, client, this, clientURL, noScriptURL, bootstrap ? await this.generateBootstrapData(client) : undefined);
+	}
+
+	async becameActive() {
+		this.hasActiveClient = true;
+	}
+
+	async valueForFormField(name: string) : Promise<string | undefined> {
+		const element = this.pageRenderer.body.querySelector("[name=\"" + name + "\"]");
+		if (element) {
+			switch (element.nodeName) {
+				case "INPUT":
+				case "TEXTAREA":
+					return (element as HTMLInputElement).value;
+			}
+		}
 	}
 };
 

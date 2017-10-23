@@ -26,13 +26,13 @@ export class Client {
 	}
 
 	async destroy() {
-		this.session.clients.delete(this.clientID);
+		this.session.client.clients.delete(this.clientID);
 		if (this.queuedLocalEventsResolve) {
 			this.queuedLocalEventsResolve(undefined);
 		}
 		this.synchronizeChannels();
 		// Destroy the session if we were the last client
-		if (this.session.clients.size == 0) {
+		if (this.session.client.clients.size == 0) {
 			await this.session.destroy();
 		}
 	}
@@ -103,6 +103,7 @@ export class Client {
 	}
 
 	async dequeueEvents() : Promise<true | void> {
+		const hasLocalChannels = await this.session.hasLocalChannels();
 		return new Promise<true | void>((resolve, reject) => {
 			// Wait until events are ready, a new event handler comes in, or no more local channels exist
 			const oldResolve = this.queuedLocalEventsResolve;
@@ -114,7 +115,7 @@ export class Client {
 					resolve(true);
 					return;
 				}
-			} else if (this.session.hasLocalChannels()) {
+			} else if (hasLocalChannels) {
 				this.queuedLocalEventsResolve = resolve;
 				if (oldResolve) {
 					oldResolve(undefined);
@@ -173,6 +174,12 @@ export class Client {
 			for (let [ key, value ] of cookies) {
 				response.cookie(key, value);
 			}
+		}
+	}
+	becameActive() {
+		if (!this.clientIsActive) {
+			this.clientIsActive;
+			this.session.becameActive();
 		}
 	}
 }

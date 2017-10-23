@@ -1,4 +1,5 @@
 import { Session, createSessionGroup } from "./session";
+import { archivePathForSessionId, HostSandboxOptions } from "./session-sandbox";
 import { escape } from "./event-loop";
 import { exists } from "./fileUtils";
 
@@ -6,52 +7,28 @@ import { ClientMessage } from "../common/_internal";
 
 import { JsonValue } from "mobius-types";
 
-import { JSDOM } from "jsdom";
-import patchJSDOM from "./jsdom-patch";
-
 import { Request } from "express";
-
-import * as path from "path";
 
 import * as uuid from "uuid/v4";
 
 export class Host {
 	sessions = new Map<string, Session>();
 	destroying: boolean = false;
-	scriptPath: string;
-	hostname?: string;
-	serverModulePaths: string[];
-	modulePaths: string[];
-	internalModulePath: string;
-	htmlSource: string;
-	dom: JSDOM;
-	document: Document;
-	noscript: Element;
-	metaRedirect: Element;
+	options: HostSandboxOptions;
 	staleSessionTimeout: any;
-	secrets: JsonValue;
-	allowMultipleClientsPerSession: boolean;
-	sessionsPath: string;
 	constructSession: (sessionID: string, request?: Request) => Session;
-	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, hostname?: string) {
+	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, workerCount: number, hostname?: string) {
 		this.destroying = false;
-		this.allowMultipleClientsPerSession = allowMultipleClientsPerSession;
-		this.secrets = secrets;
-		this.sessionsPath = sessionsPath;
-		this.htmlSource = htmlSource;
-		this.dom = new (require("jsdom").JSDOM)(htmlSource) as JSDOM;
-		this.document = (this.dom.window as Window).document as Document;
-		this.noscript = this.document.createElement("noscript");
-		this.metaRedirect = this.document.createElement("meta");
-		this.metaRedirect.setAttribute("http-equiv", "refresh");
-		this.noscript.appendChild(this.metaRedirect);
-		this.scriptPath = scriptPath;
-		this.serverModulePaths = serverModulePaths;
-		this.modulePaths = modulePaths;
-		this.hostname = hostname;
-		this.constructSession = createSessionGroup(this, 0);
-		// Client-side emulation
-		patchJSDOM(this.document);
+		this.constructSession = createSessionGroup(this.options = {
+			htmlSource,
+			allowMultipleClientsPerSession,
+			secrets,
+			serverModulePaths,
+			modulePaths,
+			scriptPath,
+			sessionsPath,
+			hostname
+		}, this.sessions, workerCount);
 		// Session timeout
 		this.staleSessionTimeout = setInterval(() => {
 			const now = Date.now();
@@ -73,39 +50,37 @@ export class Host {
 			return session;
 		}
 		if (!this.destroying) {
-			if (this.allowMultipleClientsPerSession) {
+			if (this.options.allowMultipleClientsPerSession) {
+				session = this.constructSession(sessionID, request);
+				this.sessions.set(sessionID, session);
 				try {
-					session = this.constructSession(sessionID, request);
 					await session.unarchiveEvents();
-					this.sessions.set(sessionID, session);
-					return session;
 				} catch (e) {
-					if (!allowNewSession) {
+					if (allowNewSession) {
+						session.client.newClient(session, request);
+					} else {
 						throw e;
 					}
 				}
+				return session;
 			}
 			if (allowNewSession) {
 				session = this.constructSession(sessionID, request);
-				session.newClient(request);
+				session.client.newClient(session, request);
 				this.sessions.set(sessionID, session);
 				return session;
 			}
 		}
 		throw new Error("Session ID is not valid: " + sessionID);
 	}
-	pathForSessionId(sessionId: string) {
-		return path.join(this.sessionsPath, encodeURIComponent(sessionId) + ".json");
-	}
 	async clientFromMessage(message: ClientMessage, request: Request, allowNewSession: boolean) {
 		const clientID = message.clientID as number | 0;
 		const session = await this.sessionFromId(message.sessionID, request, allowNewSession && message.messageID == 0 && clientID == 0);
-		let client = session.clients.get(clientID);
+		let client = session.client.get(clientID);
 		if (!client) {
 			throw new Error("Client ID is not valid: " + message.clientID);
 		}
 		client.request = request;
-		session.receivedRequest(request);
 		return client;
 	}
 	async newClient(request: Request) {
@@ -114,17 +89,17 @@ export class Host {
 		}
 		for (;;) {
 			const sessionID = uuid();
-			if (!this.sessions.has(sessionID) && (!this.allowMultipleClientsPerSession || !await exists(this.pathForSessionId(sessionID)))) {
+			if (!this.sessions.has(sessionID) && (!this.options.allowMultipleClientsPerSession || !await exists(archivePathForSessionId(this.options.sessionsPath, sessionID)))) {
 				const session = this.constructSession(sessionID, request);
 				this.sessions.set(sessionID, session);
-				return session.newClient(request);
+				return session.client.newClient(session, request);
 			}
 		}
 	}
 	async destroyClientById(sessionID: string, clientID: number) {
 		const session = this.sessions.get(sessionID);
 		if (session) {
-			const client = session.clients.get(clientID);
+			const client = session.client.get(clientID);
 			if (client) {
 				await client.destroy();
 			}
