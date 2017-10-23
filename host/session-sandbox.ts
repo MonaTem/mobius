@@ -4,6 +4,7 @@ import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
 
 import * as mobiusModule from "mobius";
+import * as BroadcastModule from "../server/_broadcast";
 import { JsonValue, Channel } from "mobius-types";
 
 import { interceptGlobals, FakedGlobals } from "../common/determinism";
@@ -36,7 +37,8 @@ export class HostSandbox {
 	document: Document;
 	noscript: Element;
 	metaRedirect: Element;
-	constructor(options: HostSandboxOptions) {
+	broadcastModule: typeof BroadcastModule;
+	constructor(options: HostSandboxOptions, broadcastModule: typeof BroadcastModule) {
 		this.options = options;
 		this.dom = new (require("jsdom").JSDOM)(options.htmlSource) as JSDOM;
 		this.document = (this.dom.window as Window).document as Document;
@@ -45,6 +47,7 @@ export class HostSandbox {
 		this.metaRedirect = this.document.createElement("meta");
 		this.metaRedirect.setAttribute("http-equiv", "refresh");
 		this.noscript.appendChild(this.metaRedirect);
+		this.broadcastModule = broadcastModule;
 	}
 }
 
@@ -62,6 +65,7 @@ const bakedModules: { [moduleName: string]: (sandbox: LocalSessionSandbox) => an
 	head: (sandbox: LocalSessionSandbox) => sandbox.pageRenderer.head,
 	body: (sandbox: LocalSessionSandbox) => sandbox.pageRenderer.body,
 	secrets: (sandbox: LocalSessionSandbox) => sandbox.host.options.secrets,
+	_broadcast: (sandbox: LocalSessionSandbox) => sandbox.host.broadcastModule,
 };
 
 

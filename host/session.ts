@@ -1,8 +1,10 @@
 import { Client } from "./client";
 import { ClientState, PageRenderMode } from "./page-renderer";
 import { ClientBootstrap, HostSandbox, HostSandboxOptions, LocalSessionSandbox, SessionSandbox, SessionSandboxClient } from "./session-sandbox";
+import { peek, Redacted } from "../server/redact";
 
-import { eventForException, eventForValue, parseValueEvent, Event } from "../common/_internal";
+import { eventForException, eventForValue, roundTrip, parseValueEvent, Event } from "../common/_internal";
+import { JsonValue, JsonArray, JsonMap } from "mobius-types";
 
 import { fork, ChildProcess } from "child_process";
 import { Request } from "express";
@@ -182,17 +184,69 @@ class OutOfProcessSession implements Session {
 	}
 }
 
-function isCommandMessage(message: CommandMessage | Event) : message is CommandMessage {
+type BroadcastMessage = [false, string, JsonValue];
+
+function isCommandMessage(message: CommandMessage | Event | BroadcastMessage) : message is CommandMessage {
 	return typeof message[0] === "string";
+}
+
+function isEvent(message: CommandMessage | Event | BroadcastMessage) : message is Event {
+	return typeof message[0] === "number";
+}
+
+function constructBroadcastModule() {
+	const topics = new Map<string, ((message: JsonValue) => void)[]>();
+	return {
+		send(topic: string | Redacted<string>, message: JsonValue | Redacted<JsonValue | JsonArray | JsonMap>) {
+			const observers = topics.get(peek(topic));
+			if (observers) {
+				const peekedMessage = peek(message);
+				observers.slice(0).forEach(async (observer) => observer(roundTrip(peekedMessage)));
+			}
+		},
+		addListener(topic: string, callback: (message: JsonValue) => void) : void {
+			const topicName = peek(topic);
+			let observers = topics.get(topicName);
+			if (!observers) {
+				topics.set(topicName, observers = []);
+			}
+			observers.push(callback);
+		},
+		removeListener(topic: string, callback: (message: JsonValue) => void) : void {
+			const topicName = peek(topic);
+			const observers = topics.get(topicName);
+			if (observers) {
+				const index = observers.indexOf(callback);
+				if (index != -1) {
+					observers.splice(index, 1);
+				}
+				if (observers.length === 0) {
+					topics.delete(topicName);
+				}
+			}
+		}
+	};
 }
 
 if (require.main === module) {
 	process.addListener("message", function bootstrap(options: HostSandboxOptions) {
-		const host = new HostSandbox(options);
+		const basicBroadcast = constructBroadcastModule();
+		const host = new HostSandbox(options, {
+			send(topic: string | Redacted<string>, message: JsonValue | Redacted<JsonValue | JsonArray | JsonMap>) {
+				const topicName = peek(topic);
+				const peekedMessage = peek(message);
+				const broadcastMessage: BroadcastMessage = [false, topicName, peekedMessage];
+				process.send!(broadcastMessage);
+				basicBroadcast.send(topicName, peekedMessage);
+			},
+			addListener: basicBroadcast.addListener,
+			removeListener: basicBroadcast.removeListener
+		});
 		const sessions = new Map<string, LocalSessionSandbox<WorkerSandboxClient>>();
 		process.removeListener("message", bootstrap);
-		process.addListener("message", async (message: CommandMessage | Event) => {
+		process.addListener("message", async (message: CommandMessage | Event | BroadcastMessage) => {
 			if (isCommandMessage(message)) {
+				// Dispatch commands from master
 				const sessionID = message[0];
 				let session: any = sessions.get(sessionID);
 				if (!session) {
@@ -204,12 +258,16 @@ if (require.main === module) {
 				} catch (e) {
 					process.send!(eventForException(message[2], e));
 				}
-			} else {
+			} else if (isEvent(message)) {
+				// Handle promise response
 				const resolve = workerResolves.get(message[0]);
 				if (resolve) {
 					workerResolves.delete(message[0]);
 					parseValueEvent(global, message, resolve[0], resolve[1]);
 				}
+			} else {
+				// Receive broadcast from another worker
+				basicBroadcast.send(message[1], message[2]);
 			}
 		});
 	});
@@ -217,7 +275,7 @@ if (require.main === module) {
 
 export function createSessionGroup(options: HostSandboxOptions, sessions: Map<string, Session>, workerCount: number) {
 	if (workerCount <= 0) {
-		const host = new HostSandbox(options);
+		const host = new HostSandbox(options, constructBroadcastModule());
 		return (sessionID: string, request?: Request) => new InProcessSession(host, new InProcessClients(sessionID, sessions, request), sessionID);
 	}
 	const workers: ChildProcess[] = [];
@@ -235,8 +293,9 @@ export function createSessionGroup(options: HostSandboxOptions, sessions: Map<st
 			stdio: [0, 1, 2, "ipc"]
 		});
 		worker.send(options);
-		worker.addListener("message", async (message: CommandMessage | Event) => {
+		worker.addListener("message", async (message: CommandMessage | Event | BroadcastMessage) => {
 			if (isCommandMessage(message)) {
+				// Dispatch commands from worker
 				const sessionID = message[0];
 				const session = sessions.get(sessionID);
 				if (session) {
@@ -250,11 +309,19 @@ export function createSessionGroup(options: HostSandboxOptions, sessions: Map<st
 				} else {
 					worker.send([message[2]]);
 				}
-			} else {
+			} else if (isEvent(message)) {
+				// Handle promise responses
 				const resolve = workerResolves.get(message[0]);
 				if (resolve) {
 					workerResolves.delete(message[0]);
 					parseValueEvent(global, message, resolve[0], resolve[1]);
+				}
+			} else {
+				// Forward broadcast message to other workers
+				for (let otherWorker of workers) {
+					if (otherWorker !== worker) {
+						otherWorker.send(message);
+					}
 				}
 			}
 		});
