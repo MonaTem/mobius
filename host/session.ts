@@ -48,7 +48,7 @@ class InProcessClients implements SessionClients {
 		}
 		await Promise.all(promises);
 	}
-	async scheduleSynchronize() {
+	scheduleSynchronize() {
 		for (const client of this.clients.values()) {
 			client.scheduleSynchronize();
 		}
@@ -61,20 +61,26 @@ class InProcessClients implements SessionClients {
 		await Promise.all(promises);
 		this.sessions.delete(this.sessionID);
 	}
-	async sendEvent(event: Event) {
+	sendEvent(event: Event) {
 		for (const client of this.clients.values()) {
 			client.sendEvent(event);
 		}
 	}
-	async setCookie(key: string, value: string) {
+	setCookie(key: string, value: string) {
 		for (const client of this.clients.values()) {
 			client.setCookie(key, value);
 		}
 	}
-	async cookieHeader() {
-		return this.request ? this.request.headers["cookie"].toString() || "" : "";
+	cookieHeader() {
+		if (this.request) {
+			const cookieHeader = this.request.headers["cookie"];
+			if (cookieHeader) {
+				return cookieHeader.toString();
+			}
+		}
+		return "";
 	}
-	async getBaseURL(options: HostSandboxOptions) {
+	getBaseURL(options: HostSandboxOptions) {
 		return generateBaseURL(options, this.request);
 	}
 	newClient(session: Session, request: Request) {

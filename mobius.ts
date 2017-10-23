@@ -116,6 +116,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, workers, hostname);
 
 	const initialPageSession = host.constructSession("initial-render");
+	host.sessions.set("initial-render", initialPageSession);
 	initialPageSession.updateOpenServerChannelStatus(true);
 	const prerender = initialPageSession.prerenderContent();
 	const asyncClientScript = clientCompile(serverJSPath, sourcePath, minify);

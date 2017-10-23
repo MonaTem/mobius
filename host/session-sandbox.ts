@@ -80,13 +80,13 @@ const bakedModules: { [moduleName: string]: (sandbox: LocalSessionSandbox) => an
 
 
 export interface SessionSandboxClient {
-	synchronizeChannels() : Promise<void>;
-	scheduleSynchronize() : Promise<void>;
-	sendEvent(event: Event) : Promise<void>;
-	setCookie(key: string, value: string) : Promise<void>;
-	cookieHeader() : Promise<string>;
-	sessionWasDestroyed() : Promise<void>;
-	getBaseURL(options: HostSandboxOptions) : Promise<string>;
+	synchronizeChannels() : void | Promise<void>;
+	scheduleSynchronize() : void | Promise<void>;
+	sendEvent(event: Event) : void | Promise<void>;
+	setCookie(key: string, value: string) : void | Promise<void>;
+	cookieHeader() : string | Promise<string>;
+	sessionWasDestroyed() : void | Promise<void>;
+	getBaseURL(options: HostSandboxOptions) : string | Promise<string>;
 }
 
 
@@ -126,11 +126,11 @@ export interface SessionSandbox {
 	unarchiveEvents() : Promise<void>;
 	processEvents(events: Event[], noJavaScript?: boolean) : Promise<void>;
 	prerenderContent() : Promise<void>;
-	updateOpenServerChannelStatus(newValue: boolean) : Promise<void>;
-	hasLocalChannels() : Promise<boolean>;
+	updateOpenServerChannelStatus(newValue: boolean) : void | Promise<void>;
+	hasLocalChannels() : boolean | Promise<boolean>;
 	render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string>;
-	valueForFormField(name: string) : Promise<string | undefined>;
-	becameActive() : Promise<void>;
+	valueForFormField(name: string) : string | undefined | Promise<string | undefined>;
+	becameActive() : void | Promise<void>;
 }
 
 export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandboxClient> implements SessionSandbox {
@@ -276,7 +276,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		}
 	}
 
-	async updateOpenServerChannelStatus(newValue: boolean) {
+	updateOpenServerChannelStatus(newValue: boolean) {
 		if (this.hadOpenServerChannel != newValue) {
 			this.hadOpenServerChannel = newValue;
 			if (this.recentEvents) {
@@ -287,18 +287,18 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 
 	async processEvents(events: Event[], noJavaScript?: boolean) : Promise<void> {
 		// Read each event and dispatch the appropriate event in order
-		await this.updateOpenServerChannelStatus(noJavaScript ? true : (this.localChannelCount != 0));
+		this.updateOpenServerChannelStatus(noJavaScript ? true : (this.localChannelCount != 0));
 		this.currentEvents = events;
 		this.run();
 		for (let event of events) {
 			this.dispatchClientEvent(event);
 			await defer();
 		}
-		await this.updateOpenServerChannelStatus(this.localChannelCount != 0);
+		this.updateOpenServerChannelStatus(this.localChannelCount != 0);
 		this.currentEvents = undefined;
 	}
 
-	async hasLocalChannels() {
+	hasLocalChannels() {
 		return this.localChannelCount !== 0;
 	}
 	enterLocalChannel(delayPrerender: boolean = true) : number {
@@ -873,11 +873,11 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		return await this.pageRenderer.render(mode, client, this, clientURL, noScriptURL, bootstrap ? await this.generateBootstrapData(client) : undefined);
 	}
 
-	async becameActive() {
+	becameActive() {
 		this.hasActiveClient = true;
 	}
 
-	async valueForFormField(name: string) : Promise<string | undefined> {
+	valueForFormField(name: string) : string | undefined {
 		const element = this.pageRenderer.body.querySelector("[name=\"" + name + "\"]");
 		if (element) {
 			switch (element.nodeName) {
