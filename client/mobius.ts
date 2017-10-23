@@ -187,6 +187,7 @@ let incomingMessageId = 0;
 const reorderedMessages : { [messageId: number]: ServerMessage } = {};
 let willSynchronizeChannels : boolean = false;
 let currentEvents: (Event | boolean)[] | undefined;
+const allEvents: (Event | boolean)[] = [];
 let bootstrappingChannels: number[] | undefined;
 function shouldImplementLocalChannel(channelId: number) {
 	return !bootstrappingChannels || (bootstrappingChannels.indexOf(channelId) != -1);
@@ -227,6 +228,12 @@ function runAPIImplementation<T>(block: () => T) : T {
 // Session state
 const startupScripts = document.getElementsByTagName("script");
 const bootstrapData = (() => {
+	if (!window.performance || performance.navigation.type !== 1) {
+		const historyState = history.state;
+		if (historyState && "sessionID" in historyState) {
+			return historyState as Partial<BootstrapData>;
+		}
+	}
 	for (let i = 0; i < startupScripts.length; i++) {
 		const element = startupScripts[i];
 		if (element.getAttribute("type") == "application/x-mobius-bootstrap") {
@@ -360,6 +367,15 @@ export function disconnect() {
 		hadOpenServerChannel = false;
 		cancelHeartbeat();
 		window.removeEventListener("unload", disconnect, false);
+		// Save the state to history, so that if back button is hit the app magically snaps back to where we were
+		if (history.replaceState) {
+			const channels: number[] = [];
+			for (var i in pendingLocalChannels) {
+				channels.push(((i as any) as number) | 0);
+			}
+			const replacementBootstrap: BootstrapData = { sessionID, clientID, events: allEvents, channels };
+			history.replaceState(replacementBootstrap, document.title, location.href);
+		}
 		// Forcefully tear down WebSocket
 		if (websocket) {
 			if (websocket.readyState < 2) {
@@ -390,6 +406,7 @@ export function disconnect() {
 		fencedLocalEvents.reduce((promise, event) => promise.then(escaping(dispatchEvent.bind(null, event))).then(defer), resolvedPromise);
 	}
 }
+
 window.addEventListener("unload", disconnect, false);
 
 function dispatchEvent(event: Event) : Promise<void> | void {
@@ -420,6 +437,7 @@ function dispatchEvent(event: Event) : Promise<void> | void {
 		// Server-side event
 		channel = pendingChannels[channelId];
 	}
+	allEvents.push(event);
 	callChannelWithEvent(channel, event);
 }
 
@@ -438,7 +456,10 @@ function processEvents(events: (Event | boolean)[]) {
 	currentEvents = events;
 	return events.reduce((promise: Promise<any>, event: Event | boolean) => {
 		if (typeof event == "boolean") {
-			return promise.then(() => hadOpenServerChannel = event);
+			return promise.then(() => {
+				allEvents.push(event);
+				hadOpenServerChannel = event
+			});
 		} else {
 			return promise.then(escaping(dispatchEvent.bind(null, event))).then(defer);
 		}
