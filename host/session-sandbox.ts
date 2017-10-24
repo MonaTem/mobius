@@ -23,6 +23,7 @@ export interface HostSandboxOptions {
 	serverModulePaths: string[];
 	modulePaths: string[];
 	scriptPath: string;
+	publicPath: string;
 	sessionsPath: string;
 	hostname?: string;
 }
@@ -107,9 +108,9 @@ const enum ArchiveStatus {
 
 
 // Lazy version of loadModule so that the sandbox module is loaded on first use
-let loadModuleLazy: typeof loadModule = (path, module, globalProperties, require_) => {
+let loadModuleLazy: typeof loadModule = (path, module, publicPath, globalProperties, require_) => {
 	loadModuleLazy = require("./server-compiler").loadModule as typeof loadModule;
-	return loadModuleLazy(path, module, globalProperties, require_);
+	return loadModuleLazy(path, module, publicPath, globalProperties, require_);
 }
 
 // Hack so that Module._findPath will find TypeScript files
@@ -128,7 +129,7 @@ export interface SessionSandbox {
 	prerenderContent() : Promise<void>;
 	updateOpenServerChannelStatus(newValue: boolean) : void | Promise<void>;
 	hasLocalChannels() : boolean | Promise<boolean>;
-	render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string>;
+	render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string>;
 	valueForFormField(name: string) : string | undefined | Promise<string | undefined>;
 	becameActive() : void | Promise<void>;
 }
@@ -204,7 +205,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 	}
 
 	loadModule(path: string, newModule: ServerModule, allowNodeModules: boolean) {
-		loadModuleLazy(path, newModule, this.globalProperties, (name: string) => {
+		loadModuleLazy(path, newModule, this.host.options.publicPath, this.globalProperties, (name: string) => {
 			const bakedModule = bakedModules[name];
 			if (bakedModule) {
 				return bakedModule(this);
@@ -869,8 +870,8 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		return result;
 	}
 
-	async render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string> {
-		return await this.pageRenderer.render(mode, client, this, clientURL, noScriptURL, bootstrap ? await this.generateBootstrapData(client) : undefined);
+	async render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string> {
+		return await this.pageRenderer.render(mode, client, this, clientURL, clientIntegrity, fallbackIntegrity, noScriptURL, bootstrap ? await this.generateBootstrapData(client) : undefined);
 	}
 
 	becameActive() {

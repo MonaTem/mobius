@@ -55,10 +55,9 @@ export class PageRenderer {
 		const clientScript = this.clientScript = this.document.createElement("script");
 		this.body.appendChild(clientScript);
 		const fallbackScript = this.fallbackScript = this.document.createElement("script");
-		fallbackScript.textContent = `window._mobius||document.write('<script src="/fallback.js"><\\/script>')`;
 		this.body.appendChild(fallbackScript);
 	}
-	render(mode: PageRenderMode, clientState: ClientState, sessionState: SessionState, clientURL: string, noScriptURL?: string, bootstrapData?: BootstrapData) : string {
+	render(mode: PageRenderMode, clientState: ClientState, sessionState: SessionState, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrapData?: BootstrapData) : string {
 		const document = this.document;
 		let bootstrapScript: HTMLScriptElement | undefined;
 		let textNode: Node | undefined;
@@ -139,6 +138,8 @@ export class PageRenderer {
 			this.clientScript.parentNode!.insertBefore(bootstrapScript, this.clientScript);
 		}
 		this.clientScript.src = clientURL;
+		this.clientScript.setAttribute("integrity", clientIntegrity);
+		this.fallbackScript.textContent = `window._mobius||document.write('<script integrity="${fallbackIntegrity}" src="/fallback.js"><\\/script>')`;
 		if (noScriptURL) {
 			this.metaRedirect.setAttribute("content", "0; url=" + noScriptURL);
 			this.head.appendChild(this.noscript);

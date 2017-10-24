@@ -186,8 +186,8 @@ class OutOfProcessSession implements Session {
 	hasLocalChannels() {
 		return this.send<boolean>("hasLocalChannels");
 	}
-	render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string> {
-		return this.send<string>("render", [mode, client, clientURL, noScriptURL, bootstrap]);
+	render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string> {
+		return this.send<string>("render", [mode, client, clientURL, clientIntegrity, fallbackIntegrity, noScriptURL, bootstrap]);
 	}
 	valueForFormField(name: string) : Promise<string | undefined> {
 		return this.send<string | undefined>("valueForFormField", [name]);

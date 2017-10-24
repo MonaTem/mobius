@@ -6,6 +6,7 @@ import { packageRelative } from "./fileUtils";
 import * as babel from "babel-core";
 import rewriteForInStatements from "./rewriteForInStatements";
 import noImpureGetters from "./noImpureGetters";
+import addSubresourceIntegrity from "./addSubresourceIntegrity";
 
 let convertToCommonJS: any;
 let optimizeClosuresInRender: any;
@@ -40,12 +41,12 @@ const compilerOptions = (() => {
 	return ts.convertCompilerOptionsFromJson(configObject.compilerOptions, packageRelative("./"), fileName).options;
 })();
 
-const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(scriptPath: string) => {
+const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(scriptPath: string, publicPath: string) => {
 	if (!convertToCommonJS) {
-		convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs");
+		convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs")();
 	}
 	if (!optimizeClosuresInRender) {
-		optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
+		optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render")(babel);
 	}
 	const scriptContents = readFileSync(scriptPath).toString();
 	const compiled = /\.(j|t)s(|x)$/.test(scriptPath) ? ts.transpileModule(scriptContents, {
@@ -55,10 +56,11 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(scriptPath:
 	const transformed = babel.transform(compiled ? compiled.outputText : scriptContents, {
 		babelrc: false,
 		plugins: [
-			convertToCommonJS(),
-			optimizeClosuresInRender(babel),
+			convertToCommonJS,
+			optimizeClosuresInRender,
 			rewriteForInStatements(),
 			noImpureGetters(),
+			addSubresourceIntegrity(publicPath),
 		],
 		inputSourceMap: compiled && typeof compiled.sourceMapText == "string" ? JSON.parse(compiled.sourceMapText) : undefined
 	});
@@ -69,7 +71,7 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(scriptPath:
 	}) as (global: T) => void;
 });
 
-export function loadModule<T>(path: string, module: ServerModule, globalProperties: T, require: (name: string) => any) {
+export function loadModule<T>(path: string, module: ServerModule, publicPath: string, globalProperties: T, require: (name: string) => any) {
 	const moduleGlobal: ServerModuleGlobal & T = Object.create(global);
 	Object.assign(moduleGlobal, globalProperties);
 	moduleGlobal.self = moduleGlobal;
@@ -77,5 +79,5 @@ export function loadModule<T>(path: string, module: ServerModule, globalProperti
 	moduleGlobal.require = require;
 	moduleGlobal.module = module;
 	moduleGlobal.exports = module.exports;
-	sandboxedScriptAtPath(path)(moduleGlobal);
+	sandboxedScriptAtPath(path, publicPath)(moduleGlobal);
 }

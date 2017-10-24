@@ -1,11 +1,11 @@
-export default function memoize<I, O>(func: (input: I) => O) {
-	const values = new Map<I, O>();
-	return (input: I) => {
+export default function memoize<T extends Function>(func: T) : T {
+	const values = new Map<any, any>();
+	return function(this: any, input: any) {
 		if (values.has(input)) {
-			return values.get(input) as O;
+			return values.get(input);
 		}
-		const result = func(input);
+		const result = func.apply(this, arguments);
 		values.set(input, result);
 		return result;
-	}
+	} as any as T;
 }

@@ -93,12 +93,15 @@ export function title(newTitle: string) : void {
 
 const requestedStyles: { [href: string]: Promise<void> } = {};
 
-export function style(href: string) : Promise<void> {
+export function style(href: string, subresourceIntegrity?: string) : Promise<void> {
 	let result = requestedStyles[href];
 	if (!result) {
 		const link = self.document.createElement("link");
 		link.rel = "stylesheet";
 		link.href = href;
+		if (subresourceIntegrity) {
+			link.setAttribute("integrity", subresourceIntegrity);
+		}
 		(require("head") as HTMLHeadElement).appendChild(link);
 		result = requestedStyles[href] = createClientPromise(() => {
 			// Fallback is to return immediately--if unable to track client's ability to load CSS, just proceed

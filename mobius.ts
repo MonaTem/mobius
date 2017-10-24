@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as path from "path";
 import * as util from "util";
-import * as crypto from "crypto";
+import { createHash } from "crypto";
 import { cpus } from "os";
 const Module = require("module");
 
@@ -43,7 +43,7 @@ async function topFrameHTML(response: express.Response, html: string) {
 	// Return HTML
 	noCache(response);
 	response.set("Content-Security-Policy", "frame-ancestors 'none'");
-	response.set("Content-Type", "text/html");
+	response.set("Content-Type", "text/html; charset=utf-8");
 	response.send(html);
 }
 
@@ -65,6 +65,7 @@ function messageFromBody(body: { [key: string]: any }) : ClientMessage {
 
 interface Config {
 	sourcePath: string;
+	publicPath: string;
 	secrets: { [key: string]: any };
 	sessionsPath?: string;
 	allowMultipleClientsPerSession?: boolean;
@@ -78,7 +79,7 @@ function defaultSessionPath(sourcePath: string) {
 	return path.join(sourcePath, ".sessions");
 }
 
-export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname }: Config) {
+export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname }: Config) {
 	let serverJSPath: string;
 	const packagePath = path.resolve(sourcePath, "package.json");
 	if (await exists(packagePath)) {
@@ -111,19 +112,32 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 	const serverModulePaths = [packageRelative("server"), path.join(sourcePath, "server")];
 	const modulePaths = serverModulePaths.concat([packageRelative("common"), packageRelative("dist/common"), path.join(sourcePath, "common")]);
 
-	// Render default state with noscript URL added
+	// Start host
 	console.log("Rendering initial page...");
-	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, workers, hostname);
+	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, publicPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, workers, hostname);
 
+	// Read fallback script
+	const fallbackPath = packageRelative("dist/fallback.js");
+	const fallbackContents = readFile(fallbackPath);
+
+	// Start initial page render
 	const initialPageSession = host.constructSession("initial-render");
 	host.sessions.set("initial-render", initialPageSession);
 	initialPageSession.updateOpenServerChannelStatus(true);
 	const prerender = initialPageSession.prerenderContent();
-	const asyncClientScript = clientCompile(serverJSPath, sourcePath, minify);
-	await prerender;
+
+	// Compile client code while userspace is running
+	const asyncClientScript = clientCompile(serverJSPath, sourcePath, publicPath, minify);
 	const clientScript = await asyncClientScript;
-	const clientURL = "/client-" + crypto.createHash("sha1").update(clientScript.code).digest("hex").substr(16) + ".js";
-	const defaultRenderedHTML = await initialPageSession.render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, clientURL, "/?js=no");
+	const clientScriptBuffer = Buffer.from(clientScript.code);
+	const clientHash = createHash("sha256").update(clientScriptBuffer).digest("base64");
+	const clientURL = "/client-" + clientHash.replace(/\//g, "_").replace(/\+/g, "-").replace(/=/g, "").substring(0, 16) + ".js";
+	const clientIntegrity = "sha256-" + clientHash;
+	const fallbackIntegrity = "sha256-" + createHash("sha256").update(await fallbackContents).digest("base64");
+
+	// Finish prerender of initial page
+	await prerender;
+	const defaultRenderedHTML = await initialPageSession.render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, clientURL, clientIntegrity, fallbackIntegrity, "/?js=no");
 	await initialPageSession.destroy();
 
 	return {
@@ -157,7 +171,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 					client.outgoingMessageId++;
 					await session.prerenderContent();
 					// Render the DOM into HTML source with bootstrap data applied
-					const html = await session.render(PageRenderMode.IncludeForm, client, clientURL, undefined, true);
+					const html = await session.render(PageRenderMode.IncludeForm, client, clientURL, clientIntegrity, fallbackIntegrity, undefined, true);
 					client.incomingMessageId++;
 					client.applyCookies(response);
 					return topFrameHTML(response, html);
@@ -208,7 +222,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 							await client.session.prerenderContent();
 						}
 						// Render the DOM into HTML source
-						const html = await client.session.render(PageRenderMode.IncludeFormAndStripScript, client, clientURL);
+						const html = await client.session.render(PageRenderMode.IncludeFormAndStripScript, client, clientURL, clientIntegrity, fallbackIntegrity);
 						let responseContent = html;
 						if (isJavaScript) {
 							if (client.lastSentFormHTML) {
@@ -225,7 +239,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 						}
 						client.applyCookies(response);
 						noCache(response);
-						response.set("Content-Type", isJavaScript ? "text/plain" : "text/html");
+						response.set("Content-Type", isJavaScript ? "text/plain; charset=utf-8" : "text/html; charset=utf-8");
 						response.set("Content-Security-Policy", "frame-ancestors 'none'");
 						response.send(responseContent);
 					} else {
@@ -241,7 +255,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 						}
 						client.applyCookies(response);
 						noCache(response);
-						response.set("Content-Type", "text/plain");
+						response.set("Content-Type", "text/plain; charset=utf-8");
 						response.send(responseMessage);
 					}
 				} catch (e) {
@@ -250,7 +264,7 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 					}
 					response.status(500);
 					noCache(response);
-					response.set("Content-Type", "text/plain");
+					response.set("Content-Type", "text/plain; charset=utf-8");
 					response.send(util.inspect(e));
 				};
 			});
@@ -323,32 +337,32 @@ export async function prepare({ sourcePath, sessionsPath = defaultSessionPath(so
 				}
 			});
 
-			server.use("/fallback.js", (require("express") as typeof express).static(packageRelative("dist/fallback.js")));
+			server.use("/fallback.js", (require("express") as typeof express).static(fallbackPath));
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
 				if (simulatedLatency) {
 					await delay(simulatedLatency);
 				}
-				response.set("Content-Type", "text/javascript");
+				response.set("Content-Type", "text/javascript; charset=utf-8");
 				if (sourceMaps) {
 					response.set("SourceMap", "/client.js.map");
 				}
-				response.send(clientScript.code);
+				response.send(clientScriptBuffer);
 			});
 			server.get(clientURL, async (request: express.Request, response: express.Response) => {
 				if (simulatedLatency) {
 					await delay(simulatedLatency);
 				}
-				response.set("Content-Type", "text/javascript");
+				response.set("Content-Type", "text/javascript; charset=utf-8");
 				response.set("Cache-Control", "max-age=31536000");
 				response.set("Expires", "Sun, 17 Jan 2038 19:14:07 GMT");
 				if (sourceMaps) {
 					response.set("SourceMap", "/client.js.map");
 				}
-				response.send(clientScript.code);
+				response.send(clientScriptBuffer);
 			});
 			if (sourceMaps) {
 				server.get("/client.js.map", async (request: express.Request, response: express.Response) => {
-					response.set("Content-Type", "application/json");
+					response.set("Content-Type", "application/json; charset=utf-8");
 					response.send(clientScript.map);
 				});
 			}
@@ -448,8 +462,10 @@ export default function main() {
 			secrets = await readJSON(path.join(basePath, "secrets.json"));
 		} catch (e) {
 		}
+		const publicPath = path.join(basePath, "public");
 		const mobius = await prepare({
 			sourcePath: basePath,
+			publicPath,
 			secrets,
 			minify: args.minify as boolean,
 			sourceMaps: args["source-map"] as boolean,
@@ -465,7 +481,7 @@ export default function main() {
 
 		mobius.install(server);
 
-		server.use(expressAsync.static(path.join(basePath, "public")));
+		server.use(expressAsync.static(publicPath));
 
 		const port = args.port;
 		const hostname = args.hostname;

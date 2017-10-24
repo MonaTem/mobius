@@ -17,7 +17,7 @@ export class Host {
 	options: HostSandboxOptions;
 	staleSessionTimeout: any;
 	constructSession: (sessionID: string, request?: Request) => Session;
-	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, workerCount: number, hostname?: string) {
+	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, publicPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, workerCount: number, hostname?: string) {
 		this.destroying = false;
 		this.constructSession = createSessionGroup(this.options = {
 			htmlSource,
@@ -26,6 +26,7 @@ export class Host {
 			serverModulePaths,
 			modulePaths,
 			scriptPath,
+			publicPath,
 			sessionsPath,
 			hostname
 		}, this.sessions, workerCount);

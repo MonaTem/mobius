@@ -3,7 +3,7 @@ import { packageRelative } from "./fileUtils";
 import { rollup, Plugin } from "rollup";
 import { NodePath } from "babel-traverse";
 import { existsSync } from "fs";
-import { BlockStatement, CallExpression, ForStatement, Identifier, ImportDeclaration, ImportSpecifier, Node, LabeledStatement, LogicalExpression, StringLiteral, UpdateExpression, VariableDeclaration } from "babel-types";
+import { BlockStatement, CallExpression, ForStatement, Identifier, Node, LabeledStatement, LogicalExpression, StringLiteral, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as babel from "babel-core";
 import * as types from "babel-types";
 import { pureBabylon as pure } from "side-effects-safe";
@@ -13,6 +13,8 @@ import _rollupTypeScript from "rollup-plugin-typescript2";
 import * as ts from "typescript";
 import rewriteForInStatements from "./rewriteForInStatements";
 import noImpureGetters from "./noImpureGetters";
+import importBindingForCall from "./importBindingForCall";
+import addSubresourceIntegrity from "./addSubresourceIntegrity";
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
 type RedactedExportData = { [exportName: string]: (boolean | undefined)[] };
@@ -37,31 +39,6 @@ const redactions: { [moduleName: string]: RedactedExportData } = {
 	}
 };
 
-function importBindingForPath(path: NodePath<CallExpression>) : { module: string, export: string } | undefined {
-	const callee = path.node.callee;
-	if (callee.type == "Identifier") {
-		const binding = path.scope.getBinding(callee.name);
-		if (binding && binding.path.isImportSpecifier() &&
-			(binding.path.node as ImportSpecifier).imported.type == "Identifier" &&
-			binding.path.parent.type == "ImportDeclaration" &&
-			(binding.path.parent as ImportDeclaration).source.type == "StringLiteral")
-		{
-			return {
-				module: (binding.path.parent as ImportDeclaration).source.value,
-				export: (binding.path.node as ImportSpecifier).imported.name
-			};
-		}
-	} else if (callee.type == "MemberExpression" && callee.object.type == "Identifier") {
-		const binding = path.scope.getBinding(callee.object.name);
-		if (binding && binding.path.isImportNamespaceSpecifier() && (binding.path.parent as ImportDeclaration).source.type == "StringLiteral") {
-			return {
-				module: (binding.path.parent as ImportDeclaration).source.value,
-				export: (callee.property as Identifier).name
-			};
-		}
-	}
-}
-
 function isUndefined(node: Node) {
 	return node.type == "Identifier" && (node as Identifier).name === "undefined";
 }
@@ -75,7 +52,7 @@ function isPureOrRedacted(path: NodePath) {
 		return true;
 	}
 	if (path.isCallExpression()) {
-		const binding = importBindingForPath(path as NodePath<CallExpression>);
+		const binding = importBindingForCall(path as NodePath<CallExpression>);
 		if (binding) {
 			return binding.module === "redact" && binding.export === "redact";
 		}
@@ -88,7 +65,7 @@ function stripRedact() {
 		visitor: {
 			CallExpression: {
 				exit(path: NodePath<CallExpression>) {
-					const binding = importBindingForPath(path);
+					const binding = importBindingForCall(path);
 					if (binding) {
 						const moduleRedactions = redactions[binding.module];
 						if (moduleRedactions) {
@@ -199,7 +176,7 @@ function verifyStylePaths(basePath: string) {
 				exit(path: NodePath<CallExpression>) {
 					const args = path.node.arguments;
 					if (args.length === 1 && args[0].type === "StringLiteral") {
-						const binding = importBindingForPath(path);
+						const binding = importBindingForCall(path);
 						if (binding && binding.module === "dom" && binding.export === "style") {
 							const value = (args[0] as StringLiteral).value;
 							if (!/^\w+:/.test(value)) {
@@ -220,7 +197,7 @@ interface CompilerOutput {
 	map: string;
 }
 
-export default async function(input: string, basePath: string, minify: boolean) : Promise<CompilerOutput> {
+export default async function(input: string, basePath: string, publicPath: string, minify: boolean) : Promise<CompilerOutput> {
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
@@ -274,8 +251,9 @@ export default async function(input: string, basePath: string, minify: boolean) 
 			babelrc: false,
 			plugins: [
 				optimizeClosuresInRender(babel),
+				addSubresourceIntegrity(publicPath),
 				stripRedact(),
-				verifyStylePaths(resolve(basePath, "public")),
+				verifyStylePaths(publicPath),
 				rewriteForInStatements(),
 				fixTypeScriptExtendsWarning(),
 				noImpureGetters(),
