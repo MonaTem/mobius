@@ -184,7 +184,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 			createClientChannel: this.createClientChannel,
 			createServerChannel: this.createServerChannel,
 			coordinateValue: this.coordinateValue,
-			synchronize: () => this.createServerPromise(() => undefined),
+			synchronize: () => this.createServerPromise(emptyFunction),
 			flush: async () => {
 				if (this.dead) {
 					throw disconnectedError();
