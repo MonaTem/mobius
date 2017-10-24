@@ -69,7 +69,9 @@ const { scheduleFlushTasks, setImmediate } = (() => {
 	// Attempt postMessage, but only if it's asynchronous
 	if (!setImmediate && window.postMessage) {
 		let isAsynchronous = true;
-		const synchronousTest = () => isAsynchronous = false;
+		const synchronousTest = () => {
+			isAsynchronous = false;
+		}
 		window.addEventListener("message", synchronousTest, false);
 		window.postMessage("__mobius_test", "*");
 		window.removeEventListener("message", synchronousTest, false);
