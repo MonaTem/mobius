@@ -1,4 +1,4 @@
-.PHONY: all run clean cleaner host fallback preact lint
+.PHONY: all run clean cleaner host fallback preact lint test
 
 rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
 scripts=$(call rwildcard, $1/, *.tsx) $(call rwildcard, $1/, *.ts)
@@ -17,6 +17,8 @@ cleaner: clean
 lint:
 	tslint -c tslint.json 'host/**/*.ts' 'common/**/*.ts' 'server/**/*.ts' 'client/**/*.ts' mobius.ts --fix
 
+test: lint
+	# TODO: Add actual tests
 
 preact: dist/common/preact.js dist/common/preact.d.ts
 
