@@ -9,7 +9,7 @@ export default function(document: Document) {
 		descriptor.set = function(value: string) {
 			oldSet.call(this, value);
 			this.setAttribute("value", value);
-		}
+		};
 		Object.defineProperty(HTMLInputElementPrototype, "value", descriptor);
 	}
 }

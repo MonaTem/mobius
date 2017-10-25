@@ -1,7 +1,7 @@
 import * as path from "path";
 import { promisify } from "util";
 
-import { readJSON, packageRelative, writeFile, exists, mkdir, unlink } from "./fileUtils";
+import { exists, mkdir, packageRelative, readJSON, unlink, writeFile } from "./fileUtils";
 
 export default async function init(basePath: string) {
 	const packagePath = path.resolve(basePath, "package.json");
@@ -10,13 +10,13 @@ export default async function init(basePath: string) {
 		if (newPackageFile) {
 			const mobiusPackageData = await readJSON(packageRelative("package.json"));
 			const defaultPackageFile = {
-				"dependencies": {
+				dependencies: {
 					[mobiusPackageData.name]: "^" + mobiusPackageData.version,
 				},
-				"scripts": {
-					"start": "mobius"
+				scripts: {
+					start: "mobius",
 				},
-				"main": "app.tsx"
+				main: "app.tsx",
 			};
 			await writeFile(packagePath, JSON.stringify(defaultPackageFile, null, 2) + "\n");
 		}
@@ -50,4 +50,3 @@ export default async function init(basePath: string) {
 if (require.main === module) {
 	init(process.cwd());
 }
-

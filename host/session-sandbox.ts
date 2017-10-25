@@ -1,14 +1,14 @@
-import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
-import { loadModule, ServerModule } from "./server-compiler";
 import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
+import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
+import { loadModule, ServerModule } from "./server-compiler";
 
 import * as mobiusModule from "mobius";
+import { Channel, JsonValue } from "mobius-types";
 import * as BroadcastModule from "../server/_broadcast";
-import { JsonValue, Channel } from "mobius-types";
 
-import { interceptGlobals, FakedGlobals } from "../common/determinism";
-import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, disconnectedError, BootstrapData, Event } from "../common/_internal";
+import { BootstrapData, disconnectedError, Event, eventForException, eventForValue, logOrdering, parseValueEvent, roundTrip } from "../common/_internal";
+import { FakedGlobals, interceptGlobals } from "../common/determinism";
 
 import { JSDOM } from "jsdom";
 import patchJSDOM from "./jsdom-patch";
@@ -33,12 +33,12 @@ export function archivePathForSessionId(sessionsPath: string, sessionID: string)
 }
 
 export class HostSandbox {
-	options: HostSandboxOptions;
-	dom: JSDOM;
-	document: Document;
-	noscript: Element;
-	metaRedirect: Element;
-	broadcastModule: typeof BroadcastModule;
+	public options: HostSandboxOptions;
+	public dom: JSDOM;
+	public document: Document;
+	public noscript: Element;
+	public metaRedirect: Element;
+	public broadcastModule: typeof BroadcastModule;
 	constructor(options: HostSandboxOptions, broadcastModule: typeof BroadcastModule) {
 		this.options = options;
 		this.dom = new (require("jsdom").JSDOM)(options.htmlSource) as JSDOM;
@@ -52,20 +52,18 @@ export class HostSandbox {
 	}
 }
 
-
 export interface ClientBootstrap {
 	queuedLocalEvents?: Event[];
 	clientID: number;
 }
-
 
 const bakedModules: { [moduleName: string]: (sandbox: LocalSessionSandbox) => any } = {
 	mobius: (sandbox: LocalSessionSandbox) => sandbox.mobius,
 	setCookie: (sandbox: LocalSessionSandbox) => sandbox.client.setCookie.bind(sandbox.client),
 	allCookies: (sandbox: LocalSessionSandbox) => async () => {
 		const result: {[key: string]: string} = {};
-		for (let entry of (await sandbox.client.cookieHeader()).split(/;\s*/g)) {
-			let split : string[] = entry.split(/=/);
+		for (const entry of (await sandbox.client.cookieHeader()).split(/;\s*/g)) {
+			const split: string[] = entry.split(/=/);
 			if (split.length > 1) {
 				result[decodeURIComponent(split[0])] = decodeURIComponent(split[1]);
 			}
@@ -79,98 +77,93 @@ const bakedModules: { [moduleName: string]: (sandbox: LocalSessionSandbox) => an
 	_broadcast: (sandbox: LocalSessionSandbox) => sandbox.host.broadcastModule,
 };
 
-
 export interface SessionSandboxClient {
-	synchronizeChannels() : void | Promise<void>;
-	scheduleSynchronize() : void | Promise<void>;
-	sendEvent(event: Event) : void | Promise<void>;
-	setCookie(key: string, value: string) : void | Promise<void>;
-	cookieHeader() : string | Promise<string>;
-	sessionWasDestroyed() : void | Promise<void>;
-	getBaseURL(options: HostSandboxOptions) : string | Promise<string>;
+	synchronizeChannels(): void | Promise<void>;
+	scheduleSynchronize(): void | Promise<void>;
+	sendEvent(event: Event): void | Promise<void>;
+	setCookie(key: string, value: string): void | Promise<void>;
+	cookieHeader(): string | Promise<string>;
+	sessionWasDestroyed(): void | Promise<void>;
+	getBaseURL(options: HostSandboxOptions): string | Promise<string>;
 }
-
 
 interface MobiusGlobalProperties {
-	document: Document,
+	document: Document;
 }
 
-
 interface ArchivedSession {
-	events: (Event | boolean)[];
+	events: Array<Event | boolean>;
 	channels: number[];
 }
 const enum ArchiveStatus {
 	None = 0,
 	Partial = 1,
-	Full
-};
-
+	Full,
+}
 
 // Lazy version of loadModule so that the sandbox module is loaded on first use
 let loadModuleLazy: typeof loadModule = (path, module, publicPath, globalProperties, require_) => {
 	loadModuleLazy = require("./server-compiler").loadModule as typeof loadModule;
 	return loadModuleLazy(path, module, publicPath, globalProperties, require_);
-}
+};
 
 // Hack so that Module._findPath will find TypeScript files
 const Module = require("module");
-Module._extensions[".ts"] = Module._extensions[".tsx"] = function() {}
-
+Module._extensions[".ts"] = Module._extensions[".tsx"] = function() {};
 
 const resolvedPromise: Promise<void> = Promise.resolve();
 
 export interface SessionSandbox {
-	destroy() : Promise<void>;
-	destroyIfExhausted() : Promise<void>;
-	archiveEvents(includeTrailer: boolean) : Promise<void>;
-	unarchiveEvents() : Promise<void>;
-	processEvents(events: Event[], noJavaScript?: boolean) : Promise<void>;
-	prerenderContent() : Promise<void>;
-	updateOpenServerChannelStatus(newValue: boolean) : void | Promise<void>;
-	hasLocalChannels() : boolean | Promise<boolean>;
-	render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string>;
-	valueForFormField(name: string) : string | undefined | Promise<string | undefined>;
-	becameActive() : void | Promise<void>;
+	destroy(): Promise<void>;
+	destroyIfExhausted(): Promise<void>;
+	archiveEvents(includeTrailer: boolean): Promise<void>;
+	unarchiveEvents(): Promise<void>;
+	processEvents(events: Event[], noJavaScript?: boolean): Promise<void>;
+	prerenderContent(): Promise<void>;
+	updateOpenServerChannelStatus(newValue: boolean): void | Promise<void>;
+	hasLocalChannels(): boolean | Promise<boolean>;
+	render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrap?: boolean): Promise<string>;
+	valueForFormField(name: string): string | undefined | Promise<string | undefined>;
+	becameActive(): void | Promise<void>;
 }
 
 export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandboxClient> implements SessionSandbox {
-	host: HostSandbox;
-	client: T;
-	sessionID: string;
-	dead: boolean = false;
+	public host: HostSandbox;
+	public client: T;
+	public sessionID: string;
+	public dead: boolean = false;
 	// Script context
-	modules = new Map<string, ServerModule>();
-	mobius: typeof mobiusModule;
-	hasRun: boolean = false;
-	pageRenderer: PageRenderer;
-	globalProperties: MobiusGlobalProperties & FakedGlobals;
-	Math: typeof Math;
+	public modules = new Map<string, ServerModule>();
+	public mobius: typeof mobiusModule;
+	public hasRun: boolean = false;
+	public pageRenderer: PageRenderer;
+	public globalProperties: MobiusGlobalProperties & FakedGlobals;
+	public Math: typeof Math;
 	// Local channels
-	localChannelCounter: number = 0;
-	localChannels = new Map<number, (event?: Event) => void>();
-	localChannelCount: number = 0;
-	dispatchingAPIImplementation: number = 0;
-	prerenderChannelCount: number = 0;
-	prerenderCompleted?: Promise<void>;
-	completePrerender?: () => void;
+	public localChannelCounter: number = 0;
+	public localChannels = new Map<number, (event?: Event) => void>();
+	public localChannelCount: number = 0;
+	public dispatchingAPIImplementation: number = 0;
+	public prerenderChannelCount: number = 0;
+	public prerenderCompleted?: Promise<void>;
+	public completePrerender?: () => void;
 	// Remote channels
-	remoteChannelCounter: number = 0;
-	pendingChannels = new Map<number, (event?: Event) => void>();
-	pendingChannelCount: number = 0;
-	dispatchingEvent: number = 0;
+	public remoteChannelCounter: number = 0;
+	public pendingChannels = new Map<number, (event?: Event) => void>();
+	public pendingChannelCount: number = 0;
+	public dispatchingEvent: number = 0;
 	// Incoming Events
-	currentEvents: (Event | boolean)[] | undefined;
-	hadOpenServerChannel: boolean = false;
+	public currentEvents: Array<Event | boolean> | undefined;
+	public hadOpenServerChannel: boolean = false;
 	// Archival
-	recentEvents?: (Event | boolean)[];
-	archivingEvents?: Promise<void>;
-	archiveStatus: ArchiveStatus = ArchiveStatus.None;
-	bootstrappingChannels?: Set<number>;
-	bootstrappingPromise?: Promise<void>;
+	public recentEvents?: Array<Event | boolean>;
+	public archivingEvents?: Promise<void>;
+	public archiveStatus: ArchiveStatus = ArchiveStatus.None;
+	public bootstrappingChannels?: Set<number>;
+	public bootstrappingPromise?: Promise<void>;
 	// Session sharing
-	sharingEnabled?: true;
-	hasActiveClient?: true;
+	public sharingEnabled?: true;
+	public hasActiveClient?: true;
 	constructor(host: HostSandbox, client: T, sessionID: string) {
 		this.host = host;
 		this.client = client;
@@ -193,10 +186,10 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 				this.client.scheduleSynchronize();
 				return resolvedPromise;
 			},
-			shareSession: this.shareSession
+			shareSession: this.shareSession,
 		};
 		const globalProperties: MobiusGlobalProperties & Partial<FakedGlobals> = {
-			document: this.host.document
+			document: this.host.document,
 		};
 		this.globalProperties = interceptGlobals(globalProperties, () => this.insideCallback, this.coordinateValue, this.createServerChannel);
 		if (this.host.options.allowMultipleClientsPerSession) {
@@ -204,7 +197,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		}
 	}
 
-	loadModule(path: string, newModule: ServerModule, allowNodeModules: boolean) {
+	public loadModule(path: string, newModule: ServerModule, allowNodeModules: boolean) {
 		loadModuleLazy(path, newModule, this.host.options.publicPath, this.globalProperties, (name: string) => {
 			const bakedModule = bakedModules[name];
 			if (bakedModule) {
@@ -218,7 +211,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 				}
 				const subModule: ServerModule = {
 					exports: {},
-					paths: newModule.paths
+					paths: newModule.paths,
 				};
 				this.modules.set(modulePath, subModule);
 				this.loadModule(modulePath, subModule, !!Module._findPath(name, this.host.options.serverModulePaths));
@@ -226,7 +219,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 			}
 			const result = require(name);
 			if (!allowNodeModules) {
-				var e = new Error(`Cannot access module '${name}' in this context`);
+				const e = new Error(`Cannot access module '${name}' in this context`);
 				(e as any).code = "MODULE_NOT_FOUND";
 				throw e;
 			}
@@ -236,25 +229,25 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 	}
 
 	// Async so that errors inside user code startup will log to console as unhandled promise rejection, but app will proceed
-	async run() {
+	public async run() {
 		if (!this.hasRun) {
 			this.hasRun = true;
 			this.enteringCallback();
 			this.loadModule(this.host.options.scriptPath, {
 				exports: {},
-				paths: this.host.options.modulePaths
+				paths: this.host.options.modulePaths,
 			}, false);
 		}
 	}
 
-	sendEvent(event: Event) {
+	public sendEvent(event: Event) {
 		if (this.recentEvents) {
 			this.recentEvents.push(event);
 		}
 		this.client.sendEvent(event);
 	}
 
-	dispatchClientEvent(event: Event) {
+	public dispatchClientEvent(event: Event) {
 		let channelId = event[0];
 		if (channelId < 0) {
 			// Server decided the ordering on "fenced" events
@@ -277,7 +270,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		}
 	}
 
-	updateOpenServerChannelStatus(newValue: boolean) {
+	public updateOpenServerChannelStatus(newValue: boolean) {
 		if (this.hadOpenServerChannel != newValue) {
 			this.hadOpenServerChannel = newValue;
 			if (this.recentEvents) {
@@ -286,12 +279,12 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		}
 	}
 
-	async processEvents(events: Event[], noJavaScript?: boolean) : Promise<void> {
+	public async processEvents(events: Event[], noJavaScript?: boolean): Promise<void> {
 		// Read each event and dispatch the appropriate event in order
 		this.updateOpenServerChannelStatus(noJavaScript ? true : (this.localChannelCount != 0));
 		this.currentEvents = events;
 		this.run();
-		for (let event of events) {
+		for (const event of events) {
 			this.dispatchClientEvent(event);
 			await defer();
 		}
@@ -299,16 +292,16 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		this.currentEvents = undefined;
 	}
 
-	hasLocalChannels() {
+	public hasLocalChannels() {
 		return this.localChannelCount !== 0;
 	}
-	enterLocalChannel(delayPrerender: boolean = true) : number {
+	public enterLocalChannel(delayPrerender: boolean = true): number {
 		if (delayPrerender) {
 			++this.prerenderChannelCount;
 		}
 		return ++this.localChannelCount;
 	}
-	exitLocalChannel(resumePrerender: boolean = true) : number {
+	public exitLocalChannel(resumePrerender: boolean = true): number {
 		if (resumePrerender) {
 			if (--this.prerenderChannelCount == 0) {
 				defer().then(() => {
@@ -322,32 +315,32 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		}
 		return --this.localChannelCount;
 	}
-	prerenderContent() : Promise<void> {
+	public prerenderContent(): Promise<void> {
 		if (this.prerenderCompleted) {
 			return this.prerenderCompleted;
 		}
 		this.enterLocalChannel();
 		this.run();
 		defer().then(() => this.exitLocalChannel());
-		return this.prerenderCompleted = new Promise<void>(resolve => {
+		return this.prerenderCompleted = new Promise<void>((resolve) => {
 			this.completePrerender = resolve;
 		});
 	}
-	shouldImplementLocalChannel(channelId: number) : boolean {
+	public shouldImplementLocalChannel(channelId: number): boolean {
 		return !this.bootstrappingChannels || this.bootstrappingChannels.has(channelId);
 	}
 
 	get insideCallback() {
 		return this.dispatchingEvent != 0 && this.dispatchingAPIImplementation == 0;
 	}
-	async enteringCallback() {
+	public async enteringCallback() {
 		this.dispatchingEvent++;
 		await defer();
 		this.dispatchingEvent--;
 	}
-	createServerPromise = <T extends JsonValue | void>(ask: () => (Promise<T> | T), includedInPrerender: boolean = true) => {
+	public createServerPromise = <T extends JsonValue | void>(ask: () => (Promise<T> | T), includedInPrerender: boolean = true) => {
 		if (!this.insideCallback) {
-			return new Promise<T>(resolve => resolve(ask()));
+			return new Promise<T>((resolve) => resolve(ask()));
 		}
 		// Record and ship values/errors of server-side promises
 		let channelId = ++this.localChannelCounter;
@@ -379,9 +372,9 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 				return;
 			}
 			this.dispatchingAPIImplementation++;
-			let result = new Promise<T>(resolve => resolve(ask()));
+			const result = new Promise<T>((resolve) => resolve(ask()));
 			this.dispatchingAPIImplementation--;
-			result.then(async value => {
+			result.then(async (value) => {
 				const event = eventForValue(channelId, value);
 				if (this.currentEvents) {
 					if (this.bootstrappingPromise) {
@@ -403,7 +396,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 					this.enteringCallback();
 					resolve(roundtripped);
 				}
-			}).catch(async error => {
+			}).catch(async (error) => {
 				if (this.currentEvents) {
 					if (this.bootstrappingPromise) {
 						await this.bootstrappingPromise;
@@ -426,7 +419,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 			});
 		});
 	}
-	createServerChannel = <T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender: boolean = true) => {
+	public createServerChannel = <T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender: boolean = true) => {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
@@ -458,7 +451,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 							session.dispatchingAPIImplementation--;
 						}
 					}
-				}
+				},
 			};
 		}
 		// Record and ship arguments of server-side events
@@ -498,7 +491,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 				this.dispatchingAPIImplementation++;
 				const potentialState = onOpen(function() {
 					if (channelId >= 0) {
-						let args = roundTrip([...arguments]);
+						const args = roundTrip([...arguments]);
 						(async () => {
 							if (session.currentEvents) {
 								if (session.bootstrappingPromise) {
@@ -532,11 +525,11 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		}
 		return {
 			channelId,
-			close
+			close,
 		};
 	}
 
-	createRawClientChannel(callback: (event: Event | undefined) => void) : Channel {
+	public createRawClientChannel(callback: (event: Event | undefined) => void): Channel {
 		const session = this;
 		session.pendingChannelCount++;
 		let channelId = ++session.remoteChannelCounter;
@@ -554,10 +547,10 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 						session.client.scheduleSynchronize();
 					}
 				}
-			}
+			},
 		};
 	}
-	createClientPromise = <T extends JsonValue | void>(fallback?: () => Promise<T> | T) => {
+	public createClientPromise = <T extends JsonValue | void>(fallback?: () => Promise<T> | T) => {
 		return new Promise<T>((resolve, reject) => {
 			if (!this.insideCallback) {
 				return reject(new Error("Unable to create client promise in this context!"));
@@ -568,7 +561,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 				}
 				return reject(disconnectedError());
 			}
-			const channel = this.createRawClientChannel(event => {
+			const channel = this.createRawClientChannel((event) => {
 				this.enteringCallback();
 				channel.close();
 				if (event) {
@@ -580,14 +573,14 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 			if (!this.hasActiveClient && !this.bootstrappingPromise) {
 				this.enterLocalChannel(true);
 				this.dispatchingAPIImplementation++;
-				const promise = fallback ? new Promise<T>(resolve => resolve(fallback())) : Promise.reject(new Error("Browser does not support client-side rendering!"))
+				const promise = fallback ? new Promise<T>((resolve) => resolve(fallback())) : Promise.reject(new Error("Browser does not support client-side rendering!"));
 				this.dispatchingAPIImplementation--;
-				promise.then(async value => {
+				promise.then(async (value) => {
 					if (this.currentEvents) {
 						await defer();
 					}
 					this.dispatchClientEvent(eventForValue(-channel.channelId, value));
-				}).catch(async error => {
+				}).catch(async (error) => {
 					if (this.currentEvents) {
 						await defer();
 					}
@@ -596,14 +589,14 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 			}
 		});
 	}
-	createClientChannel = <T extends Function>(callback: T) => {
+	public createClientChannel = <T extends Function>(callback: T) => {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
 		if (!this.insideCallback) {
 			throw new Error("Unable to create client channel in this context!");
 		}
-		const channel = this.createRawClientChannel(event => {
+		const channel = this.createRawClientChannel((event) => {
 			if (event) {
 				event.shift();
 				this.enteringCallback();
@@ -615,8 +608,8 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		return channel;
 	}
 
-	findValueEvent(channelId: number) : Event | undefined {
-		let events = this.currentEvents;
+	public findValueEvent(channelId: number): Event | undefined {
+		const events = this.currentEvents;
 		if (events) {
 			// Events are represented differently inside currentEvents depending on whether we're processing a client message or unarchiving
 			// Makes more sense to handle the special case here than to transform the array just for this one case
@@ -626,7 +619,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 				}
 				channelId = -channelId;
 			}
-			for (let event of events as Event[]) {
+			for (const event of events as Event[]) {
 				if (event[0] == channelId) {
 					return event;
 				}
@@ -634,20 +627,20 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		}
 	}
 
-	coordinateValue = <T extends JsonValue>(generator: () => T) => {
+	public coordinateValue = <T extends JsonValue>(generator: () => T) => {
 		if (!this.insideCallback) {
 			return generator();
 		}
 		let value: T;
 		if (!this.hadOpenServerChannel) {
-			let channelId = ++this.remoteChannelCounter;
+			const channelId = ++this.remoteChannelCounter;
 			logOrdering("client", "open", channelId, this.sessionID);
 			// Peek at incoming events to find the value generated on the client
 			const event = this.findValueEvent(-channelId);
 			if (event) {
 				logOrdering("client", "message", channelId, this.sessionID);
 				logOrdering("client", "close", channelId, this.sessionID);
-				return parseValueEvent(global, event, value => value, error => {
+				return parseValueEvent(global, event, (value) => value, (error) => {
 					throw error;
 				}) as T;
 			}
@@ -656,14 +649,14 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 			logOrdering("client", "message", channelId, this.sessionID);
 			logOrdering("client", "close", channelId, this.sessionID);
 		} else {
-			let channelId = ++this.localChannelCounter;
+			const channelId = ++this.localChannelCounter;
 			logOrdering("server", "open", channelId, this.sessionID);
 			const event = this.findValueEvent(channelId);
 			if (event) {
 				logOrdering("server", "message", channelId, this.sessionID);
 				logOrdering("server", "close", channelId, this.sessionID);
 				this.sendEvent(event);
-				return parseValueEvent(global, event, value => value, error => {
+				return parseValueEvent(global, event, (value) => value, (error) => {
 					throw error;
 				}) as T;
 			}
@@ -674,15 +667,15 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 					logOrdering("server", "message", channelId, this.sessionID);
 					logOrdering("server", "close", channelId, this.sessionID);
 					this.sendEvent(event);
-				} catch(e) {
+				} catch (e) {
 					escape(e);
 				}
-			} catch(e) {
+			} catch (e) {
 				try {
 					logOrdering("server", "message", channelId, this.sessionID);
 					logOrdering("server", "close", channelId, this.sessionID);
 					this.sendEvent(eventForException(channelId, e));
-				} catch(e) {
+				} catch (e) {
 					escape(e);
 				}
 				throw e;
@@ -691,7 +684,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		return roundTrip(value) as T;
 	}
 
-	shareSession = async () => {
+	public shareSession = async () => {
 		// Server promise so that client can confirm that sharing is enabled
 		const server = this.createServerPromise(async () => {
 			if (!this.host.options.allowMultipleClientsPerSession) {
@@ -706,7 +699,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		return result;
 	}
 
-	async destroy() {
+	public async destroy() {
 		if (!this.dead) {
 			this.dead = true;
 			this.mobius.dead = true;
@@ -723,7 +716,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		}
 	}
 
-	async destroyIfExhausted() {
+	public async destroyIfExhausted() {
 		// If no channels remain, the session is in a state where no more events
 		// can be sent from either the client or server. Session can be destroyed
 		if (this.pendingChannelCount + this.localChannelCount == 0) {
@@ -731,7 +724,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		}
 	}
 
-	async archiveEvents(includeTrailer: boolean) : Promise<void> {
+	public async archiveEvents(includeTrailer: boolean): Promise<void> {
 		// Can only archive if we're recording events
 		if (!this.recentEvents || (!this.recentEvents.length && !includeTrailer)) {
 			return;
@@ -750,7 +743,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 			// Determine where to write and whether or not this is a fresh session
 			const freshFile = this.archiveStatus != ArchiveStatus.Partial || !(await exists(path));
 			// Prepare events
-			let unarchivedEvents: (Event | boolean)[] | undefined;
+			let unarchivedEvents: Array<Event | boolean> | undefined;
 			if (this.archiveStatus == ArchiveStatus.Full) {
 				try {
 					unarchivedEvents = (await LocalSessionSandbox.readArchivedSession(path)).events;
@@ -774,7 +767,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 			}
 			stream.end();
 			return stream;
-		})().then(stream => new Promise<void>(resolve => {
+		})().then((stream) => new Promise<void>((resolve) => {
 			const finished = () => {
 				this.archiveStatus = includeTrailer ? ArchiveStatus.Full : ArchiveStatus.Partial;
 				delete this.archivingEvents;
@@ -789,18 +782,18 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		})));
 	}
 
-	static async readArchivedSession(path: string) : Promise<Partial<ArchivedSession>> {
+	public static async readArchivedSession(path: string): Promise<Partial<ArchivedSession>> {
 		const rawContents = (await readFile(path)).toString();
 		const validJSONContents = rawContents[rawContents.length - 1] == "}" ? rawContents : rawContents + "]}";
 		return JSON.parse(validJSONContents) as Partial<ArchivedSession>;
 	}
 
-	async readAllEvents() : Promise<(Event | boolean)[] | undefined> {
+	public async readAllEvents(): Promise<Array<Event | boolean> | undefined> {
 		if (this.archiveStatus == ArchiveStatus.None) {
 			return this.recentEvents;
 		}
 		const path = archivePathForSessionId(this.host.options.sessionsPath, this.sessionID);
-		let archivedEvents: (Event | boolean)[] | undefined;
+		let archivedEvents: Array<Event | boolean> | undefined;
 		do {
 			if (this.archivingEvents) {
 				await this.archivingEvents;
@@ -814,13 +807,12 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		return archivedEvents ? archivedEvents.concat(recentEvents) : recentEvents;
 	}
 
-
-	async unarchiveEvents() : Promise<void> {
+	public async unarchiveEvents(): Promise<void> {
 		const path = archivePathForSessionId(this.host.options.sessionsPath, this.sessionID);
 		const archive = await LocalSessionSandbox.readArchivedSession(path);
 		this.bootstrappingChannels = new Set<number>(archive.channels);
 		let completedBootstrapping: () => void;
-		this.bootstrappingPromise = new Promise<void>(resolve => completedBootstrapping = resolve);
+		this.bootstrappingPromise = new Promise<void>((resolve) => completedBootstrapping = resolve);
 		// Read each event and dispatch the appropriate event in order
 		const events = archive.events!;
 		this.currentEvents = events;
@@ -829,7 +821,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 			await this.updateOpenServerChannelStatus(firstEvent);
 		}
 		this.run();
-		for (let event of events) {
+		for (const event of events) {
 			if (typeof event == "boolean") {
 				await this.updateOpenServerChannelStatus(event);
 				continue;
@@ -856,7 +848,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		completedBootstrapping!();
 	}
 
-	async generateBootstrapData(client: ClientBootstrap) : Promise<BootstrapData> {
+	public async generateBootstrapData(client: ClientBootstrap): Promise<BootstrapData> {
 		const queuedLocalEvents = await this.readAllEvents() || client.queuedLocalEvents;
 		const result: BootstrapData = { sessionID: this.sessionID, channels: Array.from(this.pendingChannels.keys()) };
 		if (queuedLocalEvents) {
@@ -870,15 +862,15 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 		return result;
 	}
 
-	async render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string> {
+	public async render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrap?: boolean): Promise<string> {
 		return await this.pageRenderer.render(mode, client, this, clientURL, clientIntegrity, fallbackIntegrity, noScriptURL, bootstrap ? await this.generateBootstrapData(client) : undefined);
 	}
 
-	becameActive() {
+	public becameActive() {
 		this.hasActiveClient = true;
 	}
 
-	valueForFormField(name: string) : string | undefined {
+	public valueForFormField(name: string): string | undefined {
 		const element = this.pageRenderer.body.querySelector("[name=\"" + name + "\"]");
 		if (element) {
 			switch (element.nodeName) {
@@ -888,7 +880,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 			}
 		}
 	}
-};
+}
 
 function emptyFunction() {
 }

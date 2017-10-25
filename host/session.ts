@@ -1,13 +1,13 @@
+import { peek, Redacted } from "../server/redact";
 import { Client } from "./client";
+import { escape } from "./event-loop";
 import { ClientState, PageRenderMode } from "./page-renderer";
 import { ClientBootstrap, HostSandbox, HostSandboxOptions, LocalSessionSandbox, SessionSandbox, SessionSandboxClient } from "./session-sandbox";
-import { escape } from "./event-loop";
-import { peek, Redacted } from "../server/redact";
 
-import { eventForException, eventForValue, roundTrip, parseValueEvent, Event } from "../common/_internal";
-import { JsonValue, JsonArray, JsonMap } from "mobius-types";
+import { JsonArray, JsonMap, JsonValue } from "mobius-types";
+import { Event, eventForException, eventForValue, parseValueEvent, roundTrip } from "../common/_internal";
 
-import { fork, ChildProcess } from "child_process";
+import { ChildProcess, fork } from "child_process";
 import { Request } from "express";
 
 function generateBaseURL(options: HostSandboxOptions, request?: Request) {
@@ -24,66 +24,66 @@ export interface Session extends SessionSandbox {
 
 export interface SessionClients extends SessionSandboxClient {
 	clients: Map<number, Client>;
-	newClient(session: Session, request: Request) : Client;
-	get(clientID: number) : Client | undefined;
+	newClient(session: Session, request: Request): Client;
+	get(clientID: number): Client | undefined;
 }
 
 class InProcessClients implements SessionClients {
-	sessionID: string;
-	sessions: Map<string, Session>;
-	request?: Request;
-	clients = new Map<number, Client>();
-	currentClientID: number = 0;
-	sharingEnabled: boolean = false;
-	lastMessageTime: number = Date.now();
+	public sessionID: string;
+	public sessions: Map<string, Session>;
+	public request?: Request;
+	public clients = new Map<number, Client>();
+	public currentClientID: number = 0;
+	public sharingEnabled: boolean = false;
+	public lastMessageTime: number = Date.now();
 	constructor(sessionID: string, sessions: Map<string, Session>, request?: Request) {
 		this.sessionID = sessionID;
 		this.sessions = sessions;
 		this.request = request;
 	}
-	async synchronizeChannels() : Promise<void> {
-		const promises : Promise<void>[] = [];
-		for (let client of this.clients.values()) {
+	public async synchronizeChannels(): Promise<void> {
+		const promises: Array<Promise<void>> = [];
+		for (const client of this.clients.values()) {
 			promises.push(client.synchronizeChannels());
 		}
 		await Promise.all(promises);
 	}
-	scheduleSynchronize() {
+	public scheduleSynchronize() {
 		for (const client of this.clients.values()) {
 			client.scheduleSynchronize();
 		}
 	}
-	async sessionWasDestroyed() {
-		const promises : Promise<void>[] = [];
+	public async sessionWasDestroyed() {
+		const promises: Array<Promise<void>> = [];
 		for (const client of this.clients.values()) {
 			promises.push(client.destroy());
 		}
 		await Promise.all(promises);
 		this.sessions.delete(this.sessionID);
 	}
-	sendEvent(event: Event) {
+	public sendEvent(event: Event) {
 		for (const client of this.clients.values()) {
 			client.sendEvent(event);
 		}
 	}
-	setCookie(key: string, value: string) {
+	public setCookie(key: string, value: string) {
 		for (const client of this.clients.values()) {
 			client.setCookie(key, value);
 		}
 	}
-	cookieHeader() {
+	public cookieHeader() {
 		if (this.request) {
-			const cookieHeader = this.request.headers["cookie"];
+			const cookieHeader = this.request.headers.cookie;
 			if (cookieHeader) {
 				return cookieHeader.toString();
 			}
 		}
 		return "";
 	}
-	getBaseURL(options: HostSandboxOptions) {
+	public getBaseURL(options: HostSandboxOptions) {
 		return generateBaseURL(options, this.request);
 	}
-	newClient(session: Session, request: Request) {
+	public newClient(session: Session, request: Request) {
 		const newClientId = this.currentClientID++;
 		if ((newClientId == 0) || this.sharingEnabled) {
 			const result = new Client(session, request, newClientId);
@@ -92,15 +92,14 @@ class InProcessClients implements SessionClients {
 		}
 		throw new Error("Multiple clients attached to the same session are not supported!");
 	}
-	get(clientID: number) : Client | undefined {
+	public get(clientID: number): Client | undefined {
 		return this.clients.get(clientID);
 	}
 }
 
 class InProcessSession extends LocalSessionSandbox<InProcessClients> implements Session {
-	lastMessageTime: number = Date.now();
+	public lastMessageTime: number = Date.now();
 }
-
 
 let toWorkerMessageId = 0;
 let toHostMessageId = 0;
@@ -109,11 +108,11 @@ const workerResolves = new Map<number, [(value: any) => void, (value: any) => vo
 type CommandMessage = [string, string, number];
 
 class WorkerSandboxClient implements SessionSandboxClient {
-	sessionID: string;
+	public sessionID: string;
 	constructor(sessionID: string) {
 		this.sessionID = sessionID;
 	}
-	send<T = void>(method: string, args?: any[]) : Promise<T> {
+	public send<T = void>(method: string, args?: any[]): Promise<T> {
 		const responseId = toHostMessageId = (toHostMessageId + 1) | 0;
 		const prefix: CommandMessage = [this.sessionID, method, responseId];
 		process.send!(args && args.length ? prefix.concat(args) : prefix);
@@ -121,40 +120,40 @@ class WorkerSandboxClient implements SessionSandboxClient {
 			workerResolves.set(responseId, [resolve, reject]);
 		});
 	}
-	synchronizeChannels() : Promise<void> {
+	public synchronizeChannels(): Promise<void> {
 		return this.send("synchronizeChannels");
 	}
-	scheduleSynchronize() {
+	public scheduleSynchronize() {
 		return this.send("scheduleSynchronize");
 	}
-	sessionWasDestroyed() {
+	public sessionWasDestroyed() {
 		return this.send("sessionWasDestroyed");
 	}
-	sendEvent(event: Event) {
+	public sendEvent(event: Event) {
 		return this.send("sendEvent", [event]);
 	}
-	setCookie(key: string, value: string) {
+	public setCookie(key: string, value: string) {
 		return this.send("setCookie", [key, value]);
 	}
-	cookieHeader() {
+	public cookieHeader() {
 		return this.send<string>("cookieHeader");
 	}
-	getBaseURL(options: HostSandboxOptions) {
+	public getBaseURL(options: HostSandboxOptions) {
 		return this.send<string>("getBaseURL", [options]);
 	}
 }
 
 class OutOfProcessSession implements Session {
-	sessionID: string;
-	process: ChildProcess;
-	client: InProcessClients;
-	lastMessageTime: number = Date.now();
+	public sessionID: string;
+	public process: ChildProcess;
+	public client: InProcessClients;
+	public lastMessageTime: number = Date.now();
 	constructor(client: InProcessClients, sessionID: string, process: ChildProcess) {
 		this.client = client;
 		this.sessionID = sessionID;
 		this.process = process;
 	}
-	send<T = void>(method: string, args?: any[]) : Promise<T> {
+	public send<T = void>(method: string, args?: any[]): Promise<T> {
 		const responseId = toWorkerMessageId = (toWorkerMessageId + 1) | 0;
 		const prefix: CommandMessage = [this.sessionID, method, responseId];
 		this.process.send(args && args.length ? prefix.concat(args) : prefix);
@@ -162,48 +161,48 @@ class OutOfProcessSession implements Session {
 			workerResolves.set(responseId, [resolve, reject]);
 		});
 	}
-	destroy() : Promise<void> {
+	public destroy(): Promise<void> {
 		return this.send("destroy");
 	}
-	destroyIfExhausted() : Promise<void> {
+	public destroyIfExhausted(): Promise<void> {
 		return this.send("destroyIfExhausted");
 	}
-	archiveEvents(includeTrailer: boolean) : Promise<void> {
+	public archiveEvents(includeTrailer: boolean): Promise<void> {
 		return this.send("archiveEvents", [includeTrailer]);
 	}
-	unarchiveEvents() {
+	public unarchiveEvents() {
 		return this.send("unarchiveEvents");
 	}
-	processEvents(events: Event[], noJavaScript?: boolean) {
+	public processEvents(events: Event[], noJavaScript?: boolean) {
 		return this.send("processEvents", [events, noJavaScript]);
 	}
-	prerenderContent() {
+	public prerenderContent() {
 		return this.send("prerenderContent");
 	}
-	updateOpenServerChannelStatus(newValue: boolean) {
+	public updateOpenServerChannelStatus(newValue: boolean) {
 		return this.send("updateOpenServerChannelStatus", [newValue]);
 	}
-	hasLocalChannels() {
+	public hasLocalChannels() {
 		return this.send<boolean>("hasLocalChannels");
 	}
-	render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrap?: boolean) : Promise<string> {
+	public render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrap?: boolean): Promise<string> {
 		return this.send<string>("render", [mode, client, clientURL, clientIntegrity, fallbackIntegrity, noScriptURL, bootstrap]);
 	}
-	valueForFormField(name: string) : Promise<string | undefined> {
+	public valueForFormField(name: string): Promise<string | undefined> {
 		return this.send<string | undefined>("valueForFormField", [name]);
 	}
-	becameActive() {
+	public becameActive() {
 		return this.send("becameActive");
 	}
 }
 
 type BroadcastMessage = [false, string, JsonValue];
 
-function isCommandMessage(message: CommandMessage | Event | BroadcastMessage) : message is CommandMessage {
+function isCommandMessage(message: CommandMessage | Event | BroadcastMessage): message is CommandMessage {
 	return typeof message[0] === "string";
 }
 
-function isEvent(message: CommandMessage | Event | BroadcastMessage) : message is Event {
+function isEvent(message: CommandMessage | Event | BroadcastMessage): message is Event {
 	return typeof message[0] === "number";
 }
 
@@ -214,7 +213,7 @@ function constructBroadcastModule() {
 			const observers = topics.get(peek(topic));
 			if (observers) {
 				const peekedMessage = peek(message);
-				for (let observer of observers.values()) {
+				for (const observer of observers.values()) {
 					try {
 						observer(roundTrip(peekedMessage));
 					} catch (e) {
@@ -223,7 +222,7 @@ function constructBroadcastModule() {
 				}
 			}
 		},
-		addListener(topic: string, callback: (message: JsonValue) => void) : void {
+		addListener(topic: string, callback: (message: JsonValue) => void): void {
 			const topicName = peek(topic);
 			let observers = topics.get(topicName);
 			if (!observers) {
@@ -231,13 +230,13 @@ function constructBroadcastModule() {
 			}
 			observers.add(callback);
 		},
-		removeListener(topic: string, callback: (message: JsonValue) => void) : void {
+		removeListener(topic: string, callback: (message: JsonValue) => void): void {
 			const topicName = peek(topic);
 			const observers = topics.get(topicName);
 			if (observers && observers.delete(callback) && observers.size === 0) {
 				topics.delete(topicName);
 			}
-		}
+		},
 	};
 }
 
@@ -253,7 +252,7 @@ if (require.main === module) {
 				basicBroadcast.send(topicName, peekedMessage);
 			},
 			addListener: basicBroadcast.addListener,
-			removeListener: basicBroadcast.removeListener
+			removeListener: basicBroadcast.removeListener,
 		});
 		const sessions = new Map<string, LocalSessionSandbox<WorkerSandboxClient>>();
 		process.removeListener("message", bootstrap);
@@ -266,7 +265,7 @@ if (require.main === module) {
 					sessions.set(sessionID, session = new LocalSessionSandbox<WorkerSandboxClient>(host, new WorkerSandboxClient(sessionID), sessionID));
 				}
 				try {
-					const result = await (session as { [method: string] : () => Promise<any> })[message[1]].apply(session, message.slice(3));
+					const result = await (session as { [method: string]: () => Promise<any> })[message[1]].apply(session, message.slice(3));
 					process.send!(eventForValue(message[2], result));
 				} catch (e) {
 					process.send!(eventForException(message[2], e));
@@ -296,14 +295,14 @@ export function createSessionGroup(options: HostSandboxOptions, sessions: Map<st
 		const worker = workers[i] = fork(require.resolve("./session"), [], {
 			env: process.env,
 			cwd: process.cwd(),
-			execArgv: process.execArgv.map(option => {
+			execArgv: process.execArgv.map((option) => {
 				const debugOption = option.match(/^(--inspect|--inspect-(brk|port)|--debug|--debug-(brk|port))(=\d+)?$/);
 				if (!debugOption) {
 					return option;
 				}
 				return debugOption[1] + "=" + (((process as any).debugPort as number) + i + 1);
 			}),
-			stdio: [0, 1, 2, "ipc"]
+			stdio: [0, 1, 2, "ipc"],
 		});
 		worker.send(options);
 		worker.addListener("message", async (message: CommandMessage | Event | BroadcastMessage) => {
@@ -314,7 +313,7 @@ export function createSessionGroup(options: HostSandboxOptions, sessions: Map<st
 				if (session) {
 					const client: any = session.client;
 					try {
-						const result = await ((client as { [method: string] : () => Promise<any> })[message[1]].apply(client, message.slice(3)));
+						const result = await ((client as { [method: string]: () => Promise<any> })[message[1]].apply(client, message.slice(3)));
 						worker.send(eventForValue(message[2], result));
 					} catch (e) {
 						worker.send(eventForException(message[2], e));
@@ -331,7 +330,7 @@ export function createSessionGroup(options: HostSandboxOptions, sessions: Map<st
 				}
 			} else {
 				// Forward broadcast message to other workers
-				for (let otherWorker of workers) {
+				for (const otherWorker of workers) {
 					if (otherWorker !== worker) {
 						otherWorker.send(message);
 					}
@@ -346,5 +345,5 @@ export function createSessionGroup(options: HostSandboxOptions, sessions: Map<st
 			currentWorker = 0;
 		}
 		return result;
-	}
+	};
 }

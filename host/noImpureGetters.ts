@@ -18,7 +18,7 @@ export default function() {
 	return {
 		visitor: {
 			ClassMethod: verifyPurityOfGetters,
-			ObjectMethod: verifyPurityOfGetters
-		}
-	}
+			ObjectMethod: verifyPurityOfGetters,
+		},
+	};
 }

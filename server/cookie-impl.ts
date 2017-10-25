@@ -2,7 +2,7 @@ import { createServerPromise } from "mobius";
 
 let cachedCookies: {[key: string]: string} | undefined;
 
-async function populateCachedCookies() : {[key: string]: string} {
+async function populateCachedCookies(): {[key: string]: string} {
 	if (cachedCookies) {
 		return cachedCookies;
 	}
@@ -11,10 +11,10 @@ async function populateCachedCookies() : {[key: string]: string} {
 }
 
 export function set(key: string, value: string) {
-	populateCachedCookies().then(cookies => cookies[key] = value);
+	populateCachedCookies().then((cookies) => cookies[key] = value);
 	require("setCookie")(key, value);
 }
 
-export async function all() : Promise<Readonly<{[key: string]: string}>> {
+export async function all(): Promise<Readonly<{[key: string]: string}>> {
 	return createServerPromise(populateCachedCookies);
 }

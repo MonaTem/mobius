@@ -1,7 +1,7 @@
-import { Session, createSessionGroup } from "./session";
-import { archivePathForSessionId, HostSandboxOptions } from "./session-sandbox";
 import { escape } from "./event-loop";
 import { exists } from "./fileUtils";
+import { createSessionGroup, Session } from "./session";
+import { archivePathForSessionId, HostSandboxOptions } from "./session-sandbox";
 
 import { ClientMessage } from "../common/_internal";
 
@@ -12,11 +12,11 @@ import { Request } from "express";
 import * as uuid from "uuid/v4";
 
 export class Host {
-	sessions = new Map<string, Session>();
-	destroying: boolean = false;
-	options: HostSandboxOptions;
-	staleSessionTimeout: any;
-	constructSession: (sessionID: string, request?: Request) => Session;
+	public sessions = new Map<string, Session>();
+	public destroying: boolean = false;
+	public options: HostSandboxOptions;
+	public staleSessionTimeout: any;
+	public constructSession: (sessionID: string, request?: Request) => Session;
 	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, publicPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, workerCount: number, hostname?: string) {
 		this.destroying = false;
 		this.constructSession = createSessionGroup(this.options = {
@@ -28,12 +28,12 @@ export class Host {
 			scriptPath,
 			publicPath,
 			sessionsPath,
-			hostname
+			hostname,
 		}, this.sessions, workerCount);
 		// Session timeout
 		this.staleSessionTimeout = setInterval(() => {
 			const now = Date.now();
-			for (let session of this.sessions.values()) {
+			for (const session of this.sessions.values()) {
 				if (now - session.lastMessageTime > 5 * 60 * 1000) {
 					session.destroy().catch(escape);
 				} else {
@@ -42,7 +42,7 @@ export class Host {
 			}
 		}, 10 * 1000);
 	}
-	async sessionFromId(sessionID: string | undefined, request: Request, allowNewSession: boolean) {
+	public async sessionFromId(sessionID: string | undefined, request: Request, allowNewSession: boolean) {
 		if (!sessionID) {
 			throw new Error("No session ID specified!");
 		}
@@ -74,17 +74,17 @@ export class Host {
 		}
 		throw new Error("Session ID is not valid: " + sessionID);
 	}
-	async clientFromMessage(message: ClientMessage, request: Request, allowNewSession: boolean) {
+	public async clientFromMessage(message: ClientMessage, request: Request, allowNewSession: boolean) {
 		const clientID = message.clientID as number | 0;
 		const session = await this.sessionFromId(message.sessionID, request, allowNewSession && message.messageID == 0 && clientID == 0);
-		let client = session.client.get(clientID);
+		const client = session.client.get(clientID);
 		if (!client) {
 			throw new Error("Client ID is not valid: " + message.clientID);
 		}
 		client.request = request;
 		return client;
 	}
-	async newClient(request: Request) {
+	public async newClient(request: Request) {
 		if (this.destroying) {
 			throw new Error("Cannot create new client while shutting down!");
 		}
@@ -97,7 +97,7 @@ export class Host {
 			}
 		}
 	}
-	async destroyClientById(sessionID: string, clientID: number) {
+	public async destroyClientById(sessionID: string, clientID: number) {
 		const session = this.sessions.get(sessionID);
 		if (session) {
 			const client = session.client.get(clientID);
@@ -106,11 +106,11 @@ export class Host {
 			}
 		}
 	}
-	async destroy() {
+	public async destroy() {
 		this.destroying = true;
 		clearInterval(this.staleSessionTimeout);
-		const promises: Promise<void>[] = [];
-		for (let session of this.sessions.values()) {
+		const promises: Array<Promise<void>> = [];
+		for (const session of this.sessions.values()) {
 			promises.push(session.destroy());
 		}
 		await Promise.all(promises);

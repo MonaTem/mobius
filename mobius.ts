@@ -1,31 +1,31 @@
 #!/usr/bin/env node
-import * as path from "path";
-import * as util from "util";
 import { createHash } from "crypto";
 import { cpus } from "os";
+import * as path from "path";
+import * as util from "util";
 const Module = require("module");
 
-import * as express from "express";
 import * as bodyParser from "body-parser";
+import * as express from "express";
 
 import { diff_match_patch } from "diff-match-patch";
 const diff_match_patch_node = new (require("diff-match-patch-node") as typeof diff_match_patch);
 
-import { Host } from "./host/host";
-import { Session } from "./host/session";
 import { Client } from "./host/client";
-import { PageRenderMode } from "./host/page-renderer";
 import clientCompile from "./host/client-compiler";
-import { escape } from "./host/event-loop";
 import * as csrf from "./host/csrf";
-import { packageRelative, readFile, writeFile, mkdir, unlink, rimraf, stat, exists, readJSON } from "./host/fileUtils";
+import { escape } from "./host/event-loop";
+import { exists, mkdir, packageRelative, readFile, readJSON, rimraf, stat, unlink, writeFile } from "./host/fileUtils";
+import { Host } from "./host/host";
+import { PageRenderMode } from "./host/page-renderer";
+import { Session } from "./host/session";
 
-import { serializeMessageAsText, deserializeMessageFromText, ClientMessage } from "./common/_internal";
+import { ClientMessage, deserializeMessageFromText, serializeMessageAsText } from "./common/_internal";
 
 import * as commandLineArgs from "command-line-args";
 
 function delay(amount: number) {
-	return new Promise<void>(resolve => setTimeout(resolve, amount));
+	return new Promise<void>((resolve) => setTimeout(resolve, amount));
 }
 
 function noCache(response: express.Response) {
@@ -42,13 +42,13 @@ function topFrameHTML(response: express.Response, html: string) {
 	response.send(html);
 }
 
-function messageFromBody(body: { [key: string]: any }) : ClientMessage {
+function messageFromBody(body: { [key: string]: any }): ClientMessage {
 	const message: ClientMessage = {
 		sessionID: body.sessionID || "",
 		messageID: (body.messageID as number) | 0,
 		clientID: (body.clientID as number) | 0,
-		events: body.events ? JSON.parse("[" + body.events + "]") : []
-	}
+		events: body.events ? JSON.parse("[" + body.events + "]") : [],
+	};
 	if ("close" in body) {
 		message.close = (body.close | 0) == 1;
 	}
@@ -141,7 +141,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 		install(server: express.Express) {
 			server.use(bodyParser.urlencoded({
 				extended: true,
-				type: () => true // Accept all MIME types
+				type: () => true, // Accept all MIME types
 			}));
 
 			server.get("/", async (request, response) => {
@@ -156,7 +156,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						client.incomingMessageId++;
 					} else {
 						// Not prerendering or joining a session, just return the original source with the noscript added
-						if (request.query["js"] !== "no") {
+						if (request.query.js !== "no") {
 							if (simulatedLatency) {
 								await delay(simulatedLatency);
 							}
@@ -206,7 +206,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						response.send("");
 						return;
 					}
-					const postback = body["postback"];
+					const postback = body.postback;
 					let client: Client;
 					if (!message.sessionID && postback == "js") {
 						client = await host.newClient(request);
@@ -269,7 +269,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					noCache(response);
 					response.set("Content-Type", "text/plain; charset=utf-8");
 					response.send(util.inspect(e));
-				};
+				}
 			});
 
 			require("express-ws")(server);
@@ -382,7 +382,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 		async stop() {
 			await host.destroy();
 			await writeFile(gracefulPath, "");
-		}
+		},
 	};
 }
 
@@ -399,31 +399,31 @@ export default function main() {
 			{ name: "hostname", type: String },
 			{ name: "simulated-latency", type: Number, defaultValue: 0 },
 			{ name: "init", type: Boolean, defaultValue: false },
-			{ name: "help", type: Boolean }
+			{ name: "help", type: Boolean },
 		]);
 		if (args.help) {
 			console.log(require("command-line-usage")([
 				{
 					header: "Mobius",
-					content: "Unified frontend and backend framework for building web apps"
+					content: "Unified frontend and backend framework for building web apps",
 				},
 				{
 					header: "Options",
 					optionList: [
 						{
 							name: "init",
-							description: "Initialize a new mobius project"
+							description: "Initialize a new mobius project",
 						},
 						{
 							name: "port",
 							typeLabel: "[underline]{number}",
-							description: "The port number to listen on"
+							description: "The port number to listen on",
 
 						},
 						{
 							name: "base",
 							typeLabel: "[underline]{path}",
-							description: "The base path of the app to serve"
+							description: "The base path of the app to serve",
 						},
 						{
 							name: "minify",
@@ -445,13 +445,13 @@ export default function main() {
 						},
 						{
 							name: "help",
-							description: "Prints this usage guide. Yahahah! You found me!"
-						}
-					]
+							description: "Prints this usage guide. Yahahah! You found me!",
+						},
+					],
 				},
 				{
-					content: "Project home: [underline]{https://github.com/rpetrich/mobius}"
-				}
+					content: "Project home: [underline]{https://github.com/rpetrich/mobius}",
+				},
 			]));
 			process.exit(1);
 		}
@@ -510,7 +510,7 @@ export default function main() {
 		async function onInterrupted() {
 			process.removeListener("SIGTERM", onInterrupted);
 			process.removeListener("SIGINT", onInterrupted);
-			const acceptSocketClosed = new Promise(resolve => {
+			const acceptSocketClosed = new Promise((resolve) => {
 				acceptSocket.close(resolve);
 			});
 			await mobius.stop();
@@ -520,7 +520,7 @@ export default function main() {
 
 		server.get("/term", async (request, response) => {
 			response.send("exiting");
-			const acceptSocketClosed = new Promise(resolve => {
+			const acceptSocketClosed = new Promise((resolve) => {
 				acceptSocket.close(resolve);
 			});
 			await mobius.stop();

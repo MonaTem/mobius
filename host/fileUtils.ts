@@ -1,6 +1,6 @@
-import * as util from "util";
-import * as path from "path";
 import * as fs from "fs";
+import * as path from "path";
+import * as util from "util";
 
 export const packageRelative = (relative: string) => path.join(__dirname, "../..", relative);
 
@@ -23,5 +23,5 @@ export async function rimraf(path: string) {
 
 export const stat = util.promisify(fs.stat);
 export function exists(path: string) {
-	return new Promise<boolean>(resolve => fs.exists(path, resolve));
+	return new Promise<boolean>((resolve) => fs.exists(path, resolve));
 }

@@ -1,30 +1,30 @@
-import * as vm from "vm";
-import { readFileSync } from "fs";
-import memoize from "./memoize";
-import * as ts from "typescript";
-import { packageRelative } from "./fileUtils";
 import * as babel from "babel-core";
-import rewriteForInStatements from "./rewriteForInStatements";
-import noImpureGetters from "./noImpureGetters";
+import { readFileSync } from "fs";
+import * as ts from "typescript";
+import * as vm from "vm";
 import addSubresourceIntegrity from "./addSubresourceIntegrity";
+import { packageRelative } from "./fileUtils";
+import memoize from "./memoize";
+import noImpureGetters from "./noImpureGetters";
+import rewriteForInStatements from "./rewriteForInStatements";
 
 let convertToCommonJS: any;
 let optimizeClosuresInRender: any;
 
 export interface ServerModule {
-	exports: any,
-	paths: string[]
+	exports: any;
+	paths: string[];
 }
 
 interface ServerModuleGlobal {
-	self: this,
-	global: this | NodeJS.Global,
-	require: (name: string) => any,
-	module: ServerModule,
-	exports: any,
-	Object?: typeof Object,
-	Array?: typeof Array
-};
+	self: this;
+	global: this | NodeJS.Global;
+	require: (name: string) => any;
+	module: ServerModule;
+	exports: any;
+	Object?: typeof Object;
+	Array?: typeof Array;
+}
 
 declare global {
 	namespace NodeJS {
@@ -51,7 +51,7 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(scriptPath:
 	const scriptContents = readFileSync(scriptPath).toString();
 	const compiled = /\.(j|t)s(|x)$/.test(scriptPath) ? ts.transpileModule(scriptContents, {
 		fileName: scriptPath,
-		compilerOptions
+		compilerOptions,
 	}) : undefined;
 	const transformed = babel.transform(compiled ? compiled.outputText : scriptContents, {
 		babelrc: false,
@@ -62,12 +62,12 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(scriptPath:
 			noImpureGetters(),
 			addSubresourceIntegrity(publicPath),
 		],
-		inputSourceMap: compiled && typeof compiled.sourceMapText == "string" ? JSON.parse(compiled.sourceMapText) : undefined
+		inputSourceMap: compiled && typeof compiled.sourceMapText == "string" ? JSON.parse(compiled.sourceMapText) : undefined,
 	});
 	return vm.runInThisContext("(function (self){with(self){return(function(self,global,require,document){" + transformed.code + "\n})(self,self.global,self.require,self.document)}})", {
 		filename: scriptPath,
 		lineOffset: 0,
-		displayErrors: true
+		displayErrors: true,
 	}) as (global: T) => void;
 });
 

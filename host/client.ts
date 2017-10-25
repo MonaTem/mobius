@@ -1,23 +1,23 @@
-import { Session } from "./session";
+import { ClientMessage, Event, ServerMessage } from "../common/_internal";
 import { defer } from "./event-loop";
-import { Event, ServerMessage, ClientMessage } from "../common/_internal";
+import { Session } from "./session";
 
 import { Request, Response } from "express";
 
 export class Client {
-	session: Session;
-	request: Request;
-	clientID: number;
-	incomingMessageId: number = 0;
-	outgoingMessageId: number = 0;
-	reorderedMessages: { [messageId: number]: ClientMessage } = {};
-	queuedLocalEvents: Event[] | undefined;
-	queuedLocalEventsResolve: ((shouldContinue: true | void) => void) | undefined;
-	localResolveTimeout: NodeJS.Timer | undefined;
-	willSynchronizeChannels = false;
-	lastSentFormHTML?: string;
-	pendingCookies?: [string, string][];
-	clientIsActive?: true;
+	public session: Session;
+	public request: Request;
+	public clientID: number;
+	public incomingMessageId: number = 0;
+	public outgoingMessageId: number = 0;
+	public reorderedMessages: { [messageId: number]: ClientMessage } = {};
+	public queuedLocalEvents: Event[] | undefined;
+	public queuedLocalEventsResolve: ((shouldContinue: true | void) => void) | undefined;
+	public localResolveTimeout: NodeJS.Timer | undefined;
+	public willSynchronizeChannels = false;
+	public lastSentFormHTML?: string;
+	public pendingCookies?: Array<[string, string]>;
+	public clientIsActive?: true;
 
 	constructor(session: Session, request: Request, clientID: number) {
 		this.session = session;
@@ -25,7 +25,7 @@ export class Client {
 		this.clientID = clientID;
 	}
 
-	async destroy() {
+	public async destroy() {
 		this.session.client.clients.delete(this.clientID);
 		if (this.queuedLocalEventsResolve) {
 			this.queuedLocalEventsResolve(undefined);
@@ -37,7 +37,7 @@ export class Client {
 		}
 	}
 
-	async processMessage(message: ClientMessage) : Promise<void> {
+	public async processMessage(message: ClientMessage): Promise<void> {
 		// Process messages in order
 		const messageId = message.messageID;
 		if (messageId > this.incomingMessageId) {
@@ -63,17 +63,17 @@ export class Client {
 		}
 	}
 
-	receiveMessage(message: ClientMessage) : Promise<void> {
+	public receiveMessage(message: ClientMessage): Promise<void> {
 		this.session.lastMessageTime = Date.now();
 		return this.processMessage(message);
 	}
 
-	async receiveFallbackMessage(message: ClientMessage, body: { [key: string]: string}) : Promise<void> {
+	public async receiveFallbackMessage(message: ClientMessage, body: { [key: string]: string}): Promise<void> {
 		// JavaScript is disabled, emulate events from form POST
 		const inputEvents: Event[] = [];
 		const buttonEvents: Event[] = [];
 		message.noJavaScript = true;
-		for (let key in body) {
+		for (const key in body) {
 			if (!Object.hasOwnProperty.call(body, key)) {
 				continue;
 			}
@@ -90,7 +90,7 @@ export class Client {
 		return await this.receiveMessage(message);
 	}
 
-	produceMessage(close: boolean) : Partial<ServerMessage> {
+	public produceMessage(close: boolean): Partial<ServerMessage> {
 		const result: Partial<ServerMessage> = { messageID: this.outgoingMessageId++ };
 		if (close) {
 			result.close = true;
@@ -102,7 +102,7 @@ export class Client {
 		return result;
 	}
 
-	async dequeueEvents() : Promise<true | void> {
+	public async dequeueEvents(): Promise<true | void> {
 		const hasLocalChannels = await this.session.hasLocalChannels();
 		return new Promise<true | void>((resolve, reject) => {
 			// Wait until events are ready, a new event handler comes in, or no more local channels exist
@@ -131,7 +131,7 @@ export class Client {
 		});
 	}
 
-	sendEvent(event: Event) {
+	public sendEvent(event: Event) {
 		// Queue an event
 		const queuedLocalEvents = this.queuedLocalEvents;
 		if (queuedLocalEvents) {
@@ -142,7 +142,7 @@ export class Client {
 		this.scheduleSynchronize();
 	}
 
-	synchronizeChannels = () => {
+	public synchronizeChannels = () => {
 		this.willSynchronizeChannels = false;
 		const resolve = this.queuedLocalEventsResolve;
 		if (resolve) {
@@ -156,27 +156,27 @@ export class Client {
 		return this.session.destroyIfExhausted();
 	}
 
-	scheduleSynchronize() {
+	public scheduleSynchronize() {
 		if (!this.willSynchronizeChannels) {
 			this.willSynchronizeChannels = true;
 			defer().then(this.synchronizeChannels);
 		}
 	}
 
-	setCookie(key: string, value: string) {
+	public setCookie(key: string, value: string) {
 		const cookies = this.pendingCookies || (this.pendingCookies = []);
 		cookies.push([key, value]);
 	}
-	applyCookies(response: Response) {
+	public applyCookies(response: Response) {
 		const cookies = this.pendingCookies;
 		if (cookies) {
 			this.pendingCookies = undefined;
-			for (let [ key, value ] of cookies) {
+			for (const [ key, value ] of cookies) {
 				response.cookie(key, value);
 			}
 		}
 	}
-	becameActive() {
+	public becameActive() {
 		if (!this.clientIsActive) {
 			this.clientIsActive;
 			this.session.becameActive();

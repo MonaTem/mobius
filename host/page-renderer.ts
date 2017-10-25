@@ -1,5 +1,5 @@
-import { JSDOM } from "jsdom";
 import { BootstrapData } from "_internal";
+import { JSDOM } from "jsdom";
 
 function compatibleStringify(value: any): string {
 	return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\/script/g, "<\\/script");
@@ -15,36 +15,36 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 export const enum PageRenderMode {
 	Bare = 0,
 	IncludeForm = 1,
-	IncludeFormAndStripScript = 2
+	IncludeFormAndStripScript = 2,
 }
 
-export type SessionState = {
+export interface SessionState {
 	sessionID: string;
 	localChannelCount: number;
 }
 
-export type ClientState = {
+export interface ClientState {
 	clientID: number;
 	incomingMessageId: number;
 }
 
 export class PageRenderer {
-	dom: JSDOM;
-	document: Document;
-	body: Element;
-	head: Element;
-	baseURL: string;
-	noscript: Element;
-	metaRedirect: Element;
-	clientScript: HTMLScriptElement;
-	fallbackScript: HTMLScriptElement;
-	bootstrapScript?: HTMLScriptElement;
-	formNode?: HTMLFormElement;
-	postbackInput?: HTMLInputElement;
-	sessionIdInput?: HTMLInputElement;
-	clientIdInput?: HTMLInputElement;
-	messageIdInput?: HTMLInputElement;
-	hasServerChannelsInput?: HTMLInputElement;
+	public dom: JSDOM;
+	public document: Document;
+	public body: Element;
+	public head: Element;
+	public baseURL: string;
+	public noscript: Element;
+	public metaRedirect: Element;
+	public clientScript: HTMLScriptElement;
+	public fallbackScript: HTMLScriptElement;
+	public bootstrapScript?: HTMLScriptElement;
+	public formNode?: HTMLFormElement;
+	public postbackInput?: HTMLInputElement;
+	public sessionIdInput?: HTMLInputElement;
+	public clientIdInput?: HTMLInputElement;
+	public messageIdInput?: HTMLInputElement;
+	public hasServerChannelsInput?: HTMLInputElement;
 	constructor(dom: JSDOM, noscript: Element, metaRedirect: Element) {
 		this.dom = dom;
 		this.document = (dom.window as Window).document;
@@ -57,7 +57,7 @@ export class PageRenderer {
 		const fallbackScript = this.fallbackScript = this.document.createElement("script");
 		this.body.appendChild(fallbackScript);
 	}
-	render(mode: PageRenderMode, clientState: ClientState, sessionState: SessionState, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrapData?: BootstrapData) : string {
+	public render(mode: PageRenderMode, clientState: ClientState, sessionState: SessionState, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrapData?: BootstrapData): string {
 		const document = this.document;
 		let bootstrapScript: HTMLScriptElement | undefined;
 		let textNode: Node | undefined;

@@ -1,9 +1,9 @@
-import { Channel, JsonValue } from "mobius-types";
+import { BootstrapData, ClientMessage, deserializeMessageFromText, disconnectedError, Event, eventForException, eventForValue, logOrdering, parseValueEvent, roundTrip, serializeMessageAsText, ServerMessage } from "_internal";
 import { interceptGlobals } from "determinism";
-import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEvent, serializeMessageAsText, deserializeMessageFromText, disconnectedError, Event, ServerMessage, ClientMessage, BootstrapData } from "_internal";
+import { Channel, JsonValue } from "mobius-types";
 /**
  * @license THE MIT License (MIT)
- * 
+ *
  * Copyright (c) 2017 Ryan Petrich
  * Copyright (c) 2017 Jason Miller
  *
@@ -13,10 +13,10 @@ import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEve
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -26,13 +26,13 @@ import { logOrdering, roundTrip, eventForValue, eventForException, parseValueEve
  * SOFTWARE.
  */
 if (top != self) {
-	document.documentElement.innerHTML = '';
-	throw "Not allowed to load as an iframe!";
+	document.documentElement.innerHTML = "";
+	throw new Error("Not allowed to load as an iframe!");
 }
 
 if (/\bMSIE [1-8]\b/.test(navigator.userAgent) || !window.addEventListener || typeof JSON == "undefined") {
 insufficient_browser_throw:
-	throw "Insufficient browser support. Falling back to server-side rendering...";
+	throw new Error("Insufficient browser support. Falling back to server-side rendering...");
 }
 
 document.body.className = "mobius-active mobius-full";
@@ -56,12 +56,12 @@ const setTimeout = window.setTimeout;
 const clearTimeout = window.clearTimeout;
 
 type Task = () => void;
-function isPromiseLike<T>(value: T | Promise<T> | undefined) : value is Promise<T> {
+function isPromiseLike<T>(value: T | Promise<T> | undefined): value is Promise<T> {
 	return typeof value == "object" && "then" in (value as any);
 }
 
-const microTaskQueue : Task[] = [];
-const taskQueue : Task[] = [];
+const microTaskQueue: Task[] = [];
+const taskQueue: Task[] = [];
 
 const { scheduleFlushTasks, setImmediate } = (() => {
 	let setImmediate: (callback: () => void) => void = window.setImmediate;
@@ -71,20 +71,20 @@ const { scheduleFlushTasks, setImmediate } = (() => {
 		let isAsynchronous = true;
 		const synchronousTest = () => {
 			isAsynchronous = false;
-		}
+		};
 		window.addEventListener("message", synchronousTest, false);
 		window.postMessage("__mobius_test", "*");
 		window.removeEventListener("message", synchronousTest, false);
 		if (isAsynchronous) {
 			window.addEventListener("message", flushTasks, false);
 			scheduleFlushTasks = () => {
-				window.postMessage("__mobius_flush", "*")
+				window.postMessage("__mobius_flush", "*");
 			};
 		}
 	}
 	// Try a <script> tag's onreadystatechange
 	if (!setImmediate && "onreadystatechange" in document.createElement("script")) {
-		setImmediate = callback => {
+		setImmediate = (callback) => {
 			const script = document.createElement("script");
 			(script as any).onreadystatechange = () => {
 				document.head.removeChild(script);
@@ -102,9 +102,9 @@ const { scheduleFlushTasks, setImmediate } = (() => {
 	}
 	// Fallback to setTimeout(..., 0)
 	if (!setImmediate) {
-		setImmediate = callback => {
+		setImmediate = (callback) => {
 			setTimeout.call(window, callback, 0);
-		}
+		};
 	}
 	return { scheduleFlushTasks: scheduleFlushTasks || setImmediate.bind(window, flushTasks), setImmediate };
 })();
@@ -120,7 +120,7 @@ function flushTasks() {
 	let completed: boolean | undefined;
 	try {
 		flushMicroTasks();
-		let task = taskQueue.shift();
+		const task = taskQueue.shift();
 		if (task) {
 			task();
 		}
@@ -146,10 +146,10 @@ if (!(window as any).Promise || !/^Google |^Apple /.test(navigator.vendor)) {
 
 const resolvedPromise: Promise<void> = Promise.resolve();
 
-function defer() : Promise<void>;
-function defer<T>() : Promise<T>;
-function defer(value?: any) : Promise<any> {
-	return new Promise<any>(resolve => submitTask(taskQueue, resolve.bind(null, value)));
+function defer(): Promise<void>;
+function defer<T>(): Promise<T>;
+function defer(value?: any): Promise<any> {
+	return new Promise<any>((resolve) => submitTask(taskQueue, resolve.bind(null, value)));
 }
 
 function escape(e: any) {
@@ -158,13 +158,13 @@ function escape(e: any) {
 	});
 }
 
-function escaping(handler: () => any | Promise<any>) : () => Promise<void>;
-function escaping<T>(handler: (value: T) => any | Promise<any>) : (value: T) => Promise<T | void>;
-function escaping(handler: (value?: any) => any | Promise<any>) : (value?: any) => Promise<any> {
+function escaping(handler: () => any | Promise<any>): () => Promise<void>;
+function escaping<T>(handler: (value: T) => any | Promise<any>): (value: T) => Promise<T | void>;
+function escaping(handler: (value?: any) => any | Promise<any>): (value?: any) => Promise<any> {
 	return (value?: any) => {
 		try {
 			return Promise.resolve(handler(value)).catch(escape);
-		} catch(e) {
+		} catch (e) {
 			escape(e);
 			return resolvedPromise;
 		}
@@ -176,8 +176,8 @@ function emptyFunction() {
 
 const slice = Array.prototype.slice;
 
-function uuid() : string {
-	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+function uuid(): string {
+	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
 		const r = Math.random() * 16 | 0;
 		return (c == "x" ? r : (r & 3 | 8)).toString(16);
 	});
@@ -186,10 +186,10 @@ function uuid() : string {
 // Message ordering
 let outgoingMessageId = 0;
 let incomingMessageId = 0;
-const reorderedMessages : { [messageId: number]: ServerMessage } = {};
-let willSynchronizeChannels : boolean = false;
-let currentEvents: (Event | boolean)[] | undefined;
-const allEvents: (Event | boolean)[] = [];
+const reorderedMessages: { [messageId: number]: ServerMessage } = {};
+let willSynchronizeChannels: boolean = false;
+let currentEvents: Array<Event | boolean> | undefined;
+const allEvents: Array<Event | boolean> = [];
 let bootstrappingChannels: number[] | undefined;
 function shouldImplementLocalChannel(channelId: number) {
 	return !bootstrappingChannels || (bootstrappingChannels.indexOf(channelId) != -1);
@@ -212,7 +212,7 @@ function didExitCallback() {
 	updateInsideCallback();
 }
 
-function runAPIImplementation<T>(block: () => T) : T {
+function runAPIImplementation<T>(block: () => T): T {
 	dispatchingAPIImplementation++;
 	insideCallback = false;
 	try {
@@ -245,7 +245,7 @@ const bootstrapData = (() => {
 	}
 	return {} as Partial<BootstrapData>;
 })();
-let sessionID: string = bootstrapData.sessionID || uuid();
+const sessionID: string = bootstrapData.sessionID || uuid();
 const clientID = (bootstrapData.clientID as number) | 0;
 const serverURL = location.href.match(/^[^?]*/)![0];
 let activeConnectionCount = 0;
@@ -253,7 +253,7 @@ export let dead = false;
 
 // Remote channels
 let remoteChannelCounter = 0;
-const pendingChannels : { [channelId: number]: (event?: Event) => void; } = {};
+const pendingChannels: { [channelId: number]: (event?: Event) => void; } = {};
 let pendingChannelCount = 0;
 let hadOpenServerChannel = false;
 
@@ -264,7 +264,7 @@ const fencedLocalEvents: Event[] = [];
 const pendingLocalChannels: { [channelId: number]: (event: Event) => void; } = {};
 let totalBatched = 0;
 let isBatched: { [channelId: number]: true } = {};
-let pendingBatchedActions: (() => void)[] = [];
+let pendingBatchedActions: Array<() => void> = [];
 
 // Heartbeat
 const sessionHeartbeatInterval = 4 * 60 * 1000;
@@ -275,7 +275,7 @@ const socketURL = serverURL.replace(/^http/, "ws") + "?";
 let WebSocketClass = (window as any).WebSocket as typeof WebSocket | undefined;
 let websocket: WebSocket | undefined;
 
-const afterLoaded = new Promise(resolve => {
+const afterLoaded = new Promise((resolve) => {
 	let eventTarget: EventTarget = window;
 	for (let i = 0; i < startupScripts.length; i++) {
 		const element = startupScripts[i];
@@ -342,7 +342,7 @@ if (bootstrapData.sessionID) {
 	afterLoaded.then(didExitCallback);
 }
 
-function produceMessage() : Partial<ClientMessage> {
+function produceMessage(): Partial<ClientMessage> {
 	const result: Partial<ClientMessage> = { messageID: outgoingMessageId++ };
 	if (queuedLocalEvents.length) {
 		result.events = queuedLocalEvents;
@@ -375,7 +375,7 @@ export function disconnect() {
 		// Save the state to history, so that if back button is hit the app magically snaps back to where we were
 		if (history.replaceState) {
 			const channels: number[] = [];
-			for (var i in pendingLocalChannels) {
+			for (const i in pendingLocalChannels) {
 				channels.push(((i as any) as number) | 0);
 			}
 			const replacementBootstrap: BootstrapData = { sessionID, clientID, events: allEvents, channels, x: window.scrollX || window.pageXOffset, y: window.scrollY || window.pageYOffset };
@@ -390,7 +390,7 @@ export function disconnect() {
 		}
 		// Abandon pending channels
 		ignore_nondeterminism:
-		for (let channelId in pendingChannels) {
+		for (const channelId in pendingChannels) {
 			if (Object.hasOwnProperty.call(pendingChannels, channelId)) {
 				pendingChannels[channelId]();
 			}
@@ -414,7 +414,7 @@ export function disconnect() {
 
 window.addEventListener("unload", disconnect, false);
 
-function dispatchEvent(event: Event) : Promise<void> | void {
+function dispatchEvent(event: Event): Promise<void> | void {
 	let channelId = event[0];
 	let channel: ((event: Event) => void) | undefined;
 	if (channelId < 0) {
@@ -456,14 +456,14 @@ function callChannelWithEvent(channel: ((event: Event) => void) | undefined, eve
 	}
 }
 
-function processEvents(events: (Event | boolean)[]) {
+function processEvents(events: Array<Event | boolean>) {
 	hadOpenServerChannel = pendingChannelCount != 0;
 	currentEvents = events;
 	return events.reduce((promise: Promise<any>, event: Event | boolean) => {
 		if (typeof event == "boolean") {
 			return promise.then(() => {
 				allEvents.push(event);
-				hadOpenServerChannel = event
+				hadOpenServerChannel = event;
 			});
 		} else {
 			return promise.then(escaping(dispatchEvent.bind(null, event))).then(defer);
@@ -475,7 +475,7 @@ function processEvents(events: (Event | boolean)[]) {
 }
 
 let serverDisconnectCount = 0;
-function processMessage(message: ServerMessage) : Promise<void> {
+function processMessage(message: ServerMessage): Promise<void> {
 	// Process messages in order
 	const messageId = message.messageID;
 	if (messageId > incomingMessageId) {
@@ -513,7 +513,7 @@ function cheesyEncodeURIComponent(text: string) {
 	return encodeURIComponent(text).replace(/%5B/g, "[").replace(/%5D/g, "]").replace(/%2C/g, ",").replace(/%20/g, "+");
 }
 
-function serializeMessageAsQueryString(message: Partial<ClientMessage>) : string {
+function serializeMessageAsQueryString(message: Partial<ClientMessage>): string {
 	let result = "sessionID=" + sessionID;
 	if (clientID) {
 		result += "&clientID=" + clientID;
@@ -545,7 +545,7 @@ function sendFormMessage(message: Partial<ClientMessage>) {
 				disconnect();
 			}
 		}
-	}
+	};
 	request.send(serializeMessageAsQueryString(message));
 }
 
@@ -578,12 +578,12 @@ function sendMessages(attemptWebSockets?: boolean) {
 				existingSocket.removeEventListener("open", existingSocketOpened, false);
 				existingSocket.removeEventListener("error", existingSocketErrored, false);
 				existingSocket.send(serializeMessageAsText(message));
-			}
+			};
 			const existingSocketErrored = () => {
 				existingSocket.removeEventListener("open", existingSocketOpened, false);
 				existingSocket.removeEventListener("error", existingSocketErrored, false);
 				sendFormMessage(message);
-			}
+			};
 			existingSocket.addEventListener("open", existingSocketOpened, false);
 			existingSocket.addEventListener("error", existingSocketErrored, false);
 		}
@@ -599,14 +599,14 @@ function sendMessages(attemptWebSockets?: boolean) {
 			const newSocketOpened = () => {
 				newSocket.removeEventListener("open", newSocketOpened, false);
 				newSocket.removeEventListener("error", newSocketErrored, false);
-			}
+			};
 			const newSocketErrored = () => {
 				// WebSocket failed, fallback using form POSTs
 				newSocketOpened();
 				WebSocketClass = undefined;
 				websocket = undefined;
 				sendFormMessage(message);
-			}
+			};
 			newSocket.addEventListener("open", newSocketOpened, false);
 			newSocket.addEventListener("error", newSocketErrored, false);
 			let lastWebSocketMessageId = -1;
@@ -630,7 +630,7 @@ function sendMessages(attemptWebSockets?: boolean) {
 	sendFormMessage(message);
 }
 
-function createRawServerChannel(callback: (event?: Event) => void) : Channel {
+function createRawServerChannel(callback: (event?: Event) => void): Channel {
 	if (!insideCallback) {
 		throw new Error("Unable to create server channel in this context!");
 	}
@@ -642,7 +642,7 @@ function createRawServerChannel(callback: (event?: Event) => void) : Channel {
 		logOrdering("server", "message", channelId);
 		willEnterCallback();
 		callback(event);
-	}
+	};
 	flush();
 	return {
 		channelId,
@@ -654,7 +654,7 @@ function createRawServerChannel(callback: (event?: Event) => void) : Channel {
 				delete pendingChannels[channelId];
 				channelId = -1;
 			}
-		}
+		},
 	};
 }
 
@@ -681,7 +681,7 @@ function sendEvent(event: Event, batched?: boolean, skipsFencing?: boolean) {
 	}
 }
 
-export function flush() : Promise<void> {
+export function flush(): Promise<void> {
 	if (dead) {
 		return Promise.reject(disconnectedError());
 	}
@@ -700,14 +700,14 @@ export const createServerPromise: <T extends JsonValue | void>(fallback?: () => 
 			reject(disconnectedError());
 		}
 	} else {
-		const channel = createRawServerChannel(event => {
+		const channel = createRawServerChannel((event) => {
 			channel.close();
 			if (event) {
 				parseValueEvent(self, event, resolve as (value: JsonValue) => void, reject);
 			} else if (fallback) {
 				try {
 					resolve(fallback());
-				} catch(e) {
+				} catch (e) {
 					reject(e);
 				}
 			} else {
@@ -726,7 +726,7 @@ export function createServerChannel<T extends Function>(callback: T, onAbort?: (
 	if (dead) {
 		throw disconnectedError();
 	}
-	const channel = createRawServerChannel(event => {
+	const channel = createRawServerChannel((event) => {
 		if (event) {
 			callback.apply(null, event.slice(1));
 		} else {
@@ -739,23 +739,22 @@ export function createServerChannel<T extends Function>(callback: T, onAbort?: (
 	return channel;
 }
 
-
-export function createClientPromise<T extends JsonValue | void>(ask: () => (Promise<T> | T), batched?: boolean) : Promise<T> {
+export function createClientPromise<T extends JsonValue | void>(ask: () => (Promise<T> | T), batched?: boolean): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
 		if (!insideCallback) {
 			return runAPIImplementation(ask);
 		}
-		let channelId = ++localChannelCounter;
+		const channelId = ++localChannelCounter;
 		logOrdering("client", "open", channelId);
 		pendingLocalChannels[channelId] = function(event: Event) {
 			if (event) {
 				delete pendingLocalChannels[channelId];
 				willEnterCallback();
-				parseValueEvent(self, event, value => {
+				parseValueEvent(self, event, (value) => {
 					logOrdering("client", "message", channelId);
 					logOrdering("client", "close", channelId);
 					resolve(value as T);
-				}, error => {
+				}, (error) => {
 					logOrdering("client", "message", channelId);
 					logOrdering("client", "close", channelId);
 					reject(error);
@@ -764,16 +763,16 @@ export function createClientPromise<T extends JsonValue | void>(ask: () => (Prom
 		};
 		if (shouldImplementLocalChannel(channelId)) {
 			// Resolve value
-			new Promise<T>(resolve => resolve(runAPIImplementation(ask))).then(
-				escaping((value: T) => sendEvent(eventForValue(channelId, value), batched))
+			new Promise<T>((resolve) => resolve(runAPIImplementation(ask))).then(
+				escaping((value: T) => sendEvent(eventForValue(channelId, value), batched)),
 			).catch(
-				escaping((error: any) => sendEvent(eventForException(channelId, error), batched))
+				escaping((error: any) => sendEvent(eventForException(channelId, error), batched)),
 			);
 		}
 	});
-};
+}
 
-export function createClientChannel<T extends Function, U = void>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, batched?: boolean, shouldFlushMicroTasks?: true) : Channel {
+export function createClientChannel<T extends Function, U = void>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, batched?: boolean, shouldFlushMicroTasks?: true): Channel {
 	if (!("call" in callback)) {
 		throw new TypeError("callback is not a function!");
 	}
@@ -804,7 +803,7 @@ export function createClientChannel<T extends Function, U = void>(callback: T, o
 						escape(e);
 					}
 				}
-			}
+			},
 		};
 	}
 	let channelId: number = ++localChannelCounter;
@@ -851,33 +850,33 @@ export function createClientChannel<T extends Function, U = void>(callback: T, o
 					escape(e);
 				}
 			}
-		}
+		},
 	};
 }
 
-export function coordinateValue<T extends JsonValue>(generator: () => T) : T {
+export function coordinateValue<T extends JsonValue>(generator: () => T): T {
 	if (!dispatchingEvent || dead) {
 		return generator();
 	}
 	let value: T;
-	let events = currentEvents;
+	const events = currentEvents;
 	if (hadOpenServerChannel) {
-		let channelId = ++remoteChannelCounter;
+		const channelId = ++remoteChannelCounter;
 		logOrdering("server", "open", channelId);
 		// Peek at incoming events to find the value generated on the server
 		if (events) {
-			for (var i = 0; i < events.length; i++) {
-				var event = events[i] as Event;
+			for (let i = 0; i < events.length; i++) {
+				const event = events[i] as Event;
 				if (event[0] == channelId) {
 					pendingChannels[channelId] = emptyFunction;
-					return parseValueEvent(self, event, value => {
+					return parseValueEvent(self, event, (value) => {
 						logOrdering("server", "message", channelId);
 						logOrdering("server", "close", channelId);
 						return value;
-					}, error => {
+					}, (error) => {
 						logOrdering("server", "message", channelId);
 						logOrdering("server", "close", channelId);
-						throw error
+						throw error;
 					}) as T;
 				}
 			}
@@ -887,21 +886,21 @@ export function coordinateValue<T extends JsonValue>(generator: () => T) : T {
 		logOrdering("server", "message", channelId);
 		logOrdering("server", "close", channelId);
 	} else {
-		let channelId = ++localChannelCounter;
+		const channelId = ++localChannelCounter;
 		logOrdering("client", "open", channelId);
 		if (events) {
-			for (var i = 0; i < events.length; i++) {
-				var event = events[i] as Event;
+			for (let i = 0; i < events.length; i++) {
+				const event = events[i] as Event;
 				if (event[0] == -channelId) {
 					pendingLocalChannels[channelId] = emptyFunction;
-					return parseValueEvent(self, event, value => {
+					return parseValueEvent(self, event, (value) => {
 						logOrdering("client", "message", channelId);
 						logOrdering("client", "close", channelId);
 						return value;
-					}, error => {
+					}, (error) => {
 						logOrdering("client", "message", channelId);
 						logOrdering("client", "close", channelId);
-						throw error
+						throw error;
 					}) as T;
 				}
 			}
@@ -913,15 +912,15 @@ export function coordinateValue<T extends JsonValue>(generator: () => T) : T {
 				logOrdering("client", "message", channelId);
 				logOrdering("client", "close", channelId);
 				sendEvent(event, true, true);
-			} catch(e) {
+			} catch (e) {
 				escape(e);
 			}
-		} catch(e) {
+		} catch (e) {
 			try {
 				logOrdering("client", "message", channelId);
 				logOrdering("client", "close", channelId);
 				sendEvent(eventForException(channelId, e), true, true);
-			} catch(e) {
+			} catch (e) {
 				escape(e);
 			}
 			throw e;
@@ -930,8 +929,8 @@ export function coordinateValue<T extends JsonValue>(generator: () => T) : T {
 	return roundTrip(value);
 }
 
-export function shareSession() : Promise<string> {
-	return createServerPromise<string>().then(value => {
+export function shareSession(): Promise<string> {
+	return createServerPromise<string>().then((value) => {
 		// Dummy channel that stays open
 		createServerChannel(emptyFunction);
 		return value;
@@ -945,7 +944,7 @@ function bundledPromiseImplementation() {
 		Pending = 0,
 		Fulfilled = 1,
 		Rejected = 2,
-	};
+	}
 
 	function settlePromise<T>(this: Promise<T>, state: PromiseState, value: any) {
 		if (!this.__state) {
@@ -975,9 +974,9 @@ function bundledPromiseImplementation() {
 	}
 
 	class Promise <T> {
-		__state: PromiseState;
-		__value: any;
-		__observers?: Task[];
+		public __state: PromiseState;
+		public __value: any;
+		public __observers?: Task[];
 		constructor(executor?: (resolve: (value?: T | PromiseLike<T>) => void, reject: (reason?: any) => void) => void) {
 			if (executor) {
 				const reject = settlePromise.bind(this, PromiseState.Rejected);
@@ -989,7 +988,7 @@ function bundledPromiseImplementation() {
 				}
 			}
 		}
-		then<TResult1 = T, TResult2 = never>(onFulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2> {
+		public then<TResult1 = T, TResult2 = never>(onFulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2> {
 			return new Promise<TResult1 | TResult2>((resolve, reject) => {
 				const completed = () => {
 					try {
@@ -1004,7 +1003,7 @@ function bundledPromiseImplementation() {
 					} catch (e) {
 						reject(e);
 					}
-				}
+				};
 				if (this.__state) {
 					submitTask(microTaskQueue, completed);
 				} else {
@@ -1012,12 +1011,12 @@ function bundledPromiseImplementation() {
 				}
 			});
 		}
-		catch<TResult = never>(onRejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult> {
+		public catch<TResult = never>(onRejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult> {
 			return this.then(undefined, onRejected);
 		}
-		static resolve<T>(value: Promise<T> | T) : Promise<T>;
-	    static resolve(): Promise<void>;
-		static resolve<T>(value?: Promise<T> | T) : Promise<T> {
+		public static resolve<T>(value: Promise<T> | T): Promise<T>;
+	    public static resolve(): Promise<void>;
+		public static resolve<T>(value?: Promise<T> | T): Promise<T> {
 			if (isPromiseLike(value)) {
 				return new Promise<T>((resolve, reject) => value.then(resolve, reject));
 			}
@@ -1026,13 +1025,13 @@ function bundledPromiseImplementation() {
 			result.__state = PromiseState.Fulfilled;
 			return result;
 		}
-		static reject<T = never>(reason: any) : Promise<T> {
+		public static reject<T = never>(reason: any): Promise<T> {
 			const result = new Promise<T>();
 			result.__value = reason;
 			result.__state = PromiseState.Rejected;
 			return result;
 		}
-		static race<T>(values: ReadonlyArray<Promise<T> | T>) : Promise<T> {
+		public static race<T>(values: ReadonlyArray<Promise<T> | T>): Promise<T> {
 			for (let i = 0; i < values.length; i++) {
 				const value = values[i];
 				if (!isPromiseLike(value)) {
@@ -1053,14 +1052,14 @@ function bundledPromiseImplementation() {
 				}
 			});
 		}
-		static all<T>(values: ReadonlyArray<Promise<T> | T>) : Promise<T[]> {
+		public static all<T>(values: ReadonlyArray<Promise<T> | T>): Promise<T[]> {
 			let remaining = values.length;
 			const result = new Array(remaining);
 			return new Promise<T[]>((resolve, reject) => {
 				for (let i = 0; i < values.length; i++) {
 					const value = values[i];
 					if (isPromiseLike(value)) {
-						value.then(value => {
+						value.then((value) => {
 							result[i] = value;
 							if ((--remaining) == 0) {
 								resolve(result);
@@ -1075,7 +1074,7 @@ function bundledPromiseImplementation() {
 				}
 			});
 		}
-	};
+	}
 
 	return Promise;
 }
@@ -1088,7 +1087,7 @@ interceptGlobals(window, () => insideCallback && !dead, coordinateValue, <T exte
 			if (onClose) {
 				onClose(state);
 			}
-		}
+		};
 	});
 	return {
 		close: () => {
@@ -1097,8 +1096,8 @@ interceptGlobals(window, () => insideCallback && !dead, coordinateValue, <T exte
 			} else {
 				channel.close();
 			}
-		}
-	}
+		},
+	};
 });
 
 (window as any)._mobius = true;
