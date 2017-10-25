@@ -28,7 +28,7 @@ dist/common/:
 node_modules/preact/dist/preact.esm.js: $(call rwildcard, node_modules/preact/src/, *.js)
 	# Global tools that preact requires be available
 	npm install -g npm-run-all rollup babel-cli jscodeshift gzip-size-cli rimraf
-	pushd node_modules/preact && npm version --allow-same-version 0.0.1 && npm install
+	cd node_modules/preact && npm version --allow-same-version 0.0.1 && npm install
 
 dist/common/preact.js: node_modules/preact/dist/preact.esm.js dist/common/
 	cp $< $@
