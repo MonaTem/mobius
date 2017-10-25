@@ -7,7 +7,7 @@ async function populateCachedCookies(): {[key: string]: string} {
 		return cachedCookies;
 	}
 	const newCookies = await (require("allCookies") as () => Promise<string>)();
-	return cachedCookies || newCookies;
+	return cachedCookies || (cachedCookies = newCookies);
 }
 
 export function set(key: string, value: string) {

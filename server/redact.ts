@@ -1,6 +1,7 @@
 const symbol = Symbol();
 
 export class Redacted<T> {
+	/* tslint:disable variable-name */
 	public __suppress_declared_never_used_error?: T;
 	constructor(value: T) {
 		Object.defineProperty(this, symbol, { value });

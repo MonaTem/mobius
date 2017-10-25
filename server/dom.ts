@@ -26,6 +26,7 @@ preactOptions.nodeRemoved = (node: PreactNode) => {
 };
 
 function ignoreEvent() {
+	/* tslint:disable no-empty */
 }
 
 preactOptions.listenerUpdated = (node: PreactNode, name: string) => {

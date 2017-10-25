@@ -22,6 +22,7 @@ export function fromClient(url: string, options?: FetchOptions): Promise<FetchRe
 						return resolve(request);
 					}
 				} catch (e) {
+					/* tslint:disable no-empty */
 				}
 				reject(new TypeError("Request not sent!"));
 			}

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "crypto";
 import { cpus } from "os";
-import * as path from "path";
+import { resolve as resolvePath } from "path";
 import * as util from "util";
 const Module = require("module");
 
@@ -9,7 +9,7 @@ import * as bodyParser from "body-parser";
 import * as express from "express";
 
 import { diff_match_patch } from "diff-match-patch";
-const diff_match_patch_node = new (require("diff-match-patch-node") as typeof diff_match_patch);
+const diffMatchPatchNode = new (require("diff-match-patch-node") as typeof diff_match_patch)();
 
 import { Client } from "./host/client";
 import clientCompile from "./host/client-compiler";
@@ -72,14 +72,14 @@ interface Config {
 }
 
 function defaultSessionPath(sourcePath: string) {
-	return path.join(sourcePath, ".sessions");
+	return resolvePath(sourcePath, ".sessions");
 }
 
 export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0 }: Config) {
 	let serverJSPath: string;
-	const packagePath = path.resolve(sourcePath, "package.json");
+	const packagePath = resolvePath(sourcePath, "package.json");
 	if (await exists(packagePath)) {
-		serverJSPath = path.resolve(sourcePath, (await readJSON(packagePath)).main);
+		serverJSPath = resolvePath(sourcePath, (await readJSON(packagePath)).main);
 	} else {
 		const foundPath = Module._findPath("app", [sourcePath]);
 		if (!foundPath) {
@@ -90,13 +90,14 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	const htmlContents = readFile(packageRelative("public/index.html"));
 
-	const gracefulPath = path.join(sessionsPath, ".graceful");
+	const gracefulPath = resolvePath(sessionsPath, ".graceful");
 
 	// Check if we can reuse existing sessions
 	let lastGraceful = 0;
 	try {
 		lastGraceful = (await stat(gracefulPath)).mtimeMs;
 	} catch (e) {
+		/* tslint:disable no-empty */
 	}
 	if (lastGraceful < (await stat(serverJSPath)).mtimeMs) {
 		await rimraf(sessionsPath);
@@ -105,8 +106,8 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 		await unlink(gracefulPath);
 	}
 
-	const serverModulePaths = [packageRelative("server"), path.join(sourcePath, "server")];
-	const modulePaths = serverModulePaths.concat([packageRelative("common"), packageRelative("dist/common"), path.join(sourcePath, "common")]);
+	const serverModulePaths = [packageRelative("server"), resolvePath(sourcePath, "server")];
+	const modulePaths = serverModulePaths.concat([packageRelative("common"), packageRelative("dist/common"), resolvePath(sourcePath, "common")]);
 
 	// Start host
 	console.log("Rendering initial page...");
@@ -229,7 +230,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						let responseContent = html;
 						if (isJavaScript) {
 							if (client.lastSentFormHTML) {
-								const diff = diff_match_patch_node.patch_toText(diff_match_patch_node.patch_make(client.lastSentFormHTML, html));
+								const diff = diffMatchPatchNode.patch_toText(diffMatchPatchNode.patch_make(client.lastSentFormHTML, html));
 								if (diff.length < html.length && diff.length) {
 									responseContent = diff;
 								}
@@ -468,14 +469,15 @@ export default function main() {
 			process.exit(0);
 		}
 
-		const basePath = path.resolve(cwd, args.base as string);
+		const basePath = resolvePath(cwd, args.base as string);
 
 		let secrets = {};
 		try {
-			secrets = await readJSON(path.join(basePath, "secrets.json"));
+			secrets = await readJSON(resolvePath(basePath, "secrets.json"));
 		} catch (e) {
+			/* tslint:disable no-empty */
 		}
-		const publicPath = path.join(basePath, "public");
+		const publicPath = resolvePath(basePath, "public");
 		const mobius = await prepare({
 			sourcePath: basePath,
 			publicPath,

@@ -1,4 +1,5 @@
 export class Redacted<T> {
+	/* tslint:disable variable-name */
 	public __suppress_declared_never_used_error?: T;
 }
 

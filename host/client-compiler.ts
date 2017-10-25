@@ -72,15 +72,15 @@ function stripRedact() {
 							const methodRedactions = moduleRedactions[binding.export];
 							if (methodRedactions) {
 								const mappedArguments = path.node.arguments.map((arg, index) => {
-									const isPure = isPureOrRedacted(path.get(`arguments.${index}`));
+									const argumentIsPure = isPureOrRedacted(path.get(`arguments.${index}`));
 									switch (methodRedactions[index]) {
 										case true:
-											if (isPure) {
+											if (argumentIsPure) {
 												return types.identifier("undefined");
 											}
 											throw path.buildCodeFrameError(`Potential side-effects in argument ${index + 1} to ${binding.export} from ${binding.module} in ${path.getSource()}, where only pure expression was expected!`);
 										case false:
-											if (isPure) {
+											if (argumentIsPure) {
 												return types.identifier("undefined");
 											}
 											return arg;

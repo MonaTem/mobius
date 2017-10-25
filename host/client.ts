@@ -178,7 +178,7 @@ export class Client {
 	}
 	public becameActive() {
 		if (!this.clientIsActive) {
-			this.clientIsActive;
+			this.clientIsActive = true;
 			this.session.becameActive();
 		}
 	}

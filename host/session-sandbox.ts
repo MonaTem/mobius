@@ -14,7 +14,7 @@ import { JSDOM } from "jsdom";
 import patchJSDOM from "./jsdom-patch";
 
 import { createWriteStream } from "fs";
-import * as path from "path";
+import { join as pathJoin } from "path";
 
 export interface HostSandboxOptions {
 	htmlSource: string;
@@ -29,7 +29,7 @@ export interface HostSandboxOptions {
 }
 
 export function archivePathForSessionId(sessionsPath: string, sessionID: string) {
-	return path.join(sessionsPath, encodeURIComponent(sessionID) + ".json");
+	return pathJoin(sessionsPath, encodeURIComponent(sessionID) + ".json");
 }
 
 export class HostSandbox {
@@ -102,14 +102,16 @@ const enum ArchiveStatus {
 }
 
 // Lazy version of loadModule so that the sandbox module is loaded on first use
-let loadModuleLazy: typeof loadModule = (path, module, publicPath, globalProperties, require_) => {
+let loadModuleLazy: typeof loadModule = (modulePath, module, publicPath, globalProperties, requireFunction) => {
 	loadModuleLazy = require("./server-compiler").loadModule as typeof loadModule;
-	return loadModuleLazy(path, module, publicPath, globalProperties, require_);
+	return loadModuleLazy(modulePath, module, publicPath, globalProperties, requireFunction);
 };
 
 // Hack so that Module._findPath will find TypeScript files
 const Module = require("module");
-Module._extensions[".ts"] = Module._extensions[".tsx"] = function() {};
+Module._extensions[".ts"] = Module._extensions[".tsx"] = function() {
+	/* tslint:disable no-empty */
+};
 
 const resolvedPromise: Promise<void> = Promise.resolve();
 
@@ -127,9 +129,9 @@ export interface SessionSandbox {
 	becameActive(): void | Promise<void>;
 }
 
-export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandboxClient> implements SessionSandbox {
+export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandboxClient> implements SessionSandbox {
 	public host: HostSandbox;
-	public client: T;
+	public client: C;
 	public sessionID: string;
 	public dead: boolean = false;
 	// Script context
@@ -164,7 +166,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 	// Session sharing
 	public sharingEnabled?: true;
 	public hasActiveClient?: true;
-	constructor(host: HostSandbox, client: T, sessionID: string) {
+	constructor(host: HostSandbox, client: C, sessionID: string) {
 		this.host = host;
 		this.client = client;
 		this.sessionID = sessionID;
@@ -372,7 +374,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 				return;
 			}
 			this.dispatchingAPIImplementation++;
-			const result = new Promise<T>((resolve) => resolve(ask()));
+			const result = new Promise<T>((innerResolve) => innerResolve(ask()));
 			this.dispatchingAPIImplementation--;
 			result.then(async (value) => {
 				const event = eventForValue(channelId, value);
@@ -573,7 +575,7 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 			if (!this.hasActiveClient && !this.bootstrappingPromise) {
 				this.enterLocalChannel(true);
 				this.dispatchingAPIImplementation++;
-				const promise = fallback ? new Promise<T>((resolve) => resolve(fallback())) : Promise.reject(new Error("Browser does not support client-side rendering!"));
+				const promise = fallback ? new Promise<T>((innerResolve) => innerResolve(fallback())) : Promise.reject(new Error("Browser does not support client-side rendering!"));
 				this.dispatchingAPIImplementation--;
 				promise.then(async (value) => {
 					if (this.currentEvents) {
@@ -628,10 +630,9 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 	}
 
 	public coordinateValue = <T extends JsonValue>(generator: () => T) => {
-		if (!this.insideCallback) {
+		if (!this.insideCallback || this.dead) {
 			return generator();
 		}
-		let value: T;
 		if (!this.hadOpenServerChannel) {
 			const channelId = ++this.remoteChannelCounter;
 			logOrdering("client", "open", channelId, this.sessionID);
@@ -643,11 +644,13 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 				return parseValueEvent(global, event, (value) => value, (error) => {
 					throw error;
 				}) as T;
+			} else {
+				console.log("Expected a value from the client, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
+				const value = generator();
+				logOrdering("client", "message", channelId, this.sessionID);
+				logOrdering("client", "close", channelId, this.sessionID);
+				return roundTrip(value);
 			}
-			console.log("Expected a value from the client, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
-			value = generator();
-			logOrdering("client", "message", channelId, this.sessionID);
-			logOrdering("client", "close", channelId, this.sessionID);
 		} else {
 			const channelId = ++this.localChannelCounter;
 			logOrdering("server", "open", channelId, this.sessionID);
@@ -661,15 +664,16 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 				}) as T;
 			}
 			try {
-				value = generator();
-				const event = eventForValue(channelId, value);
+				const value = generator();
+				const newEvent = eventForValue(channelId, value);
 				try {
 					logOrdering("server", "message", channelId, this.sessionID);
 					logOrdering("server", "close", channelId, this.sessionID);
-					this.sendEvent(event);
+					this.sendEvent(newEvent);
 				} catch (e) {
 					escape(e);
 				}
+				return roundTrip(value);
 			} catch (e) {
 				try {
 					logOrdering("server", "message", channelId, this.sessionID);
@@ -681,7 +685,6 @@ export class LocalSessionSandbox<T extends SessionSandboxClient = SessionSandbox
 				throw e;
 			}
 		}
-		return roundTrip(value) as T;
 	}
 
 	public shareSession = async () => {

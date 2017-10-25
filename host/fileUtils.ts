@@ -1,8 +1,8 @@
 import * as fs from "fs";
-import * as path from "path";
+import { join as pathJoin } from "path";
 import * as util from "util";
 
-export const packageRelative = (relative: string) => path.join(__dirname, "../..", relative);
+export const packageRelative = (relative: string) => pathJoin(__dirname, "../..", relative);
 
 export const readFile = util.promisify(fs.readFile);
 export async function readJSON(path: string) {

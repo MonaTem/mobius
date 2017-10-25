@@ -64,10 +64,10 @@ const microTaskQueue: Task[] = [];
 const taskQueue: Task[] = [];
 
 const { scheduleFlushTasks, setImmediate } = (() => {
-	let setImmediate: (callback: () => void) => void = window.setImmediate;
-	let scheduleFlushTasks: (() => void) | undefined;
+	let newSetImmediate: (callback: () => void) => void = window.setImmediate;
+	let newScheduleFlushTasks: (() => void) | undefined;
 	// Attempt postMessage, but only if it's asynchronous
-	if (!setImmediate && window.postMessage) {
+	if (!newSetImmediate && window.postMessage) {
 		let isAsynchronous = true;
 		const synchronousTest = () => {
 			isAsynchronous = false;
@@ -77,14 +77,14 @@ const { scheduleFlushTasks, setImmediate } = (() => {
 		window.removeEventListener("message", synchronousTest, false);
 		if (isAsynchronous) {
 			window.addEventListener("message", flushTasks, false);
-			scheduleFlushTasks = () => {
+			newScheduleFlushTasks = () => {
 				window.postMessage("__mobius_flush", "*");
 			};
 		}
 	}
 	// Try a <script> tag's onreadystatechange
-	if (!setImmediate && "onreadystatechange" in document.createElement("script")) {
-		setImmediate = (callback) => {
+	if (!newSetImmediate && "onreadystatechange" in document.createElement("script")) {
+		newSetImmediate = (callback) => {
 			const script = document.createElement("script");
 			(script as any).onreadystatechange = () => {
 				document.head.removeChild(script);
@@ -94,19 +94,19 @@ const { scheduleFlushTasks, setImmediate } = (() => {
 		};
 	}
 	// Try requestAnimationFrame
-	if (!setImmediate) {
+	if (!newSetImmediate) {
 		const requestAnimationFrame = window.requestAnimationFrame || (window as any).webkitRequestRequestAnimationFrame || (window as any).mozRequestRequestAnimationFrame;
 		if (requestAnimationFrame) {
-			setImmediate = requestAnimationFrame;
+			newSetImmediate = requestAnimationFrame;
 		}
 	}
 	// Fallback to setTimeout(..., 0)
-	if (!setImmediate) {
-		setImmediate = (callback) => {
+	if (!newSetImmediate) {
+		newSetImmediate = (callback) => {
 			setTimeout.call(window, callback, 0);
 		};
 	}
-	return { scheduleFlushTasks: scheduleFlushTasks || setImmediate.bind(window, flushTasks), setImmediate };
+	return { scheduleFlushTasks: newScheduleFlushTasks || newSetImmediate.bind(window, flushTasks), setImmediate: newSetImmediate };
 })();
 
 function flushMicroTasks() {
@@ -172,6 +172,7 @@ function escaping(handler: (value?: any) => any | Promise<any>): (value?: any) =
 }
 
 function emptyFunction() {
+	/* tslint:disable no-empty */
 }
 
 const slice = Array.prototype.slice;
@@ -376,7 +377,9 @@ export function disconnect() {
 		if (history.replaceState) {
 			const channels: number[] = [];
 			for (const i in pendingLocalChannels) {
-				channels.push(((i as any) as number) | 0);
+				if (Object.hasOwnProperty.call(pendingLocalChannels, i)) {
+					channels.push(((i as any) as number) | 0);
+				}
 			}
 			const replacementBootstrap: BootstrapData = { sessionID, clientID, events: allEvents, channels, x: window.scrollX || window.pageXOffset, y: window.scrollY || window.pageYOffset };
 			history.replaceState(replacementBootstrap, document.title, location.href);
@@ -587,47 +590,47 @@ function sendMessages(attemptWebSockets?: boolean) {
 			existingSocket.addEventListener("open", existingSocketOpened, false);
 			existingSocket.addEventListener("error", existingSocketErrored, false);
 		}
-		return;
-	}
-	// Message will be sent in query string of new connection
-	const message = produceMessage();
-	lastWebSocketMessageId = outgoingMessageId;
-	if (attemptWebSockets && WebSocketClass) {
-		try {
-			const newSocket = new WebSocketClass(socketURL + serializeMessageAsQueryString(message));
-			// Attempt to open a WebSocket for channels, but not heartbeats
-			const newSocketOpened = () => {
-				newSocket.removeEventListener("open", newSocketOpened, false);
-				newSocket.removeEventListener("error", newSocketErrored, false);
-			};
-			const newSocketErrored = () => {
-				// WebSocket failed, fallback using form POSTs
-				newSocketOpened();
-				WebSocketClass = undefined;
-				websocket = undefined;
-				sendFormMessage(message);
-			};
-			newSocket.addEventListener("open", newSocketOpened, false);
-			newSocket.addEventListener("error", newSocketErrored, false);
-			let lastWebSocketMessageId = -1;
-			newSocket.addEventListener("message", (event: any) => {
-				const message = deserializeMessageFromText<ServerMessage>(event.data, lastWebSocketMessageId + 1);
-				lastWebSocketMessageId = message.messageID;
-				if (message.close) {
-					// Disconnect with orderly shutdown from server
+	} else {
+		// Message will be sent in query string of new connection
+		const message = produceMessage();
+		lastWebSocketMessageId = outgoingMessageId;
+		if (attemptWebSockets && WebSocketClass) {
+			try {
+				const newSocket = new WebSocketClass(socketURL + serializeMessageAsQueryString(message));
+				// Attempt to open a WebSocket for channels, but not heartbeats
+				const newSocketOpened = () => {
+					newSocket.removeEventListener("open", newSocketOpened, false);
+					newSocket.removeEventListener("error", newSocketErrored, false);
+				};
+				const newSocketErrored = () => {
+					// WebSocket failed, fallback using form POSTs
+					newSocketOpened();
+					WebSocketClass = undefined;
 					websocket = undefined;
-					newSocket.close();
-				}
-				processMessage(message);
-			}, false);
-			websocket = newSocket;
-			return;
-		} catch (e) {
-			WebSocketClass = undefined;
+					sendFormMessage(message);
+				};
+				newSocket.addEventListener("open", newSocketOpened, false);
+				newSocket.addEventListener("error", newSocketErrored, false);
+				let lastIncomingMessageId = -1;
+				newSocket.addEventListener("message", (event: any) => {
+					const incomingSocketMessage = deserializeMessageFromText<ServerMessage>(event.data, lastIncomingMessageId + 1);
+					lastIncomingMessageId = incomingSocketMessage.messageID;
+					if (incomingSocketMessage.close) {
+						// Disconnect with orderly shutdown from server
+						websocket = undefined;
+						newSocket.close();
+					}
+					processMessage(incomingSocketMessage);
+				}, false);
+				websocket = newSocket;
+				return;
+			} catch (e) {
+				WebSocketClass = undefined;
+			}
 		}
+		// WebSockets failed fast or were unavailable
+		sendFormMessage(message);
 	}
-	// WebSockets failed fast or were unavailable
-	sendFormMessage(message);
 }
 
 function createRawServerChannel(callback: (event?: Event) => void): Channel {
@@ -763,7 +766,7 @@ export function createClientPromise<T extends JsonValue | void>(ask: () => (Prom
 		};
 		if (shouldImplementLocalChannel(channelId)) {
 			// Resolve value
-			new Promise<T>((resolve) => resolve(runAPIImplementation(ask))).then(
+			new Promise<T>((innerResolve) => innerResolve(runAPIImplementation(ask))).then(
 				escaping((value: T) => sendEvent(eventForValue(channelId, value), batched)),
 			).catch(
 				escaping((error: any) => sendEvent(eventForException(channelId, error), batched)),
@@ -858,7 +861,6 @@ export function coordinateValue<T extends JsonValue>(generator: () => T): T {
 	if (!dispatchingEvent || dead) {
 		return generator();
 	}
-	let value: T;
 	const events = currentEvents;
 	if (hadOpenServerChannel) {
 		const channelId = ++remoteChannelCounter;
@@ -881,10 +883,13 @@ export function coordinateValue<T extends JsonValue>(generator: () => T): T {
 				}
 			}
 		}
-		console.log("Expected a value from the server, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
-		value = generator();
-		logOrdering("server", "message", channelId);
-		logOrdering("server", "close", channelId);
+		{
+			console.log("Expected a value from the server, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
+			const value = generator();
+			logOrdering("server", "message", channelId);
+			logOrdering("server", "close", channelId);
+			return roundTrip(value);
+		}
 	} else {
 		const channelId = ++localChannelCounter;
 		logOrdering("client", "open", channelId);
@@ -906,7 +911,7 @@ export function coordinateValue<T extends JsonValue>(generator: () => T): T {
 			}
 		}
 		try {
-			value = generator();
+			const value = generator();
 			const event = eventForValue(channelId, value);
 			try {
 				logOrdering("client", "message", channelId);
@@ -915,6 +920,7 @@ export function coordinateValue<T extends JsonValue>(generator: () => T): T {
 			} catch (e) {
 				escape(e);
 			}
+			return roundTrip(value);
 		} catch (e) {
 			try {
 				logOrdering("client", "message", channelId);
@@ -926,7 +932,6 @@ export function coordinateValue<T extends JsonValue>(generator: () => T): T {
 			throw e;
 		}
 	}
-	return roundTrip(value);
 }
 
 export function shareSession(): Promise<string> {
@@ -974,8 +979,11 @@ function bundledPromiseImplementation() {
 	}
 
 	class Promise <T> {
+		/* tslint:disable variable-name */
 		public __state: PromiseState;
+		/* tslint:disable variable-name */
 		public __value: any;
+		/* tslint:disable variable-name */
 		public __observers?: Task[];
 		constructor(executor?: (resolve: (value?: T | PromiseLike<T>) => void, reject: (reason?: any) => void) => void) {
 			if (executor) {
@@ -1015,7 +1023,7 @@ function bundledPromiseImplementation() {
 			return this.then(undefined, onRejected);
 		}
 		public static resolve<T>(value: Promise<T> | T): Promise<T>;
-	    public static resolve(): Promise<void>;
+		public static resolve(): Promise<void>;
 		public static resolve<T>(value?: Promise<T> | T): Promise<T> {
 			if (isPromiseLike(value)) {
 				return new Promise<T>((resolve, reject) => value.then(resolve, reject));
@@ -1059,8 +1067,8 @@ function bundledPromiseImplementation() {
 				for (let i = 0; i < values.length; i++) {
 					const value = values[i];
 					if (isPromiseLike(value)) {
-						value.then((value) => {
-							result[i] = value;
+						value.then((resolvedValue) => {
+							result[i] = resolvedValue;
 							if ((--remaining) == 0) {
 								resolve(result);
 							}
