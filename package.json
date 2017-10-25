@@ -68,6 +68,7 @@
     "@types/uuid": "^3.4.3",
     "diff-match-patch": "^1.0.0",
     "preact": "https://github.com/rpetrich/preact/tarball/5537021206ffbb6e1fe9c84ed0569f0d44ce80a0",
-    "set-dom": "^7.4.5"
+    "set-dom": "^7.4.5",
+    "tslint": "^5.8.0"
   }
 }

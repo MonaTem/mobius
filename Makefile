@@ -15,7 +15,7 @@ cleaner: clean
 	rm -rf node_modules
 
 lint:
-	tslint -c tslint.json 'host/**/*.ts' 'common/**/*.ts' 'server/**/*.ts' 'client/**/*.ts' mobius.ts --fix
+	node_modules/.bin/tslint -c tslint.json 'host/**/*.ts' 'common/**/*.ts' 'server/**/*.ts' 'client/**/*.ts' mobius.ts --fix
 
 test: lint
 	# TODO: Add actual tests
