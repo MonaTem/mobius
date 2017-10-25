@@ -28,18 +28,13 @@ function delay(amount: number) {
 	return new Promise<void>(resolve => setTimeout(resolve, amount));
 }
 
-const simulatedLatency: number = 0;
-
 function noCache(response: express.Response) {
 	response.header("Cache-Control", "private, no-cache, no-store, must-revalidate");
 	response.header("Expires", new Date(0).toUTCString());
 	response.header("Pragma", "no-cache");
 }
 
-async function topFrameHTML(response: express.Response, html: string) {
-	if (simulatedLatency) {
-		await delay(simulatedLatency);
-	}
+function topFrameHTML(response: express.Response, html: string) {
 	// Return HTML
 	noCache(response);
 	response.set("Content-Security-Policy", "frame-ancestors 'none'");
@@ -73,13 +68,14 @@ interface Config {
 	sourceMaps?: boolean;
 	hostname?: string;
 	workers?: number;
+	simulatedLatency?: number;
 }
 
 function defaultSessionPath(sourcePath: string) {
 	return path.join(sourcePath, ".sessions");
 }
 
-export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname }: Config) {
+export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0 }: Config) {
 	let serverJSPath: string;
 	const packagePath = path.resolve(sourcePath, "package.json");
 	if (await exists(packagePath)) {
@@ -118,7 +114,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	// Read fallback script
 	const fallbackPath = packageRelative("dist/fallback.js");
-	const fallbackContents = readFile(fallbackPath);
+	const fallbackContentsAsync = readFile(fallbackPath);
 
 	// Start initial page render
 	const initialPageSession = host.constructSession("initial-render");
@@ -133,7 +129,8 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	const clientHash = createHash("sha256").update(clientScriptBuffer).digest("base64");
 	const clientURL = "/client-" + clientHash.replace(/\//g, "_").replace(/\+/g, "-").replace(/=/g, "").substring(0, 16) + ".js";
 	const clientIntegrity = "sha256-" + clientHash;
-	const fallbackIntegrity = "sha256-" + createHash("sha256").update(await fallbackContents).digest("base64");
+	const fallbackContents = await fallbackContentsAsync;
+	const fallbackIntegrity = "sha256-" + createHash("sha256").update(fallbackContents).digest("base64");
 
 	// Finish prerender of initial page
 	await prerender;
@@ -160,7 +157,10 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					} else {
 						// Not prerendering or joining a session, just return the original source with the noscript added
 						if (request.query["js"] !== "no") {
-							return await topFrameHTML(response, defaultRenderedHTML);
+							if (simulatedLatency) {
+								await delay(simulatedLatency);
+							}
+							return topFrameHTML(response, defaultRenderedHTML);
 						}
 						// New session
 						client = await host.newClient(request);
@@ -174,6 +174,9 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					const html = await session.render(PageRenderMode.IncludeForm, client, clientURL, clientIntegrity, fallbackIntegrity, undefined, true);
 					client.incomingMessageId++;
 					client.applyCookies(response);
+					if (simulatedLatency) {
+						await delay(simulatedLatency);
+					}
 					return topFrameHTML(response, html);
 				} catch (e) {
 					if (simulatedLatency) {
@@ -337,12 +340,20 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				}
 			});
 
-			server.use("/fallback.js", (require("express") as typeof express).static(fallbackPath));
+			server.get("/fallback.js", async (request: express.Request, response: express.Response) => {
+				if (simulatedLatency) {
+					await delay(simulatedLatency);
+				}
+				response.set("Content-Type", "text/javascript; charset=utf-8");
+				response.set("Cache-Control", "no-transform");
+				response.send(fallbackContents);
+			});
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
 				if (simulatedLatency) {
 					await delay(simulatedLatency);
 				}
 				response.set("Content-Type", "text/javascript; charset=utf-8");
+				response.set("Cache-Control", "no-transform");
 				if (sourceMaps) {
 					response.set("SourceMap", "/client.js.map");
 				}
@@ -353,7 +364,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					await delay(simulatedLatency);
 				}
 				response.set("Content-Type", "text/javascript; charset=utf-8");
-				response.set("Cache-Control", "max-age=31536000");
+				response.set("Cache-Control", "max-age=31536000, no-transform");
 				response.set("Expires", "Sun, 17 Jan 2038 19:14:07 GMT");
 				if (sourceMaps) {
 					response.set("SourceMap", "/client.js.map");
@@ -363,6 +374,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 			if (sourceMaps) {
 				server.get("/client.js.map", async (request: express.Request, response: express.Response) => {
 					response.set("Content-Type", "application/json; charset=utf-8");
+					response.set("Cache-Control", "no-transform");
 					response.send(clientScript.map);
 				});
 			}
@@ -385,6 +397,7 @@ export default function main() {
 			{ name: "source-map", type: Boolean, defaultValue: false },
 			{ name: "workers", type: Number, defaultValue: cpuCount },
 			{ name: "hostname", type: String },
+			{ name: "simulated-latency", type: Number, defaultValue: 0 },
 			{ name: "init", type: Boolean, defaultValue: false },
 			{ name: "help", type: Boolean }
 		]);
@@ -470,7 +483,8 @@ export default function main() {
 			minify: args.minify as boolean,
 			sourceMaps: args["source-map"] as boolean,
 			hostname: args.hostname as string | undefined,
-			workers: args.workers as number
+			workers: args.workers as number,
+			simulatedLatency: args["simulated-latency"] as number,
 		});
 
 		const expressAsync = require("express") as typeof express;
