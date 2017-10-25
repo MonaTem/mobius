@@ -1,4 +1,4 @@
-.PHONY: all run clean cleaner host fallback preact
+.PHONY: all run clean cleaner host fallback preact lint
 
 rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
 scripts=$(call rwildcard, $1/, *.tsx) $(call rwildcard, $1/, *.ts)
@@ -6,13 +6,16 @@ scripts=$(call rwildcard, $1/, *.tsx) $(call rwildcard, $1/, *.ts)
 all: host fallback preact
 
 run: all
-	node --trace-warnings --inspect dist/mobius.js --base ../mobius-sample --source-map
+	node --trace-warnings --inspect dist/mobius.js --base ../mobius-sample --source-map --workers 2
 
 clean:
 	rm -rf dist/ mobius-*.tgz
 
 cleaner: clean
 	rm -rf node_modules
+
+lint:
+	tslint -c tslint.json 'host/**/*.ts' 'common/**/*.ts' 'server/**/*.ts' 'client/**/*.ts' mobius.ts --fix
 
 
 preact: dist/common/preact.js dist/common/preact.d.ts

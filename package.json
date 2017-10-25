@@ -14,7 +14,8 @@
     "build": "make -j4",
     "clean": "make clean",
     "start": "make run -j4",
-    "prepare": "npm run-script build"
+    "prepare": "npm run-script build",
+    "lint": "make lint -j4"
   },
   "author": "Ryan Petrich <rpetrich@gmail.com>",
   "license": "MIT",
