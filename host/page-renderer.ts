@@ -1,6 +1,6 @@
 import { BootstrapData } from "_internal";
+import { parse as parseCSS, Rule, stringify as stringifyCSS } from "css";
 import { JSDOM } from "jsdom";
-import { parse as parseCSS, stringify as stringifyCSS, Rule } from "css";
 import { resolve as resolvePath } from "path";
 import { readFile } from "./fileUtils";
 import memoize from "./memoize";
@@ -189,7 +189,7 @@ export class PageRenderer {
 			bodyParent.replaceChild(this.body, realBody);
 			try {
 				if (cssRules) {
-					const newRules = cssRules.filter((rule: Rule) => rule.type === "rule" && rule.selectors && rule.selectors.some(selector => document.querySelector(selector) !== null));
+					const newRules = cssRules.filter((rule: Rule) => rule.type === "rule" && rule.selectors && rule.selectors.some((selector) => document.querySelector(selector) !== null));
 					if (newRules.length) {
 						const inlineStyles = this.inlineStyles || (this.inlineStyles = this.head.appendChild(document.createElement("style")));
 						inlineStyles.textContent = stringifyCSS({ type: "stylesheet", stylesheet: { rules: newRules } }, { compress: true });

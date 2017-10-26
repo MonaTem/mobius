@@ -5,9 +5,9 @@ import { resolve as resolvePath } from "path";
 import * as util from "util";
 const Module = require("module");
 
-import * as express from "express";
-import * as etag from "etag";
 import * as bodyParser from "body-parser";
+import * as etag from "etag";
+import * as express from "express";
 
 import { diff_match_patch } from "diff-match-patch";
 const diffMatchPatchNode = new (require("diff-match-patch-node") as typeof diff_match_patch)();
@@ -35,23 +35,23 @@ function noCache(response: express.Response) {
 	response.header("Pragma", "no-cache");
 }
 
-function checkAndHandleETag(request: express.Request, response: express.Response, etag: string) {
+function checkAndHandleETag(request: express.Request, response: express.Response, contentTag: string) {
 	const ifMatch = request.get("if-none-match");
-	if (ifMatch && ifMatch === etag) {
+	if (ifMatch && ifMatch === contentTag) {
 		response.statusCode = 304;
 		response.end();
 		return true;
 	}
-	response.set("ETag", etag);
+	response.set("ETag", contentTag);
 	return false;
 }
 
-function topFrameHTML(request: express.Request, response: express.Response, html: string | Buffer, etag?: string) {
+function topFrameHTML(request: express.Request, response: express.Response, html: string | Buffer, contentTag?: string) {
 	// Return HTML
-	if (etag && checkAndHandleETag(request, response, etag)) {
+	if (contentTag && checkAndHandleETag(request, response, contentTag)) {
 		return;
 	}
-	if (etag) {
+	if (contentTag) {
 		response.header("Cache-Control", "max-age=0, must-revalidate, no-transform");
 	} else {
 		noCache(response);
@@ -165,7 +165,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 		clientIntegrity,
 		fallbackIntegrity,
 		noScriptURL: "/?js=no",
-		cssBasePath: publicPath
+		cssBasePath: publicPath,
 	}));
 	const defaultRenderedETag = etag(defaultRenderedHTML);
 	await initialPageSession.destroy();
@@ -211,7 +211,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						clientIntegrity,
 						fallbackIntegrity,
 						bootstrap: true,
-						cssBasePath: publicPath
+						cssBasePath: publicPath,
 					});
 					client.incomingMessageId++;
 					client.applyCookies(response);
@@ -271,7 +271,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 							client,
 							clientURL,
 							clientIntegrity,
-							fallbackIntegrity
+							fallbackIntegrity,
 						});
 						let responseContent = html;
 						if (isJavaScript) {

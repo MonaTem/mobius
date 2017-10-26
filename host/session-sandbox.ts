@@ -886,7 +886,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			fallbackIntegrity,
 			noScriptURL,
 			bootstrapData: bootstrap ? await this.generateBootstrapData(client) : undefined,
-			cssBasePath
+			cssBasePath,
 		});
 	}
 
