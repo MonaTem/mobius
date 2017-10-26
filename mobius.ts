@@ -6,6 +6,7 @@ import { cpus } from "os";
 const Module = require("module");
 
 import * as express from "express";
+import * as etag from "etag";
 import * as bodyParser from "body-parser";
 
 import { diff_match_patch } from "diff-match-patch";
@@ -34,11 +35,24 @@ function noCache(response: express.Response) {
 	response.header("Pragma", "no-cache");
 }
 
-function topFrameHTML(response: express.Response, html: string) {
+function topFrameHTML(request: express.Request, response: express.Response, html: string | Buffer, etag?: string) {
 	// Return HTML
-	noCache(response);
+	if (etag) {
+		const ifMatch = request.get("if-match");
+		if (ifMatch && ifMatch === etag) {
+			response.statusCode = 304;
+			response.end();
+			return;
+		}
+	}
 	response.set("Content-Security-Policy", "frame-ancestors 'none'");
 	response.set("Content-Type", "text/html; charset=utf-8");
+	if (etag) {
+		response.set("ETag", etag);
+		response.header("Cache-Control", "max-age=0, must-revalidate");
+	} else {
+		noCache(response);
+	}
 	response.send(html);
 }
 
@@ -134,7 +148,8 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	// Finish prerender of initial page
 	await prerender;
-	const defaultRenderedHTML = await initialPageSession.render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, clientURL, clientIntegrity, fallbackIntegrity, "/?js=no");
+	const defaultRenderedHTML = Buffer.from(await initialPageSession.render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, clientURL, clientIntegrity, fallbackIntegrity, "/?js=no"));
+	const defaultRenderedETag = etag(defaultRenderedHTML);
 	await initialPageSession.destroy();
 
 	return {
@@ -160,7 +175,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 							if (simulatedLatency) {
 								await delay(simulatedLatency);
 							}
-							return topFrameHTML(response, defaultRenderedHTML);
+							return topFrameHTML(request, response, defaultRenderedHTML, defaultRenderedETag);
 						}
 						// New session
 						client = await host.newClient(request);
@@ -177,7 +192,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					if (simulatedLatency) {
 						await delay(simulatedLatency);
 					}
-					return topFrameHTML(response, html);
+					return topFrameHTML(request, response, html);
 				} catch (e) {
 					if (simulatedLatency) {
 						await delay(simulatedLatency);
@@ -364,7 +379,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					await delay(simulatedLatency);
 				}
 				response.set("Content-Type", "text/javascript; charset=utf-8");
-				response.set("Cache-Control", "max-age=31536000, no-transform");
+				response.set("Cache-Control", "max-age=31536000, no-transform, immutable");
 				response.set("Expires", "Sun, 17 Jan 2038 19:14:07 GMT");
 				if (sourceMaps) {
 					response.set("SourceMap", "/client.js.map");
