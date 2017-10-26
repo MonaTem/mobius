@@ -30,29 +30,34 @@ function delay(amount: number) {
 }
 
 function noCache(response: express.Response) {
-	response.header("Cache-Control", "private, no-cache, no-store, must-revalidate");
+	response.header("Cache-Control", "private, no-cache, no-store, must-revalidate, no-transform");
 	response.header("Expires", new Date(0).toUTCString());
 	response.header("Pragma", "no-cache");
 }
 
+function checkAndHandleETag(request: express.Request, response: express.Response, etag: string) {
+	const ifMatch = request.get("if-none-match");
+	if (ifMatch && ifMatch === etag) {
+		response.statusCode = 304;
+		response.end();
+		return true;
+	}
+	response.set("ETag", etag);
+	return false;
+}
+
 function topFrameHTML(request: express.Request, response: express.Response, html: string | Buffer, etag?: string) {
 	// Return HTML
-	if (etag) {
-		const ifMatch = request.get("if-match");
-		if (ifMatch && ifMatch === etag) {
-			response.statusCode = 304;
-			response.end();
-			return;
-		}
+	if (etag && checkAndHandleETag(request, response, etag)) {
+		return;
 	}
-	response.set("Content-Security-Policy", "frame-ancestors 'none'");
-	response.set("Content-Type", "text/html; charset=utf-8");
 	if (etag) {
-		response.set("ETag", etag);
-		response.header("Cache-Control", "max-age=0, must-revalidate");
+		response.header("Cache-Control", "max-age=0, must-revalidate, no-transform");
 	} else {
 		noCache(response);
 	}
+	response.set("Content-Type", "text/html; charset=utf-8");
+	response.set("Content-Security-Policy", "frame-ancestors 'none'");
 	response.send(html);
 }
 
@@ -140,10 +145,14 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	const asyncClientScript = clientCompile(serverJSPath, sourcePath, publicPath, minify);
 	const clientScript = await asyncClientScript;
 	const clientScriptBuffer = Buffer.from(clientScript.code);
+	const clientEtag = etag(clientScriptBuffer);
 	const clientHash = createHash("sha256").update(clientScriptBuffer).digest("base64");
 	const clientURL = "/client-" + clientHash.replace(/\//g, "_").replace(/\+/g, "-").replace(/=/g, "").substring(0, 16) + ".js";
 	const clientIntegrity = "sha256-" + clientHash;
-	const fallbackContents = await fallbackContentsAsync;
+
+	// Finish with fallback
+	const fallbackContents = Buffer.from(await fallbackContentsAsync);
+	const fallbackEtag = etag(fallbackContents);
 	const fallbackIntegrity = "sha256-" + createHash("sha256").update(fallbackContents).digest("base64");
 
 	// Finish prerender of initial page
@@ -359,20 +368,24 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				if (simulatedLatency) {
 					await delay(simulatedLatency);
 				}
-				response.set("Content-Type", "text/javascript; charset=utf-8");
-				response.set("Cache-Control", "no-transform");
-				response.send(fallbackContents);
+				if (!checkAndHandleETag(request, response, fallbackEtag)) {
+					response.set("Content-Type", "text/javascript; charset=utf-8");
+					response.set("Cache-Control", "max-age=0, must-revalidate, no-transform");
+					response.send(fallbackContents);
+				}
 			});
 			server.get("/client.js", async (request: express.Request, response: express.Response) => {
 				if (simulatedLatency) {
 					await delay(simulatedLatency);
 				}
-				response.set("Content-Type", "text/javascript; charset=utf-8");
-				response.set("Cache-Control", "no-transform");
-				if (sourceMaps) {
-					response.set("SourceMap", "/client.js.map");
+				if (!checkAndHandleETag(request, response, clientEtag)) {
+					response.set("Content-Type", "text/javascript; charset=utf-8");
+					response.set("Cache-Control", "max-age=0, must-revalidate, no-transform");
+					if (sourceMaps) {
+						response.set("SourceMap", "/client.js.map");
+					}
+					response.send(clientScriptBuffer);
 				}
-				response.send(clientScriptBuffer);
 			});
 			server.get(clientURL, async (request: express.Request, response: express.Response) => {
 				if (simulatedLatency) {
