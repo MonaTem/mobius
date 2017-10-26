@@ -115,6 +115,17 @@ Module._extensions[".ts"] = Module._extensions[".tsx"] = function() {
 
 const resolvedPromise: Promise<void> = Promise.resolve();
 
+export interface RenderOptions {
+	mode: PageRenderMode;
+	client: ClientState & ClientBootstrap;
+	clientURL: string;
+	clientIntegrity: string;
+	fallbackIntegrity: string;
+	noScriptURL?: string;
+	bootstrap?: boolean;
+	cssBasePath?: string;
+}
+
 export interface SessionSandbox {
 	destroy(): Promise<void>;
 	destroyIfExhausted(): Promise<void>;
@@ -124,7 +135,7 @@ export interface SessionSandbox {
 	prerenderContent(): Promise<void>;
 	updateOpenServerChannelStatus(newValue: boolean): void | Promise<void>;
 	hasLocalChannels(): boolean | Promise<boolean>;
-	render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrap?: boolean): Promise<string>;
+	render(options: RenderOptions): Promise<string>;
 	valueForFormField(name: string): string | undefined | Promise<string | undefined>;
 	becameActive(): void | Promise<void>;
 }
@@ -865,8 +876,18 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		return result;
 	}
 
-	public async render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrap?: boolean): Promise<string> {
-		return await this.pageRenderer.render(mode, client, this, clientURL, clientIntegrity, fallbackIntegrity, noScriptURL, bootstrap ? await this.generateBootstrapData(client) : undefined);
+	public async render({ mode, client, clientURL, clientIntegrity, fallbackIntegrity, noScriptURL, bootstrap, cssBasePath}: RenderOptions): Promise<string> {
+		return this.pageRenderer.render({
+			mode,
+			clientState: client,
+			sessionState: this,
+			clientURL,
+			clientIntegrity,
+			fallbackIntegrity,
+			noScriptURL,
+			bootstrapData: bootstrap ? await this.generateBootstrapData(client) : undefined,
+			cssBasePath
+		});
 	}
 
 	public becameActive() {

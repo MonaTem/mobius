@@ -103,7 +103,8 @@ export function style(href: string, subresourceIntegrity?: string): Promise<void
 		if (subresourceIntegrity) {
 			link.setAttribute("integrity", subresourceIntegrity);
 		}
-		(require("head") as HTMLHeadElement).appendChild(link);
+		const body = (require("body") as HTMLBodyElement)
+		body.insertBefore(link, body.lastElementChild && body.lastElementChild.previousElementSibling);
 		result = requestedStyles[href] = createClientPromise(() => {
 			// Fallback is to return immediately--if unable to track client's ability to load CSS, just proceed
 		});

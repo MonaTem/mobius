@@ -33,6 +33,10 @@ interface Document extends Node {
 	createElement(tagName: string): HTMLElement;
 	createTextNode(data: string): Text;
 	querySelector(selectors: string): Element | null;
+	querySelectorAll<K extends keyof HTMLElementTagNameMap>(knownSelectors: K): ReadonlyArray<HTMLElementTagNameMap[K]>;
+	querySelectorAll(selectors: string): ReadonlyArray<HTMLElement>;
+	getElementsByTagName<K extends keyof HTMLElementTagNameMap>(tagName: K): ReadonlyArray<HTMLElementTagNameMap[K]>;
+	getElementsByTagName(tagName: string): ReadonlyArray<HTMLElement>;
 	readonly body: HTMLBodyElement;
 	readonly head: HTMLHeadElement;
 }
@@ -43,6 +47,8 @@ interface DocumentFragment extends Node {
 interface Element extends Node {
 	setAttribute(name: string, value: string): void;
 	querySelector(selectors: string): Element | null;
+	getElementsByTagName<K extends keyof HTMLElementTagNameMap>(tagName: K): ReadonlyArray<HTMLElementTagNameMap[K]>;
+	getElementsByTagName(tagName: string): ReadonlyArray<HTMLElement>;
 }
 
 interface HTMLElement extends Element {
@@ -66,10 +72,20 @@ interface HTMLScriptElement extends HTMLElement {
 	type: string;
 }
 
+interface HTMLLinkElement extends HTMLElement {
+	href: string;
+}
+
+interface HTMLStyleElement extends HTMLElement {
+	href: string;
+}
+
 interface HTMLElementTagNameMap {
 	"body": HTMLBodyElement;
 	"form": HTMLFormElement;
 	"head": HTMLHeadElement;
 	"input": HTMLInputElement;
 	"script": HTMLScriptElement;
+	"style": HTMLStyleElement;
+	"link": HTMLLinkElement;
 }

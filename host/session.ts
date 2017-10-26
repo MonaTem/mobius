@@ -1,8 +1,7 @@
 import { peek, Redacted } from "../server/redact";
 import { Client } from "./client";
 import { escape } from "./event-loop";
-import { ClientState, PageRenderMode } from "./page-renderer";
-import { ClientBootstrap, HostSandbox, HostSandboxOptions, LocalSessionSandbox, SessionSandbox, SessionSandboxClient } from "./session-sandbox";
+import { HostSandbox, HostSandboxOptions, LocalSessionSandbox, RenderOptions, SessionSandbox, SessionSandboxClient } from "./session-sandbox";
 
 import { JsonArray, JsonMap, JsonValue } from "mobius-types";
 import { Event, eventForException, eventForValue, parseValueEvent, roundTrip } from "../common/_internal";
@@ -29,13 +28,12 @@ export interface SessionClients extends SessionSandboxClient {
 }
 
 class InProcessClients implements SessionClients {
-	public sessionID: string;
-	public sessions: Map<string, Session>;
-	public request?: Request;
+	private sessionID: string;
+	private sessions: Map<string, Session>;
+	private request?: Request;
 	public clients = new Map<number, Client>();
-	public currentClientID: number = 0;
-	public sharingEnabled: boolean = false;
-	public lastMessageTime: number = Date.now();
+	private currentClientID: number = 0;
+	private sharingEnabled: boolean = false;
 	constructor(sessionID: string, sessions: Map<string, Session>, request?: Request) {
 		this.sessionID = sessionID;
 		this.sessions = sessions;
@@ -144,8 +142,8 @@ class WorkerSandboxClient implements SessionSandboxClient {
 }
 
 class OutOfProcessSession implements Session {
-	public sessionID: string;
-	public process: ChildProcess;
+	private sessionID: string;
+	private process: ChildProcess;
 	public client: InProcessClients;
 	public lastMessageTime: number = Date.now();
 	constructor(client: InProcessClients, sessionID: string, process: ChildProcess) {
@@ -185,8 +183,8 @@ class OutOfProcessSession implements Session {
 	public hasLocalChannels() {
 		return this.send<boolean>("hasLocalChannels");
 	}
-	public render(mode: PageRenderMode, client: ClientState & ClientBootstrap, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrap?: boolean): Promise<string> {
-		return this.send<string>("render", [mode, client, clientURL, clientIntegrity, fallbackIntegrity, noScriptURL, bootstrap]);
+	public render(options: RenderOptions): Promise<string> {
+		return this.send<string>("render", [options]);
 	}
 	public valueForFormField(name: string): Promise<string | undefined> {
 		return this.send<string | undefined>("valueForFormField", [name]);

@@ -135,7 +135,15 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	// Finish prerender of initial page
 	await prerender;
-	const defaultRenderedHTML = await initialPageSession.render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, clientURL, clientIntegrity, fallbackIntegrity, "/?js=no");
+	const defaultRenderedHTML = await initialPageSession.render({
+		mode: PageRenderMode.Bare,
+		client: { clientID: 0, incomingMessageId: 0 },
+		clientURL,
+		clientIntegrity,
+		fallbackIntegrity,
+		noScriptURL: "/?js=no",
+		cssBasePath: publicPath
+	});
 	await initialPageSession.destroy();
 
 	return {
@@ -172,7 +180,15 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					client.outgoingMessageId++;
 					await session.prerenderContent();
 					// Render the DOM into HTML source with bootstrap data applied
-					const html = await session.render(PageRenderMode.IncludeForm, client, clientURL, clientIntegrity, fallbackIntegrity, undefined, true);
+					const html = await session.render({
+						mode: PageRenderMode.IncludeForm,
+						client,
+						clientURL,
+						clientIntegrity,
+						fallbackIntegrity,
+						bootstrap: true,
+						cssBasePath: publicPath
+					});
 					client.incomingMessageId++;
 					client.applyCookies(response);
 					if (simulatedLatency) {
@@ -226,7 +242,13 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 							await client.session.prerenderContent();
 						}
 						// Render the DOM into HTML source
-						const html = await client.session.render(PageRenderMode.IncludeFormAndStripScript, client, clientURL, clientIntegrity, fallbackIntegrity);
+						const html = await client.session.render({
+							mode: PageRenderMode.IncludeFormAndStripScript,
+							client,
+							clientURL,
+							clientIntegrity,
+							fallbackIntegrity
+						});
 						let responseContent = html;
 						if (isJavaScript) {
 							if (client.lastSentFormHTML) {
