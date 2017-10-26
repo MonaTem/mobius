@@ -1,10 +1,10 @@
-import importBindingForCall from "./importBindingForCall";
-import { CallExpression, StringLiteral } from "babel-types";
 import { NodePath } from "babel-traverse";
+import { CallExpression, StringLiteral } from "babel-types";
 import * as types from "babel-types";
 import { createHash } from "crypto";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import importBindingForCall from "./importBindingForCall";
 
 export default function(basePath: string) {
 	return {
@@ -24,7 +24,7 @@ export default function(basePath: string) {
 						}
 					}
 				}
-			}
-		}
-	}
+			},
+		},
+	};
 }

@@ -10,7 +10,7 @@ function throwError(message: string) {
 	throw new Error(message);
 }
 
-function roundTripValue(obj: any, cycleDetection: any[]) : any {
+function roundTripValue(obj: any, cycleDetection: any[]): any {
 	// Round-trip values through JSON so that the client receives exactly the same type of values as the server
 	// return typeof obj == "undefined" ? obj : JSON.parse(JSON.stringify(obj)) as T;
 	switch (typeof obj) {
@@ -27,7 +27,7 @@ function roundTripValue(obj: any, cycleDetection: any[]) : any {
 					case Object:
 						result = {};
 						ignore_nondeterminism:
-						for (var key in obj) {
+						for (const key in obj) {
 							if (Object.hasOwnProperty.call(obj, key)) {
 								result[key] = roundTripValue(obj[key], cycleDetection);
 							}
@@ -35,7 +35,7 @@ function roundTripValue(obj: any, cycleDetection: any[]) : any {
 						break;
 					case Array:
 						result = [];
-						for (var i = 0; i < obj.length; i++) {
+						for (let i = 0; i < obj.length; i++) {
 							result[i] = roundTripValue(obj[i], cycleDetection);
 						}
 						break;
@@ -69,14 +69,14 @@ function roundTripValue(obj: any, cycleDetection: any[]) : any {
 	}
 }
 
-export function roundTrip<T extends JsonValue | void>(obj: T) : T {
+export function roundTrip<T extends JsonValue | void>(obj: T): T {
 	return typeof obj == "undefined" ? obj : roundTripValue(obj, []) as T;
 }
 
-export function stripDefaults<T extends JsonMap>(obj: T, defaults: Partial<T>) : Partial<T> {
+export function stripDefaults<T extends JsonMap>(obj: T, defaults: Partial<T>): Partial<T> {
 	const result: Partial<T> = {};
 	ignore_nondeterminism:
-	for (var i in obj) {
+	for (const i in obj) {
 		if (Object.hasOwnProperty.call(obj, i) && obj[i] !== (defaults as T)[i]) {
 			result[i] = obj[i];
 		}
@@ -84,16 +84,16 @@ export function stripDefaults<T extends JsonMap>(obj: T, defaults: Partial<T>) :
 	return result;
 }
 
-export function restoreDefaults<T extends JsonMap, U extends JsonMap>(obj: T, defaults: U) : T | U {
+export function restoreDefaults<T extends JsonMap, U extends JsonMap>(obj: T, defaults: U): T | U {
 	const result: Partial<T | U> = {};
 	ignore_nondeterminism:
-	for (var i in defaults) {
+	for (const i in defaults) {
 		if (!(i in obj) && Object.hasOwnProperty.call(defaults, i)) {
 			result[i] = defaults[i];
 		}
 	}
 	ignore_nondeterminism:
-	for (var j in obj) {
+	for (const j in obj) {
 		if (Object.hasOwnProperty.call(obj, j)) {
 			result[j] = obj[j];
 		}
@@ -119,12 +119,11 @@ export interface ClientMessage extends ServerMessage {
 export interface BootstrapData {
 	sessionID: string;
 	clientID?: number;
-	events?: (Event | boolean)[];
+	events?: Array<Event | boolean>;
 	channels?: number[];
 	x?: number;
 	y?: number;
 }
-
 
 export function logOrdering(from: "client" | "server", type: "open" | "close" | "message", channelId: number, sessionID?: string) {
 	// const stack = (new Error().stack || "").toString().split(/\n\s*/).slice(2).map(s => s.replace(/^at\s*/, ""));
@@ -135,21 +134,21 @@ export function disconnectedError() {
 	return new Error("Session has been disconnected!");
 }
 
-export function eventForValue(channelId: number, value: JsonValue | void) : Event {
+export function eventForValue(channelId: number, value: JsonValue | void): Event {
 	return typeof value == "undefined" ? [channelId] : [channelId, roundTrip(value)];
 }
 
-export function eventForException(channelId: number, error: any) : Event {
+export function eventForException(channelId: number, error: any): Event {
 	// Convert Error types to a representation that can be reconstituted remotely
-	let type : any = 1;
+	let type: any = 1;
 	let serializedError: { [key: string]: JsonValue } = {};
 	if (error instanceof Error) {
-		let errorClass : any = error.constructor;
+		const errorClass: any = error.constructor;
 		type = classNameForConstructor(errorClass);
 		serializedError = { message: roundTrip(error.message) };
-		let anyError : any = error;
+		const anyError: any = error;
 		ignore_nondeterminism:
-		for (let i in anyError) {
+		for (const i in anyError) {
 			if (Object.hasOwnProperty.call(anyError, i)) {
 				serializedError[i] = roundTrip(anyError[i]);
 			}
@@ -158,21 +157,21 @@ export function eventForException(channelId: number, error: any) : Event {
 	return [channelId, serializedError, type];
 }
 
-export function parseValueEvent<T>(global: any, event: Event | undefined, resolve: (value: JsonValue) => T, reject: (error: Error | JsonValue) => T) : T {
+export function parseValueEvent<T>(global: any, event: Event | undefined, resolve: (value: JsonValue) => T, reject: (error: Error | JsonValue) => T): T {
 	if (!event) {
 		return reject(disconnectedError());
 	}
-	let value = roundTrip(event[1]);
+	const value = roundTrip(event[1]);
 	if (event.length != 3) {
 		return resolve(value);
 	}
 	const type = event[2];
 	// Convert serialized representation into the appropriate Error type
 	if (type != 1 && /Error$/.test(type)) {
-		const ErrorType : typeof Error = global[type] || Error;
+		const ErrorType: typeof Error = global[type] || Error;
 		const error: Error = new ErrorType(value.message);
 		ignore_nondeterminism:
-		for (var i in value) {
+		for (const i in value) {
 			if (Object.hasOwnProperty.call(value, i) && i != "message") {
 				(error as any)[i] = roundTrip(value[i]);
 			}
@@ -182,7 +181,7 @@ export function parseValueEvent<T>(global: any, event: Event | undefined, resolv
 	return reject(value);
 }
 
-export function deserializeMessageFromText<T extends ServerMessage>(messageText: string, defaultMessageID: number) : T {
+export function deserializeMessageFromText<T extends ServerMessage>(messageText: string, defaultMessageID: number): T {
 	const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as T;
 	result.messageID = result.messageID | defaultMessageID;
 	if (!result.events) {
@@ -191,7 +190,7 @@ export function deserializeMessageFromText<T extends ServerMessage>(messageText:
 	return result;
 }
 
-export function serializeMessageAsText(message: Partial<ServerMessage | ClientMessage>) : string {
+export function serializeMessageAsText(message: Partial<ServerMessage | ClientMessage>): string {
 	if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message) && !("clientID" in message)) {
 		// Only send events, if that's all we have to send
 		return JSON.stringify(message.events).slice(1, -1);

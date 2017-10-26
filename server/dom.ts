@@ -1,13 +1,13 @@
+import { defaultEventProperties } from "_dom";
+import { restoreDefaults, stripDefaults } from "_internal";
 import { createClientChannel, createClientPromise } from "mobius";
 import { Channel } from "mobius-types";
-import { defaultEventProperties } from "_dom";
-import { stripDefaults, restoreDefaults } from "_internal";
 import * as preact from "preact";
 export { h, Component, AnyComponent, ComponentProps } from "preact";
 
 type PreactNode = Element & {
 	__l?: { [ event: string ]: (event: any) => void },
-	__c?: { [ event: string ]: [Channel, (event: any) => void] }
+	__c?: { [ event: string ]: [Channel, (event: any) => void] },
 };
 
 const preactOptions = preact.options as any;
@@ -16,16 +16,17 @@ preactOptions.nodeRemoved = (node: PreactNode) => {
 	const c = node.__c;
 	if (c) {
 		ignore_nondeterminism:
-		for (let name in c) {
+		for (const name in c) {
 			if (Object.hasOwnProperty.call(c, name)) {
 				c[name][0].close();
 				delete c[name];
 			}
 		}
 	}
-}
+};
 
 function ignoreEvent() {
+	/* tslint:disable no-empty */
 }
 
 preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
@@ -74,14 +75,14 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 			delete c[name];
 		}
 	}
-}
+};
 
-export function host(content: JSX.Element) : void {
+export function host(content: JSX.Element): void {
 	const element = (require("body") as HTMLBodyElement).children[0];
 	preact.render(content, element, element.children[0]);
 }
 
-export function title(newTitle: string) : void {
+export function title(newTitle: string): void {
 	const head = (require("head") as HTMLHeadElement);
 	let element = head.querySelector("title");
 	if (!element) {
@@ -93,7 +94,7 @@ export function title(newTitle: string) : void {
 
 const requestedStyles: { [href: string]: Promise<void> } = {};
 
-export function style(href: string, subresourceIntegrity?: string) : Promise<void> {
+export function style(href: string, subresourceIntegrity?: string): Promise<void> {
 	let result = requestedStyles[href];
 	if (!result) {
 		const link = self.document.createElement("link");
@@ -102,7 +103,8 @@ export function style(href: string, subresourceIntegrity?: string) : Promise<voi
 		if (subresourceIntegrity) {
 			link.setAttribute("integrity", subresourceIntegrity);
 		}
-		(require("head") as HTMLHeadElement).appendChild(link);
+		const body = (require("body") as HTMLBodyElement)
+		body.insertBefore(link, body.lastElementChild && body.lastElementChild.previousElementSibling);
 		result = requestedStyles[href] = createClientPromise(() => {
 			// Fallback is to return immediately--if unable to track client's ability to load CSS, just proceed
 		});

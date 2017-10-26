@@ -1,4 +1,4 @@
-.PHONY: all run clean cleaner host fallback preact
+.PHONY: all run clean cleaner host fallback preact lint test
 
 rwildcard=$(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2) $(filter $(subst *,%,$2),$d))
 scripts=$(call rwildcard, $1/, *.tsx) $(call rwildcard, $1/, *.ts)
@@ -6,7 +6,7 @@ scripts=$(call rwildcard, $1/, *.tsx) $(call rwildcard, $1/, *.ts)
 all: host fallback preact
 
 run: all
-	node --trace-warnings --inspect dist/mobius.js --base ../mobius-sample --source-map
+	node --trace-warnings --inspect dist/mobius.js --base ../mobius-sample --source-map --workers 2
 
 clean:
 	rm -rf dist/ mobius-*.tgz
@@ -14,6 +14,11 @@ clean:
 cleaner: clean
 	rm -rf node_modules
 
+lint:
+	node_modules/.bin/tslint -c tslint.json 'host/**/*.ts' 'common/**/*.ts' 'server/**/*.ts' 'client/**/*.ts' mobius.ts --fix
+
+test: lint
+	# TODO: Add actual tests
 
 preact: dist/common/preact.js dist/common/preact.d.ts
 
@@ -23,7 +28,7 @@ dist/common/:
 node_modules/preact/dist/preact.esm.js: $(call rwildcard, node_modules/preact/src/, *.js)
 	# Global tools that preact requires be available
 	npm install -g npm-run-all rollup babel-cli jscodeshift gzip-size-cli rimraf
-	pushd node_modules/preact && npm version --allow-same-version 0.0.1 && npm install
+	cd node_modules/preact && npm version --allow-same-version 0.0.1 && npm install
 
 dist/common/preact.js: node_modules/preact/dist/preact.esm.js dist/common/
 	cp $< $@

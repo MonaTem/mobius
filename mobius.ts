@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import * as path from "path";
-import * as util from "util";
 import { createHash } from "crypto";
 import { cpus } from "os";
+import { resolve as resolvePath } from "path";
+import * as util from "util";
 const Module = require("module");
 
 import * as express from "express";
@@ -10,23 +10,23 @@ import * as etag from "etag";
 import * as bodyParser from "body-parser";
 
 import { diff_match_patch } from "diff-match-patch";
-const diff_match_patch_node = new (require("diff-match-patch-node") as typeof diff_match_patch);
+const diffMatchPatchNode = new (require("diff-match-patch-node") as typeof diff_match_patch)();
 
-import { Host } from "./host/host";
-import { Session } from "./host/session";
 import { Client } from "./host/client";
-import { PageRenderMode } from "./host/page-renderer";
 import clientCompile from "./host/client-compiler";
-import { escape } from "./host/event-loop";
 import * as csrf from "./host/csrf";
-import { packageRelative, readFile, writeFile, mkdir, unlink, rimraf, stat, exists, readJSON } from "./host/fileUtils";
+import { escape } from "./host/event-loop";
+import { exists, mkdir, packageRelative, readFile, readJSON, rimraf, stat, unlink, writeFile } from "./host/fileUtils";
+import { Host } from "./host/host";
+import { PageRenderMode } from "./host/page-renderer";
+import { Session } from "./host/session";
 
-import { serializeMessageAsText, deserializeMessageFromText, ClientMessage } from "./common/_internal";
+import { ClientMessage, deserializeMessageFromText, serializeMessageAsText } from "./common/_internal";
 
 import * as commandLineArgs from "command-line-args";
 
 function delay(amount: number) {
-	return new Promise<void>(resolve => setTimeout(resolve, amount));
+	return new Promise<void>((resolve) => setTimeout(resolve, amount));
 }
 
 function noCache(response: express.Response) {
@@ -61,13 +61,13 @@ function topFrameHTML(request: express.Request, response: express.Response, html
 	response.send(html);
 }
 
-function messageFromBody(body: { [key: string]: any }) : ClientMessage {
+function messageFromBody(body: { [key: string]: any }): ClientMessage {
 	const message: ClientMessage = {
 		sessionID: body.sessionID || "",
 		messageID: (body.messageID as number) | 0,
 		clientID: (body.clientID as number) | 0,
-		events: body.events ? JSON.parse("[" + body.events + "]") : []
-	}
+		events: body.events ? JSON.parse("[" + body.events + "]") : [],
+	};
 	if ("close" in body) {
 		message.close = (body.close | 0) == 1;
 	}
@@ -91,14 +91,14 @@ interface Config {
 }
 
 function defaultSessionPath(sourcePath: string) {
-	return path.join(sourcePath, ".sessions");
+	return resolvePath(sourcePath, ".sessions");
 }
 
 export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0 }: Config) {
 	let serverJSPath: string;
-	const packagePath = path.resolve(sourcePath, "package.json");
+	const packagePath = resolvePath(sourcePath, "package.json");
 	if (await exists(packagePath)) {
-		serverJSPath = path.resolve(sourcePath, (await readJSON(packagePath)).main);
+		serverJSPath = resolvePath(sourcePath, (await readJSON(packagePath)).main);
 	} else {
 		const foundPath = Module._findPath("app", [sourcePath]);
 		if (!foundPath) {
@@ -109,13 +109,14 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	const htmlContents = readFile(packageRelative("public/index.html"));
 
-	const gracefulPath = path.join(sessionsPath, ".graceful");
+	const gracefulPath = resolvePath(sessionsPath, ".graceful");
 
 	// Check if we can reuse existing sessions
 	let lastGraceful = 0;
 	try {
 		lastGraceful = (await stat(gracefulPath)).mtimeMs;
 	} catch (e) {
+		/* tslint:disable no-empty */
 	}
 	if (lastGraceful < (await stat(serverJSPath)).mtimeMs) {
 		await rimraf(sessionsPath);
@@ -124,8 +125,8 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 		await unlink(gracefulPath);
 	}
 
-	const serverModulePaths = [packageRelative("server"), path.join(sourcePath, "server")];
-	const modulePaths = serverModulePaths.concat([packageRelative("common"), packageRelative("dist/common"), path.join(sourcePath, "common")]);
+	const serverModulePaths = [packageRelative("server"), resolvePath(sourcePath, "server")];
+	const modulePaths = serverModulePaths.concat([packageRelative("common"), packageRelative("dist/common"), resolvePath(sourcePath, "common")]);
 
 	// Start host
 	console.log("Rendering initial page...");
@@ -157,7 +158,15 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	// Finish prerender of initial page
 	await prerender;
-	const defaultRenderedHTML = Buffer.from(await initialPageSession.render(PageRenderMode.Bare, { clientID: 0, incomingMessageId: 0 }, clientURL, clientIntegrity, fallbackIntegrity, "/?js=no"));
+	const defaultRenderedHTML = Buffer.from(await initialPageSession.render({
+		mode: PageRenderMode.Bare,
+		client: { clientID: 0, incomingMessageId: 0 },
+		clientURL,
+		clientIntegrity,
+		fallbackIntegrity,
+		noScriptURL: "/?js=no",
+		cssBasePath: publicPath
+	}));
 	const defaultRenderedETag = etag(defaultRenderedHTML);
 	await initialPageSession.destroy();
 
@@ -165,7 +174,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 		install(server: express.Express) {
 			server.use(bodyParser.urlencoded({
 				extended: true,
-				type: () => true // Accept all MIME types
+				type: () => true, // Accept all MIME types
 			}));
 
 			server.get("/", async (request, response) => {
@@ -180,7 +189,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						client.incomingMessageId++;
 					} else {
 						// Not prerendering or joining a session, just return the original source with the noscript added
-						if (request.query["js"] !== "no") {
+						if (request.query.js !== "no") {
 							if (simulatedLatency) {
 								await delay(simulatedLatency);
 							}
@@ -195,7 +204,15 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					client.outgoingMessageId++;
 					await session.prerenderContent();
 					// Render the DOM into HTML source with bootstrap data applied
-					const html = await session.render(PageRenderMode.IncludeForm, client, clientURL, clientIntegrity, fallbackIntegrity, undefined, true);
+					const html = await session.render({
+						mode: PageRenderMode.IncludeForm,
+						client,
+						clientURL,
+						clientIntegrity,
+						fallbackIntegrity,
+						bootstrap: true,
+						cssBasePath: publicPath
+					});
 					client.incomingMessageId++;
 					client.applyCookies(response);
 					if (simulatedLatency) {
@@ -230,7 +247,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						response.send("");
 						return;
 					}
-					const postback = body["postback"];
+					const postback = body.postback;
 					let client: Client;
 					if (!message.sessionID && postback == "js") {
 						client = await host.newClient(request);
@@ -249,11 +266,17 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 							await client.session.prerenderContent();
 						}
 						// Render the DOM into HTML source
-						const html = await client.session.render(PageRenderMode.IncludeFormAndStripScript, client, clientURL, clientIntegrity, fallbackIntegrity);
+						const html = await client.session.render({
+							mode: PageRenderMode.IncludeFormAndStripScript,
+							client,
+							clientURL,
+							clientIntegrity,
+							fallbackIntegrity
+						});
 						let responseContent = html;
 						if (isJavaScript) {
 							if (client.lastSentFormHTML) {
-								const diff = diff_match_patch_node.patch_toText(diff_match_patch_node.patch_make(client.lastSentFormHTML, html));
+								const diff = diffMatchPatchNode.patch_toText(diffMatchPatchNode.patch_make(client.lastSentFormHTML, html));
 								if (diff.length < html.length && diff.length) {
 									responseContent = diff;
 								}
@@ -293,7 +316,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					noCache(response);
 					response.set("Content-Type", "text/plain; charset=utf-8");
 					response.send(util.inspect(e));
-				};
+				}
 			});
 
 			require("express-ws")(server);
@@ -410,7 +433,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 		async stop() {
 			await host.destroy();
 			await writeFile(gracefulPath, "");
-		}
+		},
 	};
 }
 
@@ -427,31 +450,31 @@ export default function main() {
 			{ name: "hostname", type: String },
 			{ name: "simulated-latency", type: Number, defaultValue: 0 },
 			{ name: "init", type: Boolean, defaultValue: false },
-			{ name: "help", type: Boolean }
+			{ name: "help", type: Boolean },
 		]);
 		if (args.help) {
 			console.log(require("command-line-usage")([
 				{
 					header: "Mobius",
-					content: "Unified frontend and backend framework for building web apps"
+					content: "Unified frontend and backend framework for building web apps",
 				},
 				{
 					header: "Options",
 					optionList: [
 						{
 							name: "init",
-							description: "Initialize a new mobius project"
+							description: "Initialize a new mobius project",
 						},
 						{
 							name: "port",
 							typeLabel: "[underline]{number}",
-							description: "The port number to listen on"
+							description: "The port number to listen on",
 
 						},
 						{
 							name: "base",
 							typeLabel: "[underline]{path}",
-							description: "The base path of the app to serve"
+							description: "The base path of the app to serve",
 						},
 						{
 							name: "minify",
@@ -473,13 +496,13 @@ export default function main() {
 						},
 						{
 							name: "help",
-							description: "Prints this usage guide. Yahahah! You found me!"
-						}
-					]
+							description: "Prints this usage guide. Yahahah! You found me!",
+						},
+					],
 				},
 				{
-					content: "Project home: [underline]{https://github.com/rpetrich/mobius}"
-				}
+					content: "Project home: [underline]{https://github.com/rpetrich/mobius}",
+				},
 			]));
 			process.exit(1);
 		}
@@ -496,14 +519,15 @@ export default function main() {
 			process.exit(0);
 		}
 
-		const basePath = path.resolve(cwd, args.base as string);
+		const basePath = resolvePath(cwd, args.base as string);
 
 		let secrets = {};
 		try {
-			secrets = await readJSON(path.join(basePath, "secrets.json"));
+			secrets = await readJSON(resolvePath(basePath, "secrets.json"));
 		} catch (e) {
+			/* tslint:disable no-empty */
 		}
-		const publicPath = path.join(basePath, "public");
+		const publicPath = resolvePath(basePath, "public");
 		const mobius = await prepare({
 			sourcePath: basePath,
 			publicPath,
@@ -538,7 +562,7 @@ export default function main() {
 		async function onInterrupted() {
 			process.removeListener("SIGTERM", onInterrupted);
 			process.removeListener("SIGINT", onInterrupted);
-			const acceptSocketClosed = new Promise(resolve => {
+			const acceptSocketClosed = new Promise((resolve) => {
 				acceptSocket.close(resolve);
 			});
 			await mobius.stop();
@@ -548,7 +572,7 @@ export default function main() {
 
 		server.get("/term", async (request, response) => {
 			response.send("exiting");
-			const acceptSocketClosed = new Promise(resolve => {
+			const acceptSocketClosed = new Promise((resolve) => {
 				acceptSocket.close(resolve);
 			});
 			await mobius.stop();

@@ -37,12 +37,12 @@ export default function() {
 						]),
 						types.binaryExpression("<", iIdentifier, types.memberExpression(keysIdentifier, types.identifier("length"))),
 						types.unaryExpression("++", iIdentifier),
-						types.blockStatement(body))
+						types.blockStatement(body)),
 					);
 					path.addComment("leading", "Deterministic for (... in ...)");
 					path.skip();
 					requiresForInHelper = true;
-				}
+				},
 			},
 			// Rewrite Object.keys(...) into Object.keys(...).sort(__sort_keys)
 			CallExpression: {
@@ -57,7 +57,7 @@ export default function() {
 							requiresSortHelper = true;
 						}
 					}
-				}
+				},
 			},
 			Program: {
 				exit(path: NodePath<Program>) {
@@ -85,8 +85,8 @@ export default function() {
 						}`)());
 					}
 					path.stop();
-				}
-			}
-		}
-	}
+				},
+			},
+		},
+	};
 }

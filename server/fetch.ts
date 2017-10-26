@@ -1,7 +1,7 @@
-import { createServerPromise, createClientPromise } from "mobius";
 import { FetchOptions, FetchResponse } from "fetch-types";
-import { peek, Redacted } from "redact";
+import { createClientPromise, createServerPromise } from "mobius";
 import node_fetch from "node-fetch";
+import { peek, Redacted } from "redact";
 
 async function fetch(url: string, options?: FetchOptions) {
 	const response = await node_fetch(url, options);
@@ -14,22 +14,22 @@ async function fetch(url: string, options?: FetchOptions) {
 		ok: response.ok,
 		statusText: response.statusText,
 		text: await response.text(),
-		headers
-	}
+		headers,
+	};
 	return result;
 }
 
-export function fromClient(url: string, options?: FetchOptions) : Promise<FetchResponse> {
+export function fromClient(url: string, options?: FetchOptions): Promise<FetchResponse> {
 	return createClientPromise<FetchResponse>(() => {
 		throw new Error("Fetching from the client requires a browser that supports client-side rendering!");
 	});
 }
 
-export function fromClientOrServer(url: string, options?: FetchOptions) : Promise<FetchResponse> {
+export function fromClientOrServer(url: string, options?: FetchOptions): Promise<FetchResponse> {
 	return createClientPromise<FetchResponse>(() => fetch(url, options));
 }
 
-export function fromServer(url: string | Redacted<string>, options?: FetchOptions | Redacted<FetchOptions>) : Promise<FetchResponse> {
+export function fromServer(url: string | Redacted<string>, options?: FetchOptions | Redacted<FetchOptions>): Promise<FetchResponse> {
 	return createServerPromise<FetchResponse>(() => fetch(peek(url), options ? peek(options) : undefined));
 }
 

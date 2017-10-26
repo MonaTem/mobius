@@ -1,4 +1,4 @@
-export default function memoize<T extends Function>(func: T) : T {
+export default function memoize<T extends Function>(func: T): T {
 	const values = new Map<any, any>();
 	return function(this: any, input: any) {
 		if (values.has(input)) {

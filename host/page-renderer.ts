@@ -1,5 +1,9 @@
-import { JSDOM } from "jsdom";
 import { BootstrapData } from "_internal";
+import { JSDOM } from "jsdom";
+import { parse as parseCSS, stringify as stringifyCSS, Rule } from "css";
+import { resolve as resolvePath } from "path";
+import { readFile } from "./fileUtils";
+import memoize from "./memoize";
 
 function compatibleStringify(value: any): string {
 	return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\/script/g, "<\\/script");
@@ -15,36 +19,54 @@ function migrateChildren(fromNode: Node, toNode: Node) {
 export const enum PageRenderMode {
 	Bare = 0,
 	IncludeForm = 1,
-	IncludeFormAndStripScript = 2
+	IncludeFormAndStripScript = 2,
 }
 
-export type SessionState = {
+export interface SessionState {
 	sessionID: string;
 	localChannelCount: number;
 }
 
-export type ClientState = {
+export interface ClientState {
 	clientID: number;
 	incomingMessageId: number;
 }
 
+export interface RenderOptions {
+	mode: PageRenderMode;
+	clientState: ClientState;
+	sessionState: SessionState;
+	clientURL: string;
+	clientIntegrity: string;
+	fallbackIntegrity: string;
+	noScriptURL?: string;
+	bootstrapData?: BootstrapData;
+	cssBasePath?: string;
+}
+
+const rulesForCSSAtPath = memoize(async (path: string): Promise<Rule[]> => {
+	const cssText = (await readFile(path)).toString();
+	const css = parseCSS(cssText);
+	return (css.stylesheet!.rules as Rule[] | undefined) || [];
+});
+
 export class PageRenderer {
-	dom: JSDOM;
-	document: Document;
-	body: Element;
-	head: Element;
-	baseURL: string;
-	noscript: Element;
-	metaRedirect: Element;
-	clientScript: HTMLScriptElement;
-	fallbackScript: HTMLScriptElement;
-	bootstrapScript?: HTMLScriptElement;
-	formNode?: HTMLFormElement;
-	postbackInput?: HTMLInputElement;
-	sessionIdInput?: HTMLInputElement;
-	clientIdInput?: HTMLInputElement;
-	messageIdInput?: HTMLInputElement;
-	hasServerChannelsInput?: HTMLInputElement;
+	private dom: JSDOM;
+	private document: Document;
+	public body: Element;
+	public head: Element;
+	private noscript: Element;
+	private metaRedirect: Element;
+	private clientScript: HTMLScriptElement;
+	private fallbackScript: HTMLScriptElement;
+	private inlineStyles: HTMLStyleElement;
+	private bootstrapScript?: HTMLScriptElement;
+	private formNode?: HTMLFormElement;
+	private postbackInput?: HTMLInputElement;
+	private sessionIdInput?: HTMLInputElement;
+	private clientIdInput?: HTMLInputElement;
+	private messageIdInput?: HTMLInputElement;
+	private hasServerChannelsInput?: HTMLInputElement;
 	constructor(dom: JSDOM, noscript: Element, metaRedirect: Element) {
 		this.dom = dom;
 		this.document = (dom.window as Window).document;
@@ -57,7 +79,7 @@ export class PageRenderer {
 		const fallbackScript = this.fallbackScript = this.document.createElement("script");
 		this.body.appendChild(fallbackScript);
 	}
-	render(mode: PageRenderMode, clientState: ClientState, sessionState: SessionState, clientURL: string, clientIntegrity: string, fallbackIntegrity: string, noScriptURL?: string, bootstrapData?: BootstrapData) : string {
+	public async render({ mode, clientState, sessionState, clientURL, clientIntegrity, fallbackIntegrity, noScriptURL, bootstrapData, cssBasePath }: RenderOptions): Promise<string> {
 		const document = this.document;
 		let bootstrapScript: HTMLScriptElement | undefined;
 		let textNode: Node | undefined;
@@ -68,6 +90,20 @@ export class PageRenderer {
 		let messageIdInput: HTMLInputElement | undefined;
 		let hasServerChannelsInput: HTMLInputElement | undefined;
 		let siblingNode: Node | null = null;
+		let cssRules: Rule[] | undefined;
+		// CSS Inlining
+		if (cssBasePath) {
+			const linkTags = this.body.getElementsByTagName("link");
+			for (let i = 0; i < linkTags.length; i++) {
+				const href = linkTags[i].href;
+				if (href && !/^\w+:/.test(href)) {
+					const rules = await rulesForCSSAtPath(resolvePath(cssBasePath, href.replace(/^\/+/, "")));
+					if (rules.length) {
+						cssRules = cssRules ? cssRules.concat(rules) : rules;
+					}
+				}
+			}
+		}
 		// Hidden form elements for fallbacks
 		if (mode >= PageRenderMode.IncludeForm) {
 			formNode = this.formNode;
@@ -152,6 +188,13 @@ export class PageRenderer {
 			const bodyParent = realBody.parentElement!;
 			bodyParent.replaceChild(this.body, realBody);
 			try {
+				if (cssRules) {
+					const newRules = cssRules.filter((rule: Rule) => rule.type === "rule" && rule.selectors && rule.selectors.some(selector => document.querySelector(selector) !== null));
+					if (newRules.length) {
+						const inlineStyles = this.inlineStyles || (this.inlineStyles = this.head.appendChild(document.createElement("style")));
+						inlineStyles.textContent = stringifyCSS({ type: "stylesheet", stylesheet: { rules: newRules } }, { compress: true });
+					}
+				}
 				return this.dom.serialize();
 			} finally {
 				bodyParent.replaceChild(realBody, this.body);

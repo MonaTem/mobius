@@ -1,42 +1,42 @@
-import { resolve } from "path";
-import { packageRelative } from "./fileUtils";
-import { rollup, Plugin } from "rollup";
-import { NodePath } from "babel-traverse";
-import { existsSync } from "fs";
-import { BlockStatement, CallExpression, ForStatement, Identifier, Node, LabeledStatement, LogicalExpression, StringLiteral, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as babel from "babel-core";
+import { NodePath } from "babel-traverse";
+import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, StringLiteral, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as types from "babel-types";
-import { pureBabylon as pure } from "side-effects-safe";
+import { existsSync } from "fs";
+import { resolve } from "path";
+import { Plugin, rollup } from "rollup";
 import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
+import { pureBabylon as pure } from "side-effects-safe";
 import * as ts from "typescript";
-import rewriteForInStatements from "./rewriteForInStatements";
-import noImpureGetters from "./noImpureGetters";
-import importBindingForCall from "./importBindingForCall";
 import addSubresourceIntegrity from "./addSubresourceIntegrity";
+import { packageRelative } from "./fileUtils";
+import importBindingForCall from "./importBindingForCall";
+import noImpureGetters from "./noImpureGetters";
+import rewriteForInStatements from "./rewriteForInStatements";
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
-type RedactedExportData = { [exportName: string]: (boolean | undefined)[] };
+interface RedactedExportData { [exportName: string]: Array<boolean | undefined>; }
 const redactions: { [moduleName: string]: RedactedExportData } = {
 	"redact": {
-		"redact": [true],
-		"secret": [true, true, true, true, true, true, true],
+		redact: [true],
+		secret: [true, true, true, true, true, true, true],
 	},
 	"sql": {
-		"query": [true, true, false],
-		"modify": [true, true, false],
+		query: [true, true, false],
+		modify: [true, true, false],
 	},
 	"sql-impl": {
-		"execute": [true, true, false],
+		execute: [true, true, false],
 	},
 	"fetch": {
-		"fromServer": [false, false],
+		fromServer: [false, false],
 	},
 	"broadcast": {
-		"send": [false, false],
-		"receive": [false]
-	}
+		send: [false, false],
+		receive: [false],
+	},
 };
 
 function isUndefined(node: Node) {
@@ -72,15 +72,15 @@ function stripRedact() {
 							const methodRedactions = moduleRedactions[binding.export];
 							if (methodRedactions) {
 								const mappedArguments = path.node.arguments.map((arg, index) => {
-									const isPure = isPureOrRedacted(path.get(`arguments.${index}`));
+									const argumentIsPure = isPureOrRedacted(path.get(`arguments.${index}`));
 									switch (methodRedactions[index]) {
 										case true:
-											if (isPure) {
+											if (argumentIsPure) {
 												return types.identifier("undefined");
 											}
-											throw path.buildCodeFrameError(`Potential side-effects in argument ${index+1} to ${binding.export} from ${binding.module} in ${path.getSource()}, where only pure expression was expected!`);
+											throw path.buildCodeFrameError(`Potential side-effects in argument ${index + 1} to ${binding.export} from ${binding.module} in ${path.getSource()}, where only pure expression was expected!`);
 										case false:
-											if (isPure) {
+											if (argumentIsPure) {
 												return types.identifier("undefined");
 											}
 											return arg;
@@ -88,7 +88,7 @@ function stripRedact() {
 											return arg;
 									}
 								});
-								while (mappedArguments.length && isUndefined(mappedArguments[mappedArguments.length-1])) {
+								while (mappedArguments.length && isUndefined(mappedArguments[mappedArguments.length - 1])) {
 									mappedArguments.pop();
 								}
 								path.replaceWith(types.callExpression(path.node.callee, mappedArguments));
@@ -96,9 +96,9 @@ function stripRedact() {
 							}
 						}
 					}
-				}
-			}
-		}
+				},
+			},
+		},
 	};
 }
 
@@ -115,9 +115,9 @@ function fixTypeScriptExtendsWarning() {
 							path.replaceWith(node.right);
 						}
 					}
-				}
-			}
-		}
+				},
+			},
+		},
 	};
 }
 
@@ -128,8 +128,8 @@ function rewriteInsufficientBrowserThrow() {
 				if (path.node.label.name === "insufficient_browser_throw" && path.get("body").isThrowStatement()) {
 					path.replaceWith(types.returnStatement());
 				}
-			}
-		}
+			},
+		},
 	};
 }
 
@@ -141,7 +141,7 @@ function stripUnusedArgumentCopies() {
 				const test = path.get("test");
 				const update = path.get("update");
 				const body = path.get("body");
-				if (init.isVariableDeclaration() && (init.node as VariableDeclaration).declarations.every(declarator => declarator.id.type == "Identifier" && (!declarator.init || isPure(declarator.init))) &&
+				if (init.isVariableDeclaration() && (init.node as VariableDeclaration).declarations.every((declarator) => declarator.id.type == "Identifier" && (!declarator.init || isPure(declarator.init))) &&
 					isPure(test.node) &&
 					update.isUpdateExpression() && update.get("argument").isIdentifier() && ((update.node as UpdateExpression).argument as Identifier).name === ((init.node as VariableDeclaration).declarations[0].id as Identifier).name &&
 					body.isBlockStatement() && (body.node as BlockStatement).body.length == 1
@@ -164,8 +164,8 @@ function stripUnusedArgumentCopies() {
 						}
 					}
 				}
-			}
-		}
+			},
+		},
 	};
 }
 
@@ -186,10 +186,10 @@ function verifyStylePaths(basePath: string) {
 							}
 						}
 					}
-				}
-			}
-		}
-	}
+				},
+			},
+		},
+	};
 }
 
 interface CompilerOutput {
@@ -197,7 +197,7 @@ interface CompilerOutput {
 	map: string;
 }
 
-export default async function(input: string, basePath: string, publicPath: string, minify: boolean) : Promise<CompilerOutput> {
+export default async function(input: string, basePath: string, publicPath: string, minify: boolean): Promise<CompilerOutput> {
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
@@ -205,7 +205,7 @@ export default async function(input: string, basePath: string, publicPath: strin
 
 	// Workaround to allow TypeScript to union two folders. This is definitely not right, but it works :(
 	const parseJsonConfigFileContent = ts.parseJsonConfigFileContent;
-	(ts as any).parseJsonConfigFileContent = function(this: any, json: any, host: ts.ParseConfigHost, basePath2: string, existingOptions?: ts.CompilerOptions, configFileName?: string, resolutionStack?: ts.Path[], extraFileExtensions?: ReadonlyArray<ts.JsFileExtensionInfo>) : ts.ParsedCommandLine {
+	(ts as any).parseJsonConfigFileContent = function(this: any, json: any, host: ts.ParseConfigHost, basePath2: string, existingOptions?: ts.CompilerOptions, configFileName?: string, resolutionStack?: ts.Path[], extraFileExtensions?: ReadonlyArray<ts.JsFileExtensionInfo>): ts.ParsedCommandLine {
 		const result = parseJsonConfigFileContent.call(this, json, host, basePath2, existingOptions, configFileName, resolutionStack, extraFileExtensions);
 		const augmentedResult = parseJsonConfigFileContent.call(this, json, host, basePath, existingOptions, configFileName, resolutionStack, extraFileExtensions);
 		result.fileNames = result.fileNames.concat(augmentedResult.fileNames);
@@ -214,7 +214,7 @@ export default async function(input: string, basePath: string, publicPath: strin
 	const plugins = [
 		includePaths({
 			include: {
-				"preact": packageRelative("dist/common/preact")
+				preact: packageRelative("dist/common/preact"),
 			},
 		}),
 		rollupTypeScript({
@@ -223,7 +223,7 @@ export default async function(input: string, basePath: string, publicPath: strin
 				resolve(basePath, "**/*.ts+(|x)"),
 				resolve(basePath, "*.ts+(|x)"),
 				packageRelative("**/*.ts+(|x)"),
-				packageRelative("*.ts+(|x)")
+				packageRelative("*.ts+(|x)"),
 			] as any,
 			tsconfig: packageRelative("tsconfig-client.json"),
 			tsconfigOverride: {
@@ -231,20 +231,20 @@ export default async function(input: string, basePath: string, publicPath: strin
 					baseUrl: basePath,
 					paths: {
 						"app": [
-							resolve(basePath, input)
+							resolve(basePath, input),
 						],
 						"*": [
 							packageRelative("client/*"),
 							resolve(basePath, "client/*"),
 							packageRelative("common/*"),
 							resolve(basePath, "common/*"),
-							packageRelative("types/*")
+							packageRelative("types/*"),
 						],
 						"tslib": [
 							packageRelative("node_modules/tslib/tslib"),
 						],
-					}
-				}
+					},
+				},
 			},
 		}) as any as Plugin,
 		rollupBabel({
@@ -258,28 +258,28 @@ export default async function(input: string, basePath: string, publicPath: strin
 				fixTypeScriptExtendsWarning(),
 				noImpureGetters(),
 				rewriteInsufficientBrowserThrow(),
-				stripUnusedArgumentCopies()
-			]
-		})
+				stripUnusedArgumentCopies(),
+			],
+		}),
 	];
 	if (minify) {
 		plugins.push(require("rollup-plugin-closure-compiler-js")({
 			languageIn: "ES5",
 			languageOut: "ES3",
 			assumeFunctionWrapper: false,
-			rewritePolyfills: false
+			rewritePolyfills: false,
 		}) as Plugin);
 	}
 	const bundle = await rollup({
 		input: packageRelative("client/main.js"),
 		plugins,
 		acorn: {
-			allowReturnOutsideFunction: true
-		}
+			allowReturnOutsideFunction: true,
+		},
 	});
 	const output = await bundle.generate({
 		format: "iife",
-		sourcemap: true
+		sourcemap: true,
 	});
 	// Cleanup some of the mess we made
 	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;
@@ -288,4 +288,3 @@ export default async function(input: string, basePath: string, publicPath: strin
 		map: output.map.toString(),
 	};
 }
-

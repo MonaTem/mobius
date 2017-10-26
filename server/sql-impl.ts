@@ -1,6 +1,6 @@
-import { createServerPromise, createServerChannel, secrets } from "mobius";
-import { Credentials, Record } from "sql";
+import { createServerChannel, createServerPromise, secrets } from "mobius";
 import { peek, Redacted } from "redact";
+import { Credentials, Record } from "sql";
 
 declare global {
 	namespace NodeJS {
@@ -24,9 +24,9 @@ function getPool(credentials: Redacted<Credentials | undefined>) {
 	return pool;
 }
 
-export function execute(credentials: Redacted<Credentials | undefined>, sql: string | Redacted<string>, params?: any[] | Redacted<any[]>) : Promise<Record[]>;
-export function execute<T>(credentials: Redacted<Credentials | undefined>, sql: string | Redacted<string>, params: any[] | Redacted<any[]>, stream: (record: Record) => T) : Promise<T[]>;
-export function execute(credentials: Redacted<Credentials | undefined>, sql: string | Redacted<string>, params?: any[] | Redacted<any[]>, stream?: (record: Record) => any) : Promise<any[]> {
+export function execute(credentials: Redacted<Credentials | undefined>, sql: string | Redacted<string>, params?: any[] | Redacted<any[]>): Promise<Record[]>;
+export function execute<T>(credentials: Redacted<Credentials | undefined>, sql: string | Redacted<string>, params: any[] | Redacted<any[]>, stream: (record: Record) => T): Promise<T[]>;
+export function execute(credentials: Redacted<Credentials | undefined>, sql: string | Redacted<string>, params?: any[] | Redacted<any[]>, stream?: (record: Record) => any): Promise<any[]> {
 	const records: Record[] = [];
 	let send: ((record: Record) => void) | undefined;
 	const channel = createServerChannel((record: Record) => {
@@ -35,15 +35,15 @@ export function execute(credentials: Redacted<Credentials | undefined>, sql: str
 	return createServerPromise(() => new Promise<void>((resolve, reject) => {
 		const query = getPool(credentials).query({
 			sql: peek(sql),
-			values: params ? peek(params) : []
-		})
+			values: params ? peek(params) : [],
+		});
 		query.on("result", (record: any) => send!(Object.assign({}, record)));
 		query.on("end", resolve);
 		query.on("error", reject);
-	})).then(value => {
+	})).then((value) => {
 		channel.close();
 		return records;
-	}, error => {
+	}, (error) => {
 		channel.close();
 		throw error;
 	});
