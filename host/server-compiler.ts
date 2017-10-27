@@ -44,7 +44,7 @@ const compilerOptions = (() => {
 	return ts.convertCompilerOptionsFromJson(configObject.compilerOptions, packageRelative("./"), fileName).options;
 })();
 
-function sandbox<T extends ServerModuleGlobal>(code: string, filename: string) : (global: T) => void {
+function sandbox<T extends ServerModuleGlobal>(code: string, filename: string): (global: T) => void {
 	return vm.runInThisContext("(function (self){with(self){return(function(self,global,require,document){" + code + "\n})(self,self.global,self.require,self.document)}})", {
 		filename,
 		lineOffset: 0,

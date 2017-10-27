@@ -1,8 +1,8 @@
 import { escape } from "./event-loop";
 import { exists } from "./fileUtils";
+import { ModuleSource } from "./server-compiler";
 import { createSessionGroup, Session } from "./session";
 import { archivePathForSessionId, HostSandboxOptions } from "./session-sandbox";
-import { ModuleSource } from "./server-compiler";
 
 import { ClientMessage } from "../common/_internal";
 

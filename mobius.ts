@@ -12,14 +12,14 @@ import * as express from "express";
 import { diff_match_patch } from "diff-match-patch";
 const diffMatchPatchNode = new (require("diff-match-patch-node") as typeof diff_match_patch)();
 
-import { Client } from "./host/client";
 import compileBundle from "./host/bundle-compiler";
-import { ModuleSource } from "./host/server-compiler";
+import { Client } from "./host/client";
 import * as csrf from "./host/csrf";
 import { escape } from "./host/event-loop";
 import { exists, mkdir, packageRelative, readFile, readJSON, rimraf, stat, unlink, writeFile } from "./host/fileUtils";
 import { Host } from "./host/host";
 import { PageRenderMode } from "./host/page-renderer";
+import { ModuleSource } from "./host/server-compiler";
 import { Session } from "./host/session";
 
 import { ClientMessage, deserializeMessageFromText, serializeMessageAsText } from "./common/_internal";
@@ -545,7 +545,7 @@ export default function main() {
 			hostname: args.hostname as string | undefined,
 			workers: args.workers as number,
 			simulatedLatency: args["simulated-latency"] as number,
-			bundled: args.bundled as boolean
+			bundled: args.bundled as boolean,
 		});
 
 		const expressAsync = require("express") as typeof express;

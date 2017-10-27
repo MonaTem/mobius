@@ -1,8 +1,8 @@
-import importBindingForCall from "./importBindingForCall";
 import { NodePath } from "babel-traverse";
 import { CallExpression, StringLiteral } from "babel-types";
 import { existsSync } from "fs";
 import { resolve } from "path";
+import importBindingForCall from "./importBindingForCall";
 
 export default function verifyStylePaths(basePath: string) {
 	return {
@@ -26,4 +26,3 @@ export default function verifyStylePaths(basePath: string) {
 		},
 	};
 }
-

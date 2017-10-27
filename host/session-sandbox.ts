@@ -1,7 +1,7 @@
 import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
 import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
-import { loadModule, ServerModule, ModuleSource } from "./server-compiler";
+import { loadModule, ModuleSource, ServerModule } from "./server-compiler";
 
 import * as mobiusModule from "mobius";
 import { Channel, JsonValue } from "mobius-types";
