@@ -1,8 +1,7 @@
 import * as babel from "babel-core";
 import { NodePath } from "babel-traverse";
-import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, StringLiteral, UpdateExpression, VariableDeclaration } from "babel-types";
+import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as types from "babel-types";
-import { existsSync } from "fs";
 import { resolve } from "path";
 import { Plugin, rollup } from "rollup";
 import _rollupBabel from "rollup-plugin-babel";
@@ -15,6 +14,7 @@ import { packageRelative } from "./fileUtils";
 import importBindingForCall from "./importBindingForCall";
 import noImpureGetters from "./noImpureGetters";
 import rewriteForInStatements from "./rewriteForInStatements";
+import verifyStylePaths from "./verify-style-paths";
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
 interface RedactedExportData { [exportName: string]: Array<boolean | undefined>; }
@@ -169,29 +169,6 @@ function stripUnusedArgumentCopies() {
 	};
 }
 
-function verifyStylePaths(basePath: string) {
-	return {
-		visitor: {
-			CallExpression: {
-				exit(path: NodePath<CallExpression>) {
-					const args = path.node.arguments;
-					if (args.length === 1 && args[0].type === "StringLiteral") {
-						const binding = importBindingForCall(path);
-						if (binding && binding.module === "dom" && binding.export === "style") {
-							const value = (args[0] as StringLiteral).value;
-							if (!/^\w+:/.test(value)) {
-								if (!existsSync(resolve(basePath, value.replace(/^\/+/, "")))) {
-									throw path.buildCodeFrameError(`Referenced a style path that does not exist: ${path.getSource()}`);
-								}
-							}
-						}
-					}
-				},
-			},
-		},
-	};
-}
-
 interface CompilerOutput {
 	code: string;
 	map: string;
@@ -264,8 +241,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 				addSubresourceIntegrity(publicPath),
 				verifyStylePaths(publicPath),
 				rewriteForInStatements(),
-				fixTypeScriptExtendsWarning(),
-				noImpureGetters()
+				noImpureGetters(),
 			],
 		}),
 	];

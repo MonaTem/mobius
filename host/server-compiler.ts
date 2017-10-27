@@ -7,6 +7,7 @@ import { packageRelative } from "./fileUtils";
 import memoize from "./memoize";
 import noImpureGetters from "./noImpureGetters";
 import rewriteForInStatements from "./rewriteForInStatements";
+import verifyStylePaths from "./verify-style-paths";
 
 let convertToCommonJS: any;
 let optimizeClosuresInRender: any;
@@ -68,9 +69,10 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(path: strin
 		plugins: [
 			convertToCommonJS,
 			optimizeClosuresInRender,
+			addSubresourceIntegrity(publicPath),
+			verifyStylePaths(publicPath),
 			rewriteForInStatements(),
 			noImpureGetters(),
-			addSubresourceIntegrity(publicPath),
 		],
 		inputSourceMap: compiled && typeof compiled.sourceMapText == "string" ? JSON.parse(compiled.sourceMapText) : undefined,
 	});

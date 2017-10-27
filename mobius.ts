@@ -13,7 +13,7 @@ import { diff_match_patch } from "diff-match-patch";
 const diffMatchPatchNode = new (require("diff-match-patch-node") as typeof diff_match_patch)();
 
 import { Client } from "./host/client";
-import compileBundle from "./host/client-compiler";
+import compileBundle from "./host/bundle-compiler";
 import { ModuleSource } from "./host/server-compiler";
 import * as csrf from "./host/csrf";
 import { escape } from "./host/event-loop";
