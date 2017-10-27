@@ -2,6 +2,7 @@ import { escape } from "./event-loop";
 import { exists } from "./fileUtils";
 import { createSessionGroup, Session } from "./session";
 import { archivePathForSessionId, HostSandboxOptions } from "./session-sandbox";
+import { ModuleSource } from "./server-compiler";
 
 import { ClientMessage } from "../common/_internal";
 
@@ -17,7 +18,7 @@ export class Host {
 	public options: HostSandboxOptions;
 	public staleSessionTimeout: any;
 	public constructSession: (sessionID: string, request?: Request) => Session;
-	constructor(scriptPath: string, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, publicPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, workerCount: number, hostname?: string) {
+	constructor(source: ModuleSource, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, publicPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, workerCount: number, hostname?: string) {
 		this.destroying = false;
 		this.constructSession = createSessionGroup(this.options = {
 			htmlSource,
@@ -25,7 +26,7 @@ export class Host {
 			secrets,
 			serverModulePaths,
 			modulePaths,
-			scriptPath,
+			source,
 			publicPath,
 			sessionsPath,
 			hostname,

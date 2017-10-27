@@ -13,7 +13,8 @@ import { diff_match_patch } from "diff-match-patch";
 const diffMatchPatchNode = new (require("diff-match-patch-node") as typeof diff_match_patch)();
 
 import { Client } from "./host/client";
-import clientCompile from "./host/client-compiler";
+import compileBundle from "./host/client-compiler";
+import { ModuleSource } from "./host/server-compiler";
 import * as csrf from "./host/csrf";
 import { escape } from "./host/event-loop";
 import { exists, mkdir, packageRelative, readFile, readJSON, rimraf, stat, unlink, writeFile } from "./host/fileUtils";
@@ -88,13 +89,14 @@ interface Config {
 	hostname?: string;
 	workers?: number;
 	simulatedLatency?: number;
+	bundled?: boolean;
 }
 
 function defaultSessionPath(sourcePath: string) {
 	return resolvePath(sourcePath, ".sessions");
 }
 
-export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0 }: Config) {
+export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0, bundled = false }: Config) {
 	let serverJSPath: string;
 	const packagePath = resolvePath(sourcePath, "package.json");
 	if (await exists(packagePath)) {
@@ -130,7 +132,8 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	// Start host
 	console.log("Rendering initial page...");
-	const host = new Host(serverJSPath, serverModulePaths, modulePaths, sessionsPath, publicPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, workers, hostname);
+	const serverSource: ModuleSource = bundled ? { from: "string", code: (await compileBundle("server", serverJSPath, sourcePath, publicPath)).code } : { from: "file", path: serverJSPath };
+	const host = new Host(serverSource, serverModulePaths, modulePaths, sessionsPath, publicPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, workers, hostname);
 
 	// Read fallback script
 	const fallbackPath = packageRelative("dist/fallback.js");
@@ -143,7 +146,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	const prerender = initialPageSession.prerenderContent();
 
 	// Compile client code while userspace is running
-	const asyncClientScript = clientCompile(serverJSPath, sourcePath, publicPath, minify);
+	const asyncClientScript = compileBundle("client", serverJSPath, sourcePath, publicPath, minify);
 	const clientScript = await asyncClientScript;
 	const clientScriptBuffer = Buffer.from(clientScript.code);
 	const clientEtag = etag(clientScriptBuffer);
@@ -447,6 +450,7 @@ export default function main() {
 			{ name: "minify", type: Boolean, defaultValue: false },
 			{ name: "source-map", type: Boolean, defaultValue: false },
 			{ name: "workers", type: Number, defaultValue: cpuCount },
+			{ name: "bundled", type: Boolean, defaultValue: false },
 			{ name: "hostname", type: String },
 			{ name: "simulated-latency", type: Number, defaultValue: 0 },
 			{ name: "init", type: Boolean, defaultValue: false },
@@ -495,6 +499,10 @@ export default function main() {
 							description: `Number or workers to use (defaults to number of CPUs: ${cpuCount})`,
 						},
 						{
+							name: "bundled",
+							description: "Bundle code on the server as well as on the client",
+						},
+						{
 							name: "help",
 							description: "Prints this usage guide. Yahahah! You found me!",
 						},
@@ -537,6 +545,7 @@ export default function main() {
 			hostname: args.hostname as string | undefined,
 			workers: args.workers as number,
 			simulatedLatency: args["simulated-latency"] as number,
+			bundled: args.bundled as boolean
 		});
 
 		const expressAsync = require("express") as typeof express;

@@ -1,7 +1,7 @@
 import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
 import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
-import { loadModule, ServerModule } from "./server-compiler";
+import { loadModule, ServerModule, ModuleSource } from "./server-compiler";
 
 import * as mobiusModule from "mobius";
 import { Channel, JsonValue } from "mobius-types";
@@ -22,7 +22,7 @@ export interface HostSandboxOptions {
 	secrets: JsonValue;
 	serverModulePaths: string[];
 	modulePaths: string[];
-	scriptPath: string;
+	source: ModuleSource;
 	publicPath: string;
 	sessionsPath: string;
 	hostname?: string;
@@ -102,9 +102,9 @@ const enum ArchiveStatus {
 }
 
 // Lazy version of loadModule so that the sandbox module is loaded on first use
-let loadModuleLazy: typeof loadModule = (modulePath, module, publicPath, globalProperties, requireFunction) => {
+let loadModuleLazy: typeof loadModule = (source, module, publicPath, globalProperties, requireFunction) => {
 	loadModuleLazy = require("./server-compiler").loadModule as typeof loadModule;
-	return loadModuleLazy(modulePath, module, publicPath, globalProperties, requireFunction);
+	return loadModuleLazy(source, module, publicPath, globalProperties, requireFunction);
 };
 
 // Hack so that Module._findPath will find TypeScript files
@@ -210,8 +210,8 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		}
 	}
 
-	public loadModule(path: string, newModule: ServerModule, allowNodeModules: boolean) {
-		loadModuleLazy(path, newModule, this.host.options.publicPath, this.globalProperties, (name: string) => {
+	public loadModule(source: ModuleSource, newModule: ServerModule, allowNodeModules: boolean) {
+		loadModuleLazy(source, newModule, this.host.options.publicPath, this.globalProperties, (name: string) => {
 			const bakedModule = bakedModules[name];
 			if (bakedModule) {
 				return bakedModule(this);
@@ -227,7 +227,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 					paths: newModule.paths,
 				};
 				this.modules.set(modulePath, subModule);
-				this.loadModule(modulePath, subModule, !!Module._findPath(name, this.host.options.serverModulePaths));
+				this.loadModule({ from: "file", path: modulePath }, subModule, !!Module._findPath(name, this.host.options.serverModulePaths));
 				return subModule.exports;
 			}
 			const result = require(name);
@@ -246,10 +246,11 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		if (!this.hasRun) {
 			this.hasRun = true;
 			this.enteringCallback();
-			this.loadModule(this.host.options.scriptPath, {
+			const source = this.host.options.source;
+			this.loadModule(source, {
 				exports: {},
 				paths: this.host.options.modulePaths,
-			}, false);
+			}, source.from === "string");
 		}
 	}
 

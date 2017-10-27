@@ -197,7 +197,7 @@ interface CompilerOutput {
 	map: string;
 }
 
-export default async function(input: string, basePath: string, publicPath: string, minify: boolean): Promise<CompilerOutput> {
+export default async function(profile: "client" | "server", input: string, basePath: string, publicPath: string, minify?: boolean): Promise<CompilerOutput> {
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
@@ -225,7 +225,7 @@ export default async function(input: string, basePath: string, publicPath: strin
 				packageRelative("**/*.ts+(|x)"),
 				packageRelative("*.ts+(|x)"),
 			] as any,
-			tsconfig: packageRelative("tsconfig-client.json"),
+			tsconfig: packageRelative(`tsconfig-${profile}.json`),
 			tsconfigOverride: {
 				compilerOptions: {
 					baseUrl: basePath,
@@ -234,8 +234,8 @@ export default async function(input: string, basePath: string, publicPath: strin
 							resolve(basePath, input),
 						],
 						"*": [
-							packageRelative("client/*"),
-							resolve(basePath, "client/*"),
+							packageRelative(`${profile}/*`),
+							resolve(basePath, `${profile}/*`),
 							packageRelative("common/*"),
 							resolve(basePath, "common/*"),
 							packageRelative("types/*"),
@@ -249,7 +249,7 @@ export default async function(input: string, basePath: string, publicPath: strin
 		}) as any as Plugin,
 		rollupBabel({
 			babelrc: false,
-			plugins: [
+			plugins: profile === "client" ? [
 				optimizeClosuresInRender(babel),
 				addSubresourceIntegrity(publicPath),
 				stripRedact(),
@@ -259,6 +259,13 @@ export default async function(input: string, basePath: string, publicPath: strin
 				noImpureGetters(),
 				rewriteInsufficientBrowserThrow(),
 				stripUnusedArgumentCopies(),
+			] : [
+				optimizeClosuresInRender(babel),
+				addSubresourceIntegrity(publicPath),
+				verifyStylePaths(publicPath),
+				rewriteForInStatements(),
+				fixTypeScriptExtendsWarning(),
+				noImpureGetters()
 			],
 		}),
 	];
@@ -266,19 +273,20 @@ export default async function(input: string, basePath: string, publicPath: strin
 		plugins.push(require("rollup-plugin-closure-compiler-js")({
 			languageIn: "ES5",
 			languageOut: "ES3",
-			assumeFunctionWrapper: false,
+			assumeFunctionWrapper: profile !== "client",
 			rewritePolyfills: false,
 		}) as Plugin);
 	}
 	const bundle = await rollup({
 		input: packageRelative("client/main.js"),
+		external: profile === "client" ? [] : ["mobius", "_broadcast"],
 		plugins,
 		acorn: {
 			allowReturnOutsideFunction: true,
 		},
 	});
 	const output = await bundle.generate({
-		format: "iife",
+		format: profile === "client" ? "iife" : "cjs",
 		sourcemap: true,
 	});
 	// Cleanup some of the mess we made

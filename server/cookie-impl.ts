@@ -2,11 +2,11 @@ import { createServerPromise } from "mobius";
 
 let cachedCookies: {[key: string]: string} | undefined;
 
-async function populateCachedCookies(): {[key: string]: string} {
+async function populateCachedCookies(): Promise<{[key: string]: string}> {
 	if (cachedCookies) {
 		return cachedCookies;
 	}
-	const newCookies = await (require("allCookies") as () => Promise<string>)();
+	const newCookies = await (require("allCookies") as () => Promise<{[key: string]: string}>)();
 	return cachedCookies || (cachedCookies = newCookies);
 }
 

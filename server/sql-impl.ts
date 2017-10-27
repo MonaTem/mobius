@@ -1,4 +1,4 @@
-import { createServerChannel, createServerPromise, secrets } from "mobius";
+import { createServerChannel, createServerPromise } from "mobius";
 import { peek, Redacted } from "redact";
 import { Credentials, Record } from "sql";
 
@@ -13,13 +13,14 @@ declare global {
 function getPool(credentials: Redacted<Credentials | undefined>) {
 	const pools = global.mysqlPools || (global.mysqlPools = new Map<Credentials, any>());
 	const peeked = peek(credentials);
-	let pool = pools.get(peeked);
+	let pool = pools.get(peeked!);
 	if (!pool) {
-		if (!peeked || !peeked.host) {
+		if (peeked && peeked.host) {
+			pool = require("mysql").createPool(peeked);
+			pools.set(peeked, pool);
+		} else {
 			throw new Error("Invalid SQL credentials!");
 		}
-		pool = require("mysql").createPool(peeked);
-		pools.set(peeked, pool);
 	}
 	return pool;
 }

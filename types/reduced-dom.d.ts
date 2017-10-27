@@ -33,10 +33,10 @@ interface Document extends Node {
 	createElement(tagName: string): HTMLElement;
 	createTextNode(data: string): Text;
 	querySelector(selectors: string): Element | null;
-	querySelectorAll<K extends keyof HTMLElementTagNameMap>(knownSelectors: K): ReadonlyArray<HTMLElementTagNameMap[K]>;
-	querySelectorAll(selectors: string): ReadonlyArray<HTMLElement>;
-	getElementsByTagName<K extends keyof HTMLElementTagNameMap>(tagName: K): ReadonlyArray<HTMLElementTagNameMap[K]>;
-	getElementsByTagName(tagName: string): ReadonlyArray<HTMLElement>;
+	querySelectorAll<K extends keyof HTMLElementTagNameMap>(knownSelectors: K): ArrayLike<HTMLElementTagNameMap[K]>;
+	querySelectorAll(selectors: string): ArrayLike<HTMLElement>;
+	getElementsByTagName<K extends keyof HTMLElementTagNameMap>(tagName: K): ArrayLike<HTMLElementTagNameMap[K]>;
+	getElementsByTagName(tagName: string): ArrayLike<HTMLElement>;
 	readonly body: HTMLBodyElement;
 	readonly head: HTMLHeadElement;
 }
@@ -46,9 +46,15 @@ interface DocumentFragment extends Node {
 
 interface Element extends Node {
 	setAttribute(name: string, value: string): void;
+	getAttribute(name: string): string | null;
+	removeAttribute(name: string): void;
 	querySelector(selectors: string): Element | null;
-	getElementsByTagName<K extends keyof HTMLElementTagNameMap>(tagName: K): ReadonlyArray<HTMLElementTagNameMap[K]>;
-	getElementsByTagName(tagName: string): ReadonlyArray<HTMLElement>;
+	getElementsByTagName<K extends keyof HTMLElementTagNameMap>(tagName: K): ArrayLike<HTMLElementTagNameMap[K]>;
+	getElementsByTagName(tagName: string): ArrayLike<Element>;
+	children: ArrayLike<Element>;
+	lastElementChild: Element | null;
+	previousElementSibling: Element | null;
+	innerText: string;
 }
 
 interface HTMLElement extends Element {
@@ -74,6 +80,7 @@ interface HTMLScriptElement extends HTMLElement {
 
 interface HTMLLinkElement extends HTMLElement {
 	href: string;
+	rel: string;
 }
 
 interface HTMLStyleElement extends HTMLElement {

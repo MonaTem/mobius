@@ -1,12 +1,12 @@
 import { defaultEventProperties } from "_dom";
-import { restoreDefaults, stripDefaults } from "_internal";
+import { restoreDefaults } from "_internal";
 import { createClientChannel, createClientPromise } from "mobius";
 import { Channel } from "mobius-types";
 import * as preact from "preact";
 export { h, Component, AnyComponent, ComponentProps } from "preact";
 
 type PreactNode = Element & {
-	__l?: { [ event: string ]: (event: any) => void },
+	_listeners?: { [ event: string ]: (event: any) => void },
 	__c?: { [ event: string ]: [Channel, (event: any) => void] },
 };
 
