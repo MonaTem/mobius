@@ -25,6 +25,7 @@
   },
   "homepage": "https://github.com/rpetrich/mobius#readme",
   "dependencies": {
+    "@types/etag": "^1.8.0",
     "@types/express": "^4.0.38",
     "@types/jsdom": "^11.0.3",
     "@types/node": "^8.0.47",
@@ -37,6 +38,7 @@
     "command-line-usage": "^4.0.1",
     "css": "^2.2.1",
     "diff-match-patch-node": "^0.9.1",
+    "etag": "^1.8.1",
     "express": "^4.16.2",
     "express-ws": "^3.0.0",
     "init-package-json": "^1.10.1",
