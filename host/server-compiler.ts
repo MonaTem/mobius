@@ -45,7 +45,7 @@ const compilerOptions = (() => {
 })();
 
 function sandbox<T extends ServerModuleGlobal>(code: string, filename: string): (global: T) => void {
-	return vm.runInThisContext(`(function(self){return(function(self,global,require,document,exports){${code}\n})(self,self.global,self.require,self.document,self.exports)})`, {
+	return vm.runInThisContext(`(function(self){return(function(self,global,require,document,exports,Math,Date,setInterval,clearInterval,setTimeout,clearTimeout){${code}\n})(self,self.global,self.require,self.document,self.exports,self.Math,self.Date,self.setInterval,self.clearInterval,self.setTimeout,self.clearTimeout)})`, {
 		filename,
 		lineOffset: 0,
 		displayErrors: true,
