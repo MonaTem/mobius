@@ -5,9 +5,12 @@ import { resolve as resolvePath } from "path";
 import * as util from "util";
 const Module = require("module");
 
+import * as accepts from "accepts";
 import * as bodyParser from "body-parser";
 import * as etag from "etag";
 import * as express from "express";
+import { compressSync as brotliCompress } from "iltorb";
+import * as zlib from "zlib";
 
 import { diff_match_patch } from "diff-match-patch";
 const diffMatchPatchNode = new (require("diff-match-patch-node") as typeof diff_match_patch)();
@@ -47,7 +50,49 @@ function checkAndHandleETag(request: express.Request, response: express.Response
 	return false;
 }
 
-function topFrameHTML(request: express.Request, response: express.Response, html: string | Buffer, contentTag?: string) {
+interface StaticFileRoute {
+	path: string;
+	foreverPath: string;
+	etag: string;
+	integrity: string;
+	buffer: Buffer;
+	gzipped: Buffer;
+	brotlied: Buffer;
+}
+
+function staticFileRoute(path: string, contents: string | Buffer): StaticFileRoute {
+	const buffer = typeof contents === "string" ? Buffer.from(contents) : contents;
+	const integrity = createHash("sha256").update(buffer).digest("base64");
+	return {
+		path,
+		foreverPath: path.replace(".", "." + integrity.replace(/\//g, "_").replace(/\+/g, "-").replace(/=/g, "").substring(0, 16) + "."),
+		etag: etag(buffer),
+		integrity: "sha256-" + integrity,
+		buffer,
+		gzipped: zlib.gzipSync(buffer, {
+			level: zlib.constants.Z_BEST_COMPRESSION,
+		}),
+		brotlied: brotliCompress(buffer, {
+			mode: 1,
+		}),
+	};
+}
+
+function sendCompressed(request: express.Request, response: express.Response, route: StaticFileRoute) {
+	response.set("Vary", "Accept-Encoding");
+	const encodings = accepts(request).encodings();
+	if (encodings.indexOf("br") !== -1) {
+		response.set("Content-Encoding", "br");
+		response.send(route.brotlied);
+	} else if (encodings.indexOf("gzip") !== -1) {
+		response.set("Content-Encoding", "gzip");
+		response.send(route.gzipped);
+	} else {
+		response.send(route.buffer);
+	}
+}
+
+function topFrameHTML(request: express.Request, response: express.Response, html: string | Buffer | StaticFileRoute, contentTag?: string) {
 	// Return HTML
 	if (contentTag && checkAndHandleETag(request, response, contentTag)) {
 		return;
@@ -59,7 +104,11 @@ function topFrameHTML(request: express.Request, response: express.Response, html
 	}
 	response.set("Content-Type", "text/html; charset=utf-8");
 	response.set("Content-Security-Policy", "frame-ancestors 'none'");
-	response.send(html);
+	if (typeof html === "string" || html instanceof Buffer) {
+		response.send(html);
+	} else {
+		sendCompressed(request, response, html);
+	}
 }
 
 function messageFromBody(body: { [key: string]: any }): ClientMessage {
@@ -146,31 +195,24 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	const prerender = initialPageSession.prerenderContent();
 
 	// Compile client code while userspace is running
-	const asyncClientScript = compileBundle("client", serverJSPath, sourcePath, publicPath, minify);
-	const clientScript = await asyncClientScript;
-	const clientScriptBuffer = Buffer.from(clientScript.code);
-	const clientEtag = etag(clientScriptBuffer);
-	const clientHash = createHash("sha256").update(clientScriptBuffer).digest("base64");
-	const clientURL = "/client-" + clientHash.replace(/\//g, "_").replace(/\+/g, "-").replace(/=/g, "").substring(0, 16) + ".js";
-	const clientIntegrity = "sha256-" + clientHash;
+	const clientCompiled = await compileBundle("client", serverJSPath, sourcePath, publicPath, minify);
+	const clientScript = staticFileRoute("/client.js", clientCompiled.code);
 
 	// Finish with fallback
-	const fallbackContents = Buffer.from(await fallbackContentsAsync);
-	const fallbackEtag = etag(fallbackContents);
-	const fallbackIntegrity = "sha256-" + createHash("sha256").update(fallbackContents).digest("base64");
+	const fallbackScript = staticFileRoute("/fallback.js", await fallbackContentsAsync);
 
 	// Finish prerender of initial page
 	await prerender;
-	const defaultRenderedHTML = Buffer.from(await initialPageSession.render({
+	const defaultRenderedHTML = staticFileRoute("/", await initialPageSession.render({
 		mode: PageRenderMode.Bare,
 		client: { clientID: 0, incomingMessageId: 0 },
-		clientURL,
-		clientIntegrity,
-		fallbackIntegrity,
+		clientURL: clientScript.foreverPath,
+		clientIntegrity: clientScript.integrity,
+		fallbackURL: fallbackScript.foreverPath,
+		fallbackIntegrity: fallbackScript.integrity,
 		noScriptURL: "/?js=no",
 		cssBasePath: publicPath,
 	}));
-	const defaultRenderedETag = etag(defaultRenderedHTML);
 	await initialPageSession.destroy();
 
 	return {
@@ -196,7 +238,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 							if (simulatedLatency) {
 								await delay(simulatedLatency);
 							}
-							return topFrameHTML(request, response, defaultRenderedHTML, defaultRenderedETag);
+							return topFrameHTML(request, response, defaultRenderedHTML, defaultRenderedHTML.etag);
 						}
 						// New session
 						client = await host.newClient(request);
@@ -210,9 +252,10 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					const html = await session.render({
 						mode: PageRenderMode.IncludeForm,
 						client,
-						clientURL,
-						clientIntegrity,
-						fallbackIntegrity,
+						clientURL: clientScript.foreverPath,
+						clientIntegrity: clientScript.integrity,
+						fallbackURL: fallbackScript.foreverPath,
+						fallbackIntegrity: fallbackScript.integrity,
 						bootstrap: true,
 						cssBasePath: publicPath,
 					});
@@ -272,9 +315,10 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						const html = await client.session.render({
 							mode: PageRenderMode.IncludeFormAndStripScript,
 							client,
-							clientURL,
-							clientIntegrity,
-							fallbackIntegrity,
+							clientURL: clientScript.foreverPath,
+							clientIntegrity: clientScript.integrity,
+							fallbackURL: fallbackScript.foreverPath,
+							fallbackIntegrity: fallbackScript.integrity,
 						});
 						let responseContent = html;
 						if (isJavaScript) {
@@ -390,46 +434,45 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				}
 			});
 
-			server.get("/fallback.js", async (request: express.Request, response: express.Response) => {
-				if (simulatedLatency) {
-					await delay(simulatedLatency);
-				}
-				if (!checkAndHandleETag(request, response, fallbackEtag)) {
-					response.set("Content-Type", "text/javascript; charset=utf-8");
-					response.set("Cache-Control", "max-age=0, must-revalidate, no-transform");
-					response.send(fallbackContents);
-				}
-			});
-			server.get("/client.js", async (request: express.Request, response: express.Response) => {
-				if (simulatedLatency) {
-					await delay(simulatedLatency);
-				}
-				if (!checkAndHandleETag(request, response, clientEtag)) {
-					response.set("Content-Type", "text/javascript; charset=utf-8");
-					response.set("Cache-Control", "max-age=0, must-revalidate, no-transform");
-					if (sourceMaps) {
-						response.set("SourceMap", "/client.js.map");
+			function registerStatic(route: StaticFileRoute, additionalHeaders: (response: express.Response) => void) {
+				server.get(route.path, async (request: express.Request, response: express.Response) => {
+					if (simulatedLatency) {
+						await delay(simulatedLatency);
 					}
-					response.send(clientScriptBuffer);
-				}
-			});
-			server.get(clientURL, async (request: express.Request, response: express.Response) => {
-				if (simulatedLatency) {
-					await delay(simulatedLatency);
-				}
+					if (!checkAndHandleETag(request, response, route.etag)) {
+						response.set("Cache-Control", "max-age=0, must-revalidate, no-transform");
+						additionalHeaders(response);
+						sendCompressed(request, response, route);
+					}
+				});
+				server.get(route.foreverPath, async (request: express.Request, response: express.Response) => {
+					if (simulatedLatency) {
+						await delay(simulatedLatency);
+					}
+					response.set("Cache-Control", "max-age=31536000, no-transform, immutable");
+					response.set("Expires", "Sun, 17 Jan 2038 19:14:07 GMT");
+					additionalHeaders(response);
+					sendCompressed(request, response, route);
+				});
+			}
+
+			registerStatic(fallbackScript, (response) => {
 				response.set("Content-Type", "text/javascript; charset=utf-8");
-				response.set("Cache-Control", "max-age=31536000, no-transform, immutable");
-				response.set("Expires", "Sun, 17 Jan 2038 19:14:07 GMT");
-				if (sourceMaps) {
-					response.set("SourceMap", "/client.js.map");
-				}
-				response.send(clientScriptBuffer);
 			});
 			if (sourceMaps) {
-				server.get("/client.js.map", async (request: express.Request, response: express.Response) => {
+				const clientMap = staticFileRoute("/client.js.map", clientCompiled.map);
+				registerStatic(clientScript, (response) => {
+					response.set("Content-Type", "text/javascript; charset=utf-8");
+					if (sourceMaps) {
+						response.set("SourceMap", clientMap.foreverPath);
+					}
+				});
+				registerStatic(clientMap, (response) => {
 					response.set("Content-Type", "application/json; charset=utf-8");
-					response.set("Cache-Control", "no-transform");
-					response.send(clientScript.map);
+				});
+			} else {
+				registerStatic(clientScript, (response) => {
+					response.set("Content-Type", "text/javascript; charset=utf-8");
 				});
 			}
 		},

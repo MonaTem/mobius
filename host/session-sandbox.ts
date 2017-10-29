@@ -120,6 +120,7 @@ export interface RenderOptions {
 	client: ClientState & ClientBootstrap;
 	clientURL: string;
 	clientIntegrity: string;
+	fallbackURL: string;
 	fallbackIntegrity: string;
 	noScriptURL?: string;
 	bootstrap?: boolean;
@@ -877,13 +878,14 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		return result;
 	}
 
-	public async render({ mode, client, clientURL, clientIntegrity, fallbackIntegrity, noScriptURL, bootstrap, cssBasePath}: RenderOptions): Promise<string> {
+	public async render({ mode, client, clientURL, clientIntegrity, fallbackURL, fallbackIntegrity, noScriptURL, bootstrap, cssBasePath}: RenderOptions): Promise<string> {
 		return this.pageRenderer.render({
 			mode,
 			clientState: client,
 			sessionState: this,
 			clientURL,
 			clientIntegrity,
+			fallbackURL,
 			fallbackIntegrity,
 			noScriptURL,
 			bootstrapData: bootstrap ? await this.generateBootstrapData(client) : undefined,

@@ -39,6 +39,7 @@ export interface RenderOptions {
 	clientURL: string;
 	clientIntegrity: string;
 	fallbackIntegrity: string;
+	fallbackURL: string;
 	noScriptURL?: string;
 	bootstrapData?: BootstrapData;
 	cssBasePath?: string;
@@ -79,7 +80,7 @@ export class PageRenderer {
 		const fallbackScript = this.fallbackScript = this.document.createElement("script");
 		this.body.appendChild(fallbackScript);
 	}
-	public async render({ mode, clientState, sessionState, clientURL, clientIntegrity, fallbackIntegrity, noScriptURL, bootstrapData, cssBasePath }: RenderOptions): Promise<string> {
+	public async render({ mode, clientState, sessionState, clientURL, clientIntegrity, fallbackIntegrity, fallbackURL, noScriptURL, bootstrapData, cssBasePath }: RenderOptions): Promise<string> {
 		const document = this.document;
 		let bootstrapScript: HTMLScriptElement | undefined;
 		let textNode: Node | undefined;
@@ -175,7 +176,7 @@ export class PageRenderer {
 		}
 		this.clientScript.src = clientURL;
 		this.clientScript.setAttribute("integrity", clientIntegrity);
-		this.fallbackScript.textContent = `window._mobius||document.write('<script integrity="${fallbackIntegrity}" src="/fallback.js"><\\/script>')`;
+		this.fallbackScript.textContent = `window._mobius||document.write('<script integrity="${fallbackIntegrity}" src="${fallbackURL}"><\\/script>')`;
 		if (noScriptURL) {
 			this.metaRedirect.setAttribute("content", "0; url=" + noScriptURL);
 			this.head.appendChild(this.noscript);
