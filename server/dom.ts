@@ -86,7 +86,7 @@ export function title(newTitle: string): void {
 	const head = (require("head") as HTMLHeadElement);
 	let element = head.querySelector("title");
 	if (!element) {
-		element = self.document.createElement("title");
+		element = (require("document") as Document).createElement("title");
 		head.appendChild(element);
 	}
 	element.innerText = newTitle;
@@ -97,7 +97,7 @@ const requestedStyles: { [href: string]: Promise<void> } = {};
 export function style(href: string, subresourceIntegrity?: string): Promise<void> {
 	let result = requestedStyles[href];
 	if (!result) {
-		const link = self.document.createElement("link");
+		const link = (require("document") as Document).createElement("link");
 		link.rel = "stylesheet";
 		link.href = href;
 		if (subresourceIntegrity) {

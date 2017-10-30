@@ -2,6 +2,7 @@ import * as babel from "babel-core";
 import { readFileSync } from "fs";
 import * as ts from "typescript";
 import * as vm from "vm";
+import { cwd } from "process";
 import addSubresourceIntegrity from "./addSubresourceIntegrity";
 import { packageRelative } from "./fileUtils";
 import memoize from "./memoize";
@@ -52,6 +53,16 @@ function sandbox<T extends ServerModuleGlobal>(code: string, filename: string): 
 	}) as (global: T) => void;
 }
 
+const diagnosticsHost = {
+	getCurrentDirectory: cwd,
+	getCanonicalFileName(fileName: string) {
+		return fileName;
+	},
+	getNewLine() {
+		return "\n";
+	}
+};
+
 const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(path: string, publicPath: string) => {
 	if (!convertToCommonJS) {
 		convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs")();
@@ -59,12 +70,28 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(path: strin
 	if (!optimizeClosuresInRender) {
 		optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render")(babel);
 	}
-	const scriptContents = readFileSync(path).toString();
-	const compiled = /\.(j|t)s(|x)$/.test(path) ? ts.transpileModule(scriptContents, {
-		fileName: path,
-		compilerOptions,
-	}) : undefined;
-	const transformed = babel.transform(compiled ? compiled.outputText : scriptContents, {
+	let scriptContents: string | undefined;
+	let scriptMap: string | undefined;
+	const isTypeScript = /\.ts(|x)$/.test(path);
+	if (isTypeScript) {
+		const program = ts.createProgram([path, packageRelative("types/reduced-dom.d.ts")], compilerOptions);
+		const diagnostics = ts.getPreEmitDiagnostics(program);
+		if (diagnostics.length) {
+			console.log(ts.formatDiagnostics(diagnostics, diagnosticsHost));
+		}
+		for (let sourceFile of program.getSourceFiles()) {
+			if (sourceFile.fileName === path) {
+				program.emit(sourceFile, (fileName: string, data: string, writeByteOrderMark: boolean, onError?: (message: string) => void, sourceFiles?: ReadonlyArray<ts.SourceFile>) => {
+					if (/\.js$/.test(fileName)) {
+						scriptContents = data;
+					} else if (/\.js\.map$/.test(fileName)) {
+						scriptMap = data;
+					}
+				});
+			}
+		}
+	}
+	const transformed = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(path).toString(), {
 		babelrc: false,
 		plugins: [
 			convertToCommonJS,
@@ -74,7 +101,7 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(path: strin
 			rewriteForInStatements(),
 			noImpureGetters(),
 		],
-		inputSourceMap: compiled && typeof compiled.sourceMapText == "string" ? JSON.parse(compiled.sourceMapText) : undefined,
+		inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
 	});
 	return sandbox<T>(transformed.code!, path);
 });

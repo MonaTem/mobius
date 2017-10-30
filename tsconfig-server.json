@@ -4,6 +4,7 @@
 		"allowJs": false,
 		"declaration": true,
 		"declarationDir": "types",
+		"sourceMap": true,
 		"jsx": "react",
 		"jsxFactory": "dom.h",
 		"strict": true,

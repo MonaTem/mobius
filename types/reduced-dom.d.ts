@@ -4,6 +4,9 @@
 interface EventTarget {
 }
 
+interface Event {
+}
+
 interface Window {
 	readonly document: Document;
 }
