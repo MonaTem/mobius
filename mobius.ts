@@ -201,7 +201,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	// Finish with fallback
 	const fallbackScript = staticFileRoute("/fallback.js", await fallbackContentsAsync);
-	const fallbackMap = staticFileRoute("/fallback.js.map", await fallbackMapContentsAsync);
+	const fallbackMapContents = await fallbackMapContentsAsync;
 
 	// Finish prerender of initial page
 	await prerender;
@@ -467,12 +467,12 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				registerStatic(clientMap, (response) => {
 					response.set("Content-Type", "application/json; charset=utf-8");
 				});
-				const fallbackMapRoute = staticFileRoute("/fallback.js.map", fallbackMap);
+				const fallbackMap = staticFileRoute("/fallback.js.map", fallbackMapContents);
 				registerStatic(fallbackScript, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");
-					response.set("SourceMap", fallbackMapRoute.foreverPath);
+					response.set("SourceMap", fallbackMap.foreverPath);
 				});
-				registerStatic(clientMapRoute, (response) => {
+				registerStatic(fallbackMap, (response) => {
 					response.set("Content-Type", "application/json; charset=utf-8");
 				});
 			} else {
