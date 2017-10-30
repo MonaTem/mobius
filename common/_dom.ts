@@ -6,4 +6,5 @@ export const defaultEventProperties = {
 	ctrlKey: false,
 	metaKey: false,
 	shiftKey: false,
+	repeat: false,
 };
