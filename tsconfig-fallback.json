@@ -9,6 +9,7 @@
 	"compilerOptions": {
 		"baseUrl": "./",
 		"outFile": "dist/fallback.js",
+		"sourceMap": true,
 		"allowJs": true,
 		"strict": true,
 		"strictNullChecks": true,

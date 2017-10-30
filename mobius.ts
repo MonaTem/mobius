@@ -187,6 +187,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	// Read fallback script
 	const fallbackPath = packageRelative("dist/fallback.js");
 	const fallbackContentsAsync = readFile(fallbackPath);
+	const fallbackMapContentsAsync = readFile(fallbackPath + ".map");
 
 	// Start initial page render
 	const initialPageSession = host.constructSession("initial-render");
@@ -200,6 +201,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	// Finish with fallback
 	const fallbackScript = staticFileRoute("/fallback.js", await fallbackContentsAsync);
+	const fallbackMap = staticFileRoute("/fallback.js.map", await fallbackMapContentsAsync);
 
 	// Finish prerender of initial page
 	await prerender;
@@ -456,22 +458,28 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				});
 			}
 
-			registerStatic(fallbackScript, (response) => {
-				response.set("Content-Type", "text/javascript; charset=utf-8");
-			});
 			if (sourceMaps) {
 				const clientMap = staticFileRoute("/client.js.map", clientCompiled.map);
 				registerStatic(clientScript, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");
-					if (sourceMaps) {
-						response.set("SourceMap", clientMap.foreverPath);
-					}
+					response.set("SourceMap", clientMap.foreverPath);
 				});
 				registerStatic(clientMap, (response) => {
 					response.set("Content-Type", "application/json; charset=utf-8");
 				});
+				const fallbackMapRoute = staticFileRoute("/fallback.js.map", fallbackMap);
+				registerStatic(fallbackScript, (response) => {
+					response.set("Content-Type", "text/javascript; charset=utf-8");
+					response.set("SourceMap", fallbackMapRoute.foreverPath);
+				});
+				registerStatic(clientMapRoute, (response) => {
+					response.set("Content-Type", "application/json; charset=utf-8");
+				});
 			} else {
 				registerStatic(clientScript, (response) => {
+					response.set("Content-Type", "text/javascript; charset=utf-8");
+				});
+				registerStatic(fallbackScript, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");
 				});
 			}
