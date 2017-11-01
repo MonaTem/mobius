@@ -1,4 +1,3 @@
-// mobius-shared
 export const defaultEventProperties = {
 	altKey: false,
 	button: 0,
@@ -8,3 +7,5 @@ export const defaultEventProperties = {
 	shiftKey: false,
 	repeat: false,
 };
+
+export type EventArgs = [JSX.Event | JSX.ClipboardEvent | JSX.CompositionEvent | JSX.DragEvent | JSX.FocusEvent | JSX.KeyboardEvent | JSX.MouseEvent | JSX.TouchEvent | JSX.UIEvent | JSX.WheelEvent | JSX.AnimationEvent | JSX.TransitionEvent];

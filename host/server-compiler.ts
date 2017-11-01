@@ -1,6 +1,8 @@
 import * as babel from "babel-core";
 import { readFileSync } from "fs";
 import * as ts from "typescript";
+import { buildGenerator } from "typescript-json-schema";
+import { Ajv } from "ajv";
 import * as vm from "vm";
 import { cwd } from "process";
 import addSubresourceIntegrity from "./addSubresourceIntegrity";
@@ -63,6 +65,17 @@ const diagnosticsHost = {
 	}
 };
 
+// Ajv configured to support draft-04 JSON schemas
+const ajv = (() => {
+	const result = (new (require("ajv") as any)({
+		meta: false,
+		extendRefs: true,
+		unknownFormats: "ignore",
+	})) as Ajv;
+	result.addMetaSchema(require("ajv/lib/refs/json-schema-draft-04.json"));
+	return result;
+})();
+
 const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(path: string, publicPath: string) => {
 	if (!convertToCommonJS) {
 		convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs")();
@@ -72,6 +85,7 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(path: strin
 	}
 	let scriptContents: string | undefined;
 	let scriptMap: string | undefined;
+	let validatorForType: ((name: string) => (obj: any) => boolean) | undefined;
 	const isTypeScript = /\.ts(|x)$/.test(path);
 	if (isTypeScript) {
 		const program = ts.createProgram([path, packageRelative("types/reduced-dom.d.ts")], compilerOptions);
@@ -90,6 +104,20 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(path: strin
 				});
 			}
 		}
+		const generator = buildGenerator(program, {
+			strictNullChecks: true,
+			ref: true,
+			topRef: true,
+			required: true,
+		});
+		if (generator) {
+			validatorForType = memoize((typeName: string) => {
+				const schema = generator.getSchemaForSymbol(typeName);
+				console.log(JSON.stringify(schema, null, 2));
+				const schemaValidator = ajv.compile(schema);
+				return (value: any) => !!schemaValidator(value);
+			});
+		}
 	}
 	const transformed = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(path).toString(), {
 		babelrc: false,
@@ -103,7 +131,7 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(path: strin
 		],
 		inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
 	});
-	return sandbox<T>(transformed.code!, path);
+	return { sandbox: sandbox<T>(transformed.code!, path), validatorForType };
 });
 
 const sandboxedScriptFromCode = memoize(sandbox);
@@ -117,7 +145,11 @@ export function loadModule<T>(source: ModuleSource, module: ServerModule, public
 	moduleGlobal.module = module;
 	moduleGlobal.exports = module.exports;
 	if (source.from === "file") {
-		sandboxedScriptAtPath(source.path, publicPath)(moduleGlobal);
+		const script = sandboxedScriptAtPath(source.path, publicPath);
+		if (script.validatorForType) {
+			module.exports._validatorForType = script.validatorForType;
+		}
+		script.sandbox(moduleGlobal);
 	} else {
 		sandboxedScriptFromCode(source.code, "__bundle.js")(moduleGlobal);
 	}

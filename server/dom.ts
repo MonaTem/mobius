@@ -1,9 +1,10 @@
-import { defaultEventProperties } from "_dom";
+import * as _dom from "_dom";
 import { restoreDefaults } from "_internal";
 import { createClientChannel, createClientPromise } from "mobius";
 import { Channel } from "mobius-types";
 import * as preact from "preact";
 export { h, Component, AnyComponent, ComponentProps } from "preact";
+import { validate } from "schema";
 
 type PreactNode = Element & {
 	_listeners?: { [ event: string ]: (event: any) => void },
@@ -40,8 +41,8 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 				tuple[1] = listener;
 			} else {
 				const channel = createClientChannel((event: any) => {
-					tuple[1](restoreDefaults(event, defaultEventProperties));
-				});
+					tuple[1](restoreDefaults(event, _dom.defaultEventProperties));
+				}, validate(_dom, "EventArgs"));
 				if (node.nodeName == "INPUT" || node.nodeName == "TEXTAREA") {
 					switch (name) {
 						case "keydown":

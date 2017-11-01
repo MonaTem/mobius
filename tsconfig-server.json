@@ -17,7 +17,8 @@
 		"target": "es2017",
 		"downlevelIteration": false,
 		"types": [
-			"node"
+			"node",
+			"preact"
 		],
 		"typeRoots": [
 			"types",

@@ -6,6 +6,7 @@ import { loadModule, ModuleSource, ServerModule } from "./server-compiler";
 import * as mobiusModule from "mobius";
 import { Channel, JsonValue } from "mobius-types";
 import * as BroadcastModule from "../server/_broadcast";
+import * as SchemaModule from "../server/schema";
 
 import { BootstrapData, disconnectedError, Event, eventForException, eventForValue, logOrdering, parseValueEvent, roundTrip } from "../common/_internal";
 import { FakedGlobals, interceptGlobals } from "../common/determinism";
@@ -31,6 +32,16 @@ export interface HostSandboxOptions {
 export function archivePathForSessionId(sessionsPath: string, sessionID: string) {
 	return pathJoin(sessionsPath, encodeURIComponent(sessionID) + ".json");
 }
+
+function alwaysBlue() {
+	return true;
+}
+const schemaModule: typeof SchemaModule = {
+	validate(exports: any, name: string): (value: any) => boolean {
+		const validatorForType = exports._validatorForType as ((name: string) => (value: any) => boolean) | undefined;
+		return validatorForType ? validatorForType(name) : alwaysBlue;
+	}
+};
 
 export class HostSandbox {
 	public options: HostSandboxOptions;
@@ -75,6 +86,7 @@ const bakedModules: { [moduleName: string]: (sandbox: LocalSessionSandbox) => an
 	body: (sandbox: LocalSessionSandbox) => sandbox.pageRenderer.body,
 	secrets: (sandbox: LocalSessionSandbox) => sandbox.host.options.secrets,
 	_broadcast: (sandbox: LocalSessionSandbox) => sandbox.host.broadcastModule,
+	schema: (sandbox: LocalSessionSandbox) => schemaModule,
 };
 
 export interface SessionSandboxClient {
@@ -565,7 +577,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			},
 		};
 	}
-	public createClientPromise = <T extends JsonValue | void>(fallback?: () => Promise<T> | T) => {
+	public createClientPromise = <T extends JsonValue | void>(fallback?: () => Promise<T> | T, validator?: (value: any) => boolean) => {
 		return new Promise<T>((resolve, reject) => {
 			if (!this.insideCallback) {
 				return reject(new Error("Unable to create client promise in this context!"));
@@ -580,7 +592,18 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 				this.enteringCallback();
 				channel.close();
 				if (event) {
-					parseValueEvent(global, event, resolve as (value: JsonValue | void) => void, reject);
+					if (validator) {
+						parseValueEvent(global, event, (value: any) => {
+							if (validator(value)) {
+								resolve(value as T);
+							} else {
+								escape(new Error("Value from client did not validate to the expected schema: " + JSON.stringify(value)));
+								this.destroy();
+							}
+						}, reject);
+					} else {
+						parseValueEvent(global, event, resolve as (value: JsonValue | void) => void, reject);
+					}
 				} else {
 					reject(disconnectedError());
 				}
@@ -604,7 +627,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			}
 		});
 	}
-	public createClientChannel = <T extends Function>(callback: T) => {
+	public createClientChannel = <T extends Function>(callback: T, argumentValidator?: (args: any[]) => boolean) => {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
@@ -615,7 +638,12 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			if (event) {
 				event.shift();
 				this.enteringCallback();
-				resolvedPromise.then(() => callback.apply(null, event));
+				if (!argumentValidator || argumentValidator(event)) {
+					resolvedPromise.then(() => callback.apply(null, event));
+				} else {
+					escape(new Error("Arguments from client did not validate to the expected schema: " + JSON.stringify(event)));
+					this.destroy();
+				}
 			} else {
 				channel.close();
 			}

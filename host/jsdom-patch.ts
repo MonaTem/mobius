@@ -4,12 +4,15 @@ export default function(document: Document) {
 	if (!patchedJSDOM) {
 		patchedJSDOM = true;
 		const HTMLInputElementPrototype = document.createElement("input").constructor.prototype;
-		const descriptor = Object.create(Object.getOwnPropertyDescriptor(HTMLInputElementPrototype, "value"));
-		const oldSet = descriptor.set;
-		descriptor.set = function(value: string) {
-			oldSet.call(this, value);
-			this.setAttribute("value", value);
-		};
-		Object.defineProperty(HTMLInputElementPrototype, "value", descriptor);
+		const oldDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElementPrototype, "value");
+		if (oldDescriptor) {
+			const descriptor = Object.create(oldDescriptor);
+			const oldSet = descriptor.set;
+			descriptor.set = function(value: string) {
+				oldSet.call(this, value);
+				this.setAttribute("value", value);
+			};
+			Object.defineProperty(HTMLInputElementPrototype, "value", descriptor);
+		}
 	}
 }

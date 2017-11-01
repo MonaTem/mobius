@@ -36,6 +36,7 @@ const redactions: { [moduleName: string]: RedactedExportData } = {
 	"broadcast": {
 		send: [false, false],
 		receive: [false],
+		topic: [false],
 	},
 };
 
@@ -202,8 +203,16 @@ export default async function(profile: "client" | "server", input: string, baseP
 				packageRelative("**/*.ts+(|x)"),
 				packageRelative("*.ts+(|x)"),
 			] as any,
+			exclude: [] as any,
 			tsconfig: packageRelative(`tsconfig-${profile}.json`),
 			tsconfigOverride: {
+				include: [
+					resolve(basePath, "**/*"),
+					resolve(basePath, "*"),
+					packageRelative("**/*"),
+					packageRelative("*"),
+				] as any,
+				exclude: [] as any,
 				compilerOptions: {
 					baseUrl: basePath,
 					paths: {
@@ -223,6 +232,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 					},
 				},
 			},
+			verbosity: 0,
 		}) as any as Plugin,
 		rollupBabel({
 			babelrc: false,
