@@ -7,7 +7,9 @@ import { addListener, removeListener, send as sendImplementation } from "_broadc
 export type Topic<T> = Redacted<string> & { messageType: T };
 export const topic = redact as <T extends JsonValue>(name: string) => Topic<T>;
 
-export const send = sendImplementation as <T extends JsonValue>(dest: Topic<T>, message: T | Redacted<T>) => void;
+export function send<T extends JsonValue>(dest: Topic<T>, message: T | Redacted<T>) {
+	sendImplementation(peek(dest as any), peek(message));
+}
 
 export function receive<T extends JsonValue>(source: Topic<T>, callback: (message: T) => void, onAbort?: () => void): Channel {
 	const peekedTopic = peek(source as any as Redacted<string>);

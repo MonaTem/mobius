@@ -1,9 +1,8 @@
-import { peek, Redacted } from "../server/redact";
 import { Client } from "./client";
 import { escape } from "./event-loop";
 import { HostSandbox, HostSandboxOptions, LocalSessionSandbox, RenderOptions, SessionSandbox, SessionSandboxClient } from "./session-sandbox";
 
-import { JsonArray, JsonMap, JsonValue } from "mobius-types";
+import { JsonValue } from "mobius-types";
 import { Event, eventForException, eventForValue, parseValueEvent, roundTrip } from "../common/_internal";
 
 import { ChildProcess, fork } from "child_process";
@@ -207,13 +206,12 @@ function isEvent(message: CommandMessage | Event | BroadcastMessage): message is
 function constructBroadcastModule() {
 	const topics = new Map<string, Set<(message: JsonValue) => void>>();
 	return {
-		send(topic: string | Redacted<string>, message: JsonValue | Redacted<JsonValue | JsonArray | JsonMap>) {
-			const observers = topics.get(peek(topic));
+		send(topic: string, message: JsonValue) {
+			const observers = topics.get(topic);
 			if (observers) {
-				const peekedMessage = peek(message);
 				for (const observer of observers.values()) {
 					try {
-						observer(roundTrip(peekedMessage));
+						observer(roundTrip(message));
 					} catch (e) {
 						escape(e);
 					}
@@ -221,18 +219,16 @@ function constructBroadcastModule() {
 			}
 		},
 		addListener(topic: string, callback: (message: JsonValue) => void): void {
-			const topicName = peek(topic);
-			let observers = topics.get(topicName);
+			let observers = topics.get(topic);
 			if (!observers) {
-				topics.set(topicName, observers = new Set<(message: JsonValue) => void>());
+				topics.set(topic, observers = new Set<(message: JsonValue) => void>());
 			}
 			observers.add(callback);
 		},
 		removeListener(topic: string, callback: (message: JsonValue) => void): void {
-			const topicName = peek(topic);
-			const observers = topics.get(topicName);
+			const observers = topics.get(topic);
 			if (observers && observers.delete(callback) && observers.size === 0) {
-				topics.delete(topicName);
+				topics.delete(topic);
 			}
 		},
 	};
@@ -242,12 +238,10 @@ if (require.main === module) {
 	process.addListener("message", function bootstrap(options: HostSandboxOptions) {
 		const basicBroadcast = constructBroadcastModule();
 		const host = new HostSandbox(options, {
-			send(topic: string | Redacted<string>, message: JsonValue | Redacted<JsonValue | JsonArray | JsonMap>) {
-				const topicName = peek(topic);
-				const peekedMessage = peek(message);
-				const broadcastMessage: BroadcastMessage = [false, topicName, peekedMessage];
+			send(topic: string, message: JsonValue) {
+				const broadcastMessage: BroadcastMessage = [false, topic, message];
 				process.send!(broadcastMessage);
-				basicBroadcast.send(topicName, peekedMessage);
+				basicBroadcast.send(topic, message);
 			},
 			addListener: basicBroadcast.addListener,
 			removeListener: basicBroadcast.removeListener,
