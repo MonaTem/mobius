@@ -113,7 +113,6 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(path: strin
 		if (generator) {
 			validatorForType = memoize((typeName: string) => {
 				const schema = generator.getSchemaForSymbol(typeName);
-				console.log(JSON.stringify(schema, null, 2));
 				const schemaValidator = ajv.compile(schema);
 				return (value: any) => !!schemaValidator(value);
 			});
