@@ -40,7 +40,7 @@ const schemaModule: typeof SchemaModule = {
 	validate(exports: any, name: string): (value: any) => boolean {
 		const validatorForType = exports._validatorForType as ((name: string) => (value: any) => boolean) | undefined;
 		return validatorForType ? validatorForType(name) : alwaysBlue;
-	}
+	},
 };
 
 export class HostSandbox {

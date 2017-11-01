@@ -1,26 +1,18 @@
 import { createServerChannel } from "mobius";
 import { Channel, JsonValue } from "mobius-types";
-import { peek, Redacted } from "redact";
+import { peek, redact, Redacted } from "redact";
 
-import { send as sendImplementation, addListener, removeListener } from "_broadcast";
+import { addListener, removeListener, send as sendImplementation } from "_broadcast";
 
-export class Topic<T extends JsonValue> {
-	/* tslint:disable variable-name */
-	public __suppress_declared_never_used_error?: T;
-}
+export type Topic<T> = Redacted<string> & { messageType: T };
+export const topic = redact as <T extends JsonValue>(name: string) => Topic<T>;
 
-export function topic<T extends JsonValue>(name: string | Redacted<string>) : Topic<T> {
-	return name as any;
-}
+export const send = sendImplementation as <T extends JsonValue>(dest: Topic<T>, message: T | Redacted<T>) => void;
 
-export function send<T extends JsonValue>(topic: Topic<T>, message: T | Redacted<T>) {
-	sendImplementation(topic as any, message);
-}
-
-export function receive<T extends JsonValue>(topic: Topic<T>, callback: (message: T) => void, onAbort?: () => void): Channel {
-	const peekedTopic = peek(topic as any as Redacted<string>);
-	return createServerChannel(callback, send => {
-		addListener(peekedTopic, send as (message: JsonValue) => void);
-		return send;
-	}, (send) => removeListener(peekedTopic, send as (message: JsonValue) => void), false);
+export function receive<T extends JsonValue>(source: Topic<T>, callback: (message: T) => void, onAbort?: () => void): Channel {
+	const peekedTopic = peek(source as any as Redacted<string>);
+	return createServerChannel(callback, (sendMessage) => {
+		addListener(peekedTopic, sendMessage as (message: JsonValue) => void);
+		return sendMessage;
+	}, (sendMessage) => removeListener(peekedTopic, sendMessage as (message: JsonValue) => void), false);
 }

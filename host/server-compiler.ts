@@ -1,10 +1,10 @@
+import { Ajv } from "ajv";
 import * as babel from "babel-core";
 import { readFileSync } from "fs";
+import { cwd } from "process";
 import * as ts from "typescript";
 import { buildGenerator } from "typescript-json-schema";
-import { Ajv } from "ajv";
 import * as vm from "vm";
-import { cwd } from "process";
 import addSubresourceIntegrity from "./addSubresourceIntegrity";
 import { packageRelative } from "./fileUtils";
 import memoize from "./memoize";
@@ -62,7 +62,7 @@ const diagnosticsHost = {
 	},
 	getNewLine() {
 		return "\n";
-	}
+	},
 };
 
 // Ajv configured to support draft-04 JSON schemas
@@ -93,7 +93,7 @@ const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(path: strin
 		if (diagnostics.length) {
 			console.log(ts.formatDiagnostics(diagnostics, diagnosticsHost));
 		}
-		for (let sourceFile of program.getSourceFiles()) {
+		for (const sourceFile of program.getSourceFiles()) {
 			if (sourceFile.fileName === path) {
 				program.emit(sourceFile, (fileName: string, data: string, writeByteOrderMark: boolean, onError?: (message: string) => void, sourceFiles?: ReadonlyArray<ts.SourceFile>) => {
 					if (/\.js$/.test(fileName)) {
