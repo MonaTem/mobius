@@ -52,9 +52,8 @@ function roundTripValue(obj: any, cycleDetection: any[]): any {
 		case "number":
 			switch (obj) {
 				case Infinity:
-					throwError("Infinity does not round-trip!");
 				case -Infinity:
-					throwError("-Infinity does not round-trip!");
+					throwError(obj + " does not round-trip!");
 				case 0:
 					if (1 / obj < 0) {
 						throwError("-0 does not round-trip!");
@@ -62,10 +61,10 @@ function roundTripValue(obj: any, cycleDetection: any[]): any {
 				case obj:
 					return obj;
 				default:
-					throwError("NaN does not round-trip!");
+					throwError(obj + " does not round-trip!");
 			}
 		case "undefined":
-			throwError("undefined does not round-trip!");
+			throwError(obj + " does not round-trip!");
 	}
 }
 
