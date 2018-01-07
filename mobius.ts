@@ -19,7 +19,7 @@ import compileBundle from "./host/bundle-compiler";
 import { Client } from "./host/client";
 import * as csrf from "./host/csrf";
 import { escape } from "./host/event-loop";
-import { exists, mkdir, packageRelative, readFile, readJSON, rimraf, stat, unlink, writeFile } from "./host/fileUtils";
+import { exists, mkdir, packageRelative, readFile, readJSON, rimraf, stat, symlink, unlink, writeFile } from "./host/fileUtils";
 import { Host } from "./host/host";
 import { PageRenderMode } from "./host/page-renderer";
 import { ModuleSource } from "./host/server-compiler";
@@ -139,13 +139,14 @@ interface Config {
 	workers?: number;
 	simulatedLatency?: number;
 	bundled?: boolean;
+	generate?: boolean;
 }
 
 function defaultSessionPath(sourcePath: string) {
 	return resolvePath(sourcePath, ".sessions");
 }
 
-export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0, bundled = false }: Config) {
+export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0, bundled = false, generate = false }: Config) {
 	let serverJSPath: string;
 	const packagePath = resolvePath(sourcePath, "package.json");
 	if (await exists(packagePath)) {
@@ -456,6 +457,22 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					additionalHeaders(response);
 					sendCompressed(request, response, route);
 				});
+				if (generate) {
+					(async () => {
+						const foreverPathRelative = route.foreverPath.replace(/^\//, "");
+						const pathRelative = route.path.replace(/^\//, "");
+						const foreverPath = resolvePath(publicPath, foreverPathRelative);
+						if (await exists(foreverPath)) {
+							await unlink(foreverPath);
+						}
+						await writeFile(foreverPath, route.buffer);
+						const path = resolvePath(publicPath, pathRelative);
+						if (await exists(path)) {
+							await unlink(path);
+						}
+						await symlink(foreverPathRelative, path);
+					})()
+				}
 			}
 
 			if (sourceMaps) {
@@ -502,6 +519,7 @@ export default function main() {
 			{ name: "source-map", type: Boolean, defaultValue: false },
 			{ name: "workers", type: Number, defaultValue: cpuCount },
 			{ name: "bundled", type: Boolean, defaultValue: false },
+			{ name: "generate", type: Boolean, defaultValue: false },
 			{ name: "hostname", type: String },
 			{ name: "simulated-latency", type: Number, defaultValue: 0 },
 			{ name: "init", type: Boolean, defaultValue: false },
@@ -543,6 +561,10 @@ export default function main() {
 							name: "hostname",
 							typeLabel: "[underline]{name}",
 							description: "Public hostname to serve content from; used to validate CSRF if set",
+						},
+						{
+							name: "generate",
+							description: "Write generated static assets to public/",
 						},
 						{
 							name: "workers",
@@ -597,6 +619,7 @@ export default function main() {
 			workers: args.workers as number,
 			simulatedLatency: args["simulated-latency"] as number,
 			bundled: args.bundled as boolean,
+			generate: args.generate as boolean,
 		});
 
 		const expressAsync = require("express") as typeof express;

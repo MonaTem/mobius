@@ -21,6 +21,9 @@ export async function rimraf(path: string) {
 	await rimrafLazy(path);
 }
 
+export const hardlink = util.promisify(fs.link);
+export const symlink = util.promisify(fs.symlink);
+
 export const stat = util.promisify(fs.stat);
 export function exists(path: string) {
 	return new Promise<boolean>((resolve) => fs.exists(path, resolve));
