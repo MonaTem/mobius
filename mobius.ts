@@ -479,6 +479,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				const clientMap = staticFileRoute("/client.js.map", clientCompiled.map);
 				registerStatic(clientScript, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");
+					response.set("X-Content-Type-Options", "nosniff");
 					response.set("SourceMap", clientMap.foreverPath);
 				});
 				registerStatic(clientMap, (response) => {
@@ -487,6 +488,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				const fallbackMap = staticFileRoute("/fallback.js.map", fallbackMapContents);
 				registerStatic(fallbackScript, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");
+					response.set("X-Content-Type-Options", "nosniff");
 					response.set("SourceMap", fallbackMap.foreverPath);
 				});
 				registerStatic(fallbackMap, (response) => {
@@ -495,9 +497,11 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 			} else {
 				registerStatic(clientScript, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");
+					response.set("X-Content-Type-Options", "nosniff");
 				});
 				registerStatic(fallbackScript, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");
+					response.set("X-Content-Type-Options", "nosniff");
 				});
 			}
 		},
