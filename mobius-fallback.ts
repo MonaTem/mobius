@@ -40,7 +40,7 @@
 
 	let isSending = 0;
 	let anyChanged = false;
-	let lastEventKey = "";
+	let lastInputChannelId = -1;
 	let queuedEvents: string[] = [];
 	let flushTimerId: number | undefined;
 
@@ -61,47 +61,27 @@
 		return false;
 	}
 
-	function hasAncestor(potentialChild: Node, potentialAncestor: Element) {
-		let node : Node | null = potentialChild;
-		while (node = node.parentNode) {
-			if (node === potentialAncestor) {
-				return true;
-			}
-		}
-		return false;
+	function queryPairForDOMEvent(channelId: number, event: Event): string {
+		const element = (event.target || event.srcElement) as HTMLInputElement;
+		return `channelID${channelId}=${element ? encodeURIComponent(element.value || "") : ""}`;
 	}
 
-	function eventForDOMEvent(event: Event, defaultType: string): [string, string] | undefined {
-		const element = (event.target || event.srcElement) as Element;
-		if (element) {
-			const type = event.type || defaultType;
-			const channelId = element.getAttribute && element.getAttribute(`data-mobius-on${type}`);
-			return [channelId ? "channelID" + channelId : (element as HTMLInputElement).name, (element as HTMLInputElement).value];
+	function onInputEvent(channelId: number, event: Event) {
+		// Coalesce similar events
+		if (lastInputChannelId == channelId) {
+			queuedEvents.pop();
+		} else {
+			lastInputChannelId = channelId;
 		}
-	}
-
-	function onInputEvent(event: Event) {
-		const pair = eventForDOMEvent(event, "input");
-		if (pair) {
-			// Coalesce similar events
-			if (lastEventKey == pair[0]) {
-				queuedEvents.pop();
-			} else {
-				lastEventKey = pair[0];
-			}
-			queuedEvents.push(pair[0] + "=" + encodeURIComponent(pair[1]));
-			if (typeof flushTimerId == "undefined") {
-				flushTimerId = setTimeout(send, 300);
-			}
+		queuedEvents.push(queryPairForDOMEvent(channelId, event));
+		if (typeof flushTimerId == "undefined") {
+			flushTimerId = setTimeout(send, 300);
 		}
 		anyChanged = true;
 	}
 
-	function onGenericEvent(event: Event) {
-		const pair = eventForDOMEvent(event, "click");
-		if (pair) {
-			queuedEvents.push(pair[0] + "=");
-		}
+	function onGenericEvent(channelId: number, event: Event) {
+		queuedEvents.push(queryPairForDOMEvent(channelId, event));
 		send();
 	}
 
@@ -117,24 +97,7 @@
 		}
 	}
 
-	function interceptElement(element: HTMLElement) {
-		if (hasAncestor(element, form)) {
-			const attributes = element.attributes;
-			for (var i = 0; i < attributes.length; i++) {
-				var match = attributes[i].name.match(/^data\-mobius\-on(.*)/);
-				if (match) {
-					var eventType = match[1];
-					(element as any as { [eventName: string] : (this: HTMLElement, ev: Event) => any })["on" + eventType] = handlerForEventType(eventType);
-				}
-			}
-		}
-	}
-
-	function interceptFormElements() {
-		const elements = document.getElementsByTagName("*");
-		for (var i = 0; i < elements.length; i++) {
-			interceptElement(elements[i] as HTMLElement);
-		}
+	function checkServerChannels() {
 		const hasServerChannels = form["hasServerChannels"];
 		if (!hasServerChannels || hasServerChannels.value) {
 			if (!isSending) {
@@ -154,7 +117,7 @@
 			request.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
 			var body = queuedEvents;
 			queuedEvents = [];
-			lastEventKey = "";
+			lastInputChannelId = -1;
 			body.unshift("postback=js");
 			for (let i = 0; i < form.length; i++) {
 				const element = form[i];
@@ -180,7 +143,7 @@
 							}
 							(window as any).setDOM(document.documentElement, currentHTMLSource);
 							// form.innerHTML = request.responseText;
-							interceptFormElements();
+							checkServerChannels();
 						}
 					}
 				}
@@ -195,6 +158,10 @@
 		}
 	}
 
-	interceptFormElements();
+	checkServerChannels();
+
+	(window as any)._dispatch = function(channelId: number, event: Event) {
+		handlerForEventType(event.type)(channelId, event);
+	}
 
 })()

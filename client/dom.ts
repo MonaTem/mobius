@@ -5,6 +5,18 @@ import { Channel } from "mobius-types";
 import * as preact from "preact";
 export { h, Component, AnyComponent, ComponentProps } from "preact";
 
+const registeredListeners: { [ eventId: number ]: (event: any) => void } = {};
+
+export function dispatchRacedEvents(defer: () => void) {
+	var resolved = Promise.resolve();
+	var racedEvents = (window as any)["_mobiusEvents"] as ReadonlyArray<[number, any]>;
+	if (racedEvents) {
+		return racedEvents.reduce((promise, event) => promise.then(() => registeredListeners[event[0]](event[1])).then(defer), resolved);
+	} else {
+		return resolved;
+	}
+}
+
 type PreactNode = Node & {
 	_listeners?: { [ event: string ]: (event: any) => void },
 	__l?: { [ event: string ]: (event: any) => void },
@@ -41,11 +53,12 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 				}, (send) => {
 					sender = send;
 				}, undefined, name == "input", true);
-				tuple = c[name] = [(event: any) => sender(stripDefaults(event, defaultEventProperties)), listener, channel];
+				tuple = c[name] = [registeredListeners[channel.channelId] = (event: any) => sender(stripDefaults(event, defaultEventProperties)), listener, channel];
 			}
 			listeners[name] = tuple[0];
 		} else if (Object.hasOwnProperty.call(c, name)) {
 			const channel = c[name][2];
+			delete registeredListeners[channel.channelId];
 			delete c[name];
 			channel.close();
 		}

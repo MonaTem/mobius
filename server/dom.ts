@@ -59,7 +59,7 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 							break;
 					}
 				}
-				node.setAttribute(`data-mobius-on${name}`, channel.channelId.toString());
+				node.setAttribute(`on${name}`, `_dispatch(${channel.channelId},event)`);
 				tuple = c[name] = [channel, listener];
 			}
 			listeners[name] = ignoreEvent;
@@ -71,7 +71,7 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 					node.removeAttribute("name");
 				}
 			}
-			node.removeAttribute(`data-mobius-on${name}`);
+			node.removeAttribute(`on${name}`);
 			channel.close();
 			delete c[name];
 		}

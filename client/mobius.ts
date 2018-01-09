@@ -1,4 +1,5 @@
 import { BootstrapData, ClientMessage, deserializeMessageFromText, disconnectedError, Event, eventForException, eventForValue, logOrdering, parseValueEvent, roundTrip, serializeMessageAsText, ServerMessage } from "_internal";
+import { dispatchRacedEvents } from "dom";
 import { interceptGlobals } from "determinism";
 import { Channel, JsonValue } from "mobius-types";
 /**
@@ -338,9 +339,9 @@ if (bootstrapData.sessionID) {
 			window.scrollTo(bootstrapData.x, bootstrapData.y);
 		}
 		clientRenderedHostElement.style.display = null;
-	}).then(didExitCallback).then(synchronizeChannels);
+	}).then(didExitCallback).then(synchronizeChannels).then(dispatchRacedEvents.bind(null, defer));
 } else {
-	afterLoaded.then(didExitCallback);
+	afterLoaded.then(didExitCallback).then(dispatchRacedEvents.bind(null, defer));
 }
 
 function produceMessage(): Partial<ClientMessage> {
