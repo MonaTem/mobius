@@ -239,7 +239,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 		}) as any as Plugin,
 		rollupBabel({
 			babelrc: false,
-			presets: isClient ? [env.default(null, { targets: { browsers: ["ie 6"] } })] : [],
+			presets: isClient ? [env.default(null, { targets: { browsers: ["ie 6"] }, modules: false })] : [],
 			plugins: isClient ? [
 				"external-helpers",
 				transformAsyncToPromises(babel),
