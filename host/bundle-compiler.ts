@@ -180,6 +180,8 @@ export default async function(profile: "client" | "server", input: string, baseP
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
 	const optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
+	const transformAsyncToPromises = require("babel-plugin-transform-async-to-promises");
+	const env = require("babel-preset-env");
 
 	// Workaround to allow TypeScript to union two folders. This is definitely not right, but it works :(
 	const parseJsonConfigFileContent = ts.parseJsonConfigFileContent;
@@ -189,6 +191,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 		result.fileNames = result.fileNames.concat(augmentedResult.fileNames);
 		return result;
 	} as any;
+	const isClient = profile === "client";
 	const plugins = [
 		includePaths({
 			include: {
@@ -236,7 +239,10 @@ export default async function(profile: "client" | "server", input: string, baseP
 		}) as any as Plugin,
 		rollupBabel({
 			babelrc: false,
-			plugins: profile === "client" ? [
+			presets: isClient ? [env.default(null, { targets: { browsers: ["ie 6"] } })] : [],
+			plugins: isClient ? [
+				"external-helpers",
+				transformAsyncToPromises(babel),
 				optimizeClosuresInRender(babel),
 				addSubresourceIntegrity(publicPath),
 				stripRedact(),
@@ -259,7 +265,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 		plugins.push(require("rollup-plugin-closure-compiler-js")({
 			languageIn: "ES5",
 			languageOut: "ES3",
-			assumeFunctionWrapper: profile !== "client",
+			assumeFunctionWrapper: !isClient,
 			rewritePolyfills: false,
 		}) as Plugin);
 	}
@@ -272,7 +278,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 		},
 	});
 	const output = await bundle.generate({
-		format: profile === "client" ? "iife" : "cjs",
+		format: isClient ? "iife" : "cjs",
 		sourcemap: true,
 	});
 	// Cleanup some of the mess we made
