@@ -935,12 +935,11 @@ export function coordinateValue<T extends JsonValue>(generator: () => T): T {
 	}
 }
 
-export function shareSession(): Promise<string> {
-	return createServerPromise<string>().then((value) => {
-		// Dummy channel that stays open
-		createServerChannel(emptyFunction);
-		return value;
-	});
+export async function shareSession(): Promise<string> {
+	const value = await createServerPromise<string>();
+	// Dummy channel that stays open
+	createServerChannel(emptyFunction);
+	return value;
 }
 
 function bundledPromiseImplementation() {

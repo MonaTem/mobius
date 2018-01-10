@@ -181,6 +181,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
 	const optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
 	const transformAsyncToPromises = require("babel-plugin-transform-async-to-promises");
+	const externalHelpers = require("babel-plugin-external-helpers");
 	const env = require("babel-preset-env");
 
 	// Workaround to allow TypeScript to union two folders. This is definitely not right, but it works :(
@@ -196,6 +197,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 		includePaths({
 			include: {
 				preact: packageRelative("dist/common/preact"),
+				"babel-plugin-transform-async-to-promises/helpers": packageRelative("node_modules/babel-plugin-transform-async-to-promises/helpers"),
 			},
 		}),
 		rollupTypeScript({
@@ -241,8 +243,8 @@ export default async function(profile: "client" | "server", input: string, baseP
 			babelrc: false,
 			presets: isClient ? [env.default(null, { targets: { browsers: ["ie 6"] }, modules: false })] : [],
 			plugins: isClient ? [
-				"external-helpers",
-				transformAsyncToPromises(babel),
+				externalHelpers(babel),
+				[transformAsyncToPromises(babel), {"externalHelpers": true}],
 				optimizeClosuresInRender(babel),
 				addSubresourceIntegrity(publicPath),
 				stripRedact(),
