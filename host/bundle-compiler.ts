@@ -196,7 +196,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 	const plugins = [
 		includePaths({
 			include: {
-				preact: packageRelative("dist/common/preact"),
+				"preact": packageRelative("dist/common/preact"),
 				"babel-plugin-transform-async-to-promises/helpers": packageRelative("node_modules/babel-plugin-transform-async-to-promises/helpers"),
 			},
 		}),
@@ -244,7 +244,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 			presets: isClient ? [env.default(null, { targets: { browsers: ["ie 6"] }, modules: false })] : [],
 			plugins: isClient ? [
 				externalHelpers(babel),
-				[transformAsyncToPromises(babel), {"externalHelpers": true}],
+				[transformAsyncToPromises(babel), {externalHelpers: true}],
 				optimizeClosuresInRender(babel),
 				addSubresourceIntegrity(publicPath),
 				stripRedact(),

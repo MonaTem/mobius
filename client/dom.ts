@@ -8,8 +8,8 @@ export { h, Component, AnyComponent, ComponentProps } from "preact";
 const registeredListeners: { [ eventId: number ]: (event: any) => void } = {};
 
 export function dispatchRacedEvents(defer: () => void) {
-	var resolved = Promise.resolve();
-	var racedEvents = (window as any)["_mobiusEvents"] as ReadonlyArray<[number, any]>;
+	const resolved = Promise.resolve();
+	const racedEvents = (window as any)._mobiusEvents as ReadonlyArray<[number, any]>;
 	if (racedEvents) {
 		return racedEvents.reduce((promise, event) => promise.then(() => registeredListeners[event[0]](event[1])).then(defer), resolved);
 	} else {

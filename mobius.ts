@@ -471,7 +471,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 							await unlink(path);
 						}
 						await symlink(foreverPathRelative, path);
-					})()
+					})();
 				}
 			}
 

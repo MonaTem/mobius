@@ -1,6 +1,6 @@
 import { BootstrapData, ClientMessage, deserializeMessageFromText, disconnectedError, Event, eventForException, eventForValue, logOrdering, parseValueEvent, roundTrip, serializeMessageAsText, ServerMessage } from "_internal";
-import { dispatchRacedEvents } from "dom";
 import { interceptGlobals } from "determinism";
+import { dispatchRacedEvents } from "dom";
 import { Channel, JsonValue } from "mobius-types";
 /**
  * @license THE MIT License (MIT)
