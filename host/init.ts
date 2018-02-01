@@ -20,7 +20,7 @@ export default async function init(basePath: string) {
 			};
 			await writeFile(packagePath, JSON.stringify(defaultPackageFile, null, 2) + "\n");
 		}
-		const result = await promisify(require("init-package-json"))(basePath, path.resolve(process.env.HOME, ".npm-init"));
+		const result = await promisify(require("init-package-json"))(basePath, path.resolve(process.env.HOME || "~", ".npm-init"));
 		const mainPath = path.resolve(basePath, result.main);
 		if (!await exists(mainPath)) {
 			await writeFile(mainPath, `import * as dom from "dom";\n//import { query } from "sql";\n//import { send, receive } from "broadcast";\n\ndom.host(<div>Hello World!</div>);\ndom.style("style.css");\n`);

@@ -165,7 +165,6 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 	public hasRun: boolean = false;
 	public pageRenderer: PageRenderer;
 	public globalProperties: MobiusGlobalProperties & FakedGlobals;
-	public Math: typeof Math;
 	// Local channels
 	public localChannelCounter: number = 0;
 	public localChannels = new Map<number, (event?: Event) => void>();

@@ -60,7 +60,7 @@ export class PageRenderer {
 	private metaRedirect: Element;
 	private clientScript: HTMLScriptElement;
 	private fallbackScript: HTMLScriptElement;
-	private inlineStyles: HTMLStyleElement;
+	private inlineStyles?: HTMLStyleElement;
 	private bootstrapScript?: HTMLScriptElement;
 	private formNode?: HTMLFormElement;
 	private postbackInput?: HTMLInputElement;

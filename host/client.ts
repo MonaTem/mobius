@@ -13,7 +13,7 @@ export class Client {
 	public reorderedMessages: { [messageId: number]: ClientMessage } = {};
 	public queuedLocalEvents: Event[] | undefined;
 	public queuedLocalEventsResolve: ((shouldContinue: true | void) => void) | undefined;
-	public localResolveTimeout: NodeJS.Timer | undefined;
+	public localResolveTimeout: number | undefined;
 	public willSynchronizeChannels = false;
 	public lastSentFormHTML?: string;
 	public pendingCookies?: Array<[string, string]>;
