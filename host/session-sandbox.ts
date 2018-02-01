@@ -97,6 +97,7 @@ export interface SessionSandboxClient {
 	cookieHeader(): string | Promise<string>;
 	sessionWasDestroyed(): void | Promise<void>;
 	getBaseURL(options: HostSandboxOptions): string | Promise<string>;
+	sharingBecameEnabled(): void | Promise<void>;
 }
 
 interface MobiusGlobalProperties {
@@ -188,7 +189,6 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 	public bootstrappingChannels?: Set<number>;
 	public bootstrappingPromise?: Promise<void>;
 	// Session sharing
-	public sharingEnabled?: true;
 	public hasActiveClient?: true;
 	constructor(host: HostSandbox, client: C, sessionID: string) {
 		this.host = host;
@@ -734,7 +734,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			if (!this.host.options.allowMultipleClientsPerSession) {
 				throw new Error("Sharing has been disabled!");
 			}
-			this.sharingEnabled = true;
+			await this.client.sharingBecameEnabled();
 			return await this.client.getBaseURL(this.host.options) + "?sessionID=" + this.sessionID;
 		});
 		const result = await server;

@@ -80,6 +80,9 @@ class InProcessClients implements SessionClients {
 	public getBaseURL(options: HostSandboxOptions) {
 		return generateBaseURL(options, this.request);
 	}
+	public sharingBecameEnabled() {
+		this.sharingEnabled = true;
+	}
 	public newClient(session: Session, request: Request) {
 		const newClientId = this.currentClientID++;
 		if ((newClientId == 0) || this.sharingEnabled) {
@@ -137,6 +140,9 @@ class WorkerSandboxClient implements SessionSandboxClient {
 	}
 	public getBaseURL(options: HostSandboxOptions) {
 		return this.send<string>("getBaseURL", [options]);
+	}
+	public sharingBecameEnabled() {
+		return this.send("sharingBecameEnabled");
 	}
 }
 
