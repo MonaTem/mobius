@@ -84,7 +84,7 @@ export function stripDefaults<T extends JsonMap>(obj: T, defaults: Partial<T>): 
 }
 
 export function restoreDefaults<T extends JsonMap, U extends JsonMap>(obj: T, defaults: U): T | U {
-	const result: Partial<T | U> = {};
+	const result = {} as T | U;
 	ignore_nondeterminism:
 	for (const i in defaults) {
 		if (!(i in obj) && Object.hasOwnProperty.call(defaults, i)) {
@@ -97,7 +97,7 @@ export function restoreDefaults<T extends JsonMap, U extends JsonMap>(obj: T, de
 			result[j] = obj[j];
 		}
 	}
-	return result as T | U;
+	return result;
 }
 
 export type Event = [number] | [number, any] | [number, any, any];

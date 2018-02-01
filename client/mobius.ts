@@ -148,7 +148,7 @@ if (!(window as any).Promise || !/^Google |^Apple /.test(navigator.vendor)) {
 const resolvedPromise: Promise<void> = Promise.resolve();
 
 function defer(): Promise<void>;
-function defer<T>(): Promise<T>;
+function defer<T>(value: T): Promise<T>;
 function defer(value?: any): Promise<any> {
 	return new Promise<any>((resolve) => submitTask(taskQueue, resolve.bind(null, value)));
 }
@@ -160,7 +160,7 @@ function escape(e: any) {
 }
 
 function escaping(handler: () => any | Promise<any>): () => Promise<void>;
-function escaping<T>(handler: (value: T) => any | Promise<any>): (value: T) => Promise<T | void>;
+function escaping<T, V>(handler: (value: T) => V | Promise<V>): (value: T) => Promise<V | void>;
 function escaping(handler: (value?: any) => any | Promise<any>): (value?: any) => Promise<any> {
 	return (value?: any) => {
 		try {
@@ -412,7 +412,7 @@ export function disconnect() {
 			request.send(body);
 		}
 		// Flush fenced events
-		fencedLocalEvents.reduce((promise, event) => promise.then(escaping(dispatchEvent.bind(null, event))).then(defer), resolvedPromise);
+		fencedLocalEvents.reduce((promise: Promise<any>, event: Event) => promise.then(() => escapingDispatchEvent(event)).then(defer), resolvedPromise as Promise<any>);
 	}
 }
 
@@ -438,7 +438,7 @@ function dispatchEvent(event: Event): Promise<void> | void {
 			const batchedActions = pendingBatchedActions;
 			pendingBatchedActions = [];
 			isBatched = {};
-			return batchedActions.reduce((promise, action) => {
+			return batchedActions.reduce((promise: Promise<any>, action) => {
 				return promise.then(escaping(action)).then(defer);
 			}, resolvedPromise).then(escaping(callChannelWithEvent.bind(null, channel, event)));
 		}
@@ -449,6 +449,7 @@ function dispatchEvent(event: Event): Promise<void> | void {
 	allEvents.push(event);
 	callChannelWithEvent(channel, event);
 }
+const escapingDispatchEvent = escaping(dispatchEvent);
 
 function callChannelWithEvent(channel: ((event: Event) => void) | undefined, event: Event) {
 	if (channel) {
@@ -470,9 +471,9 @@ function processEvents(events: Array<Event | boolean>) {
 				hadOpenServerChannel = event;
 			});
 		} else {
-			return promise.then(escaping(dispatchEvent.bind(null, event))).then(defer);
+			return promise.then(() => escapingDispatchEvent(event)).then(defer);
 		}
-	}, resolvedPromise).then(() => {
+	}, resolvedPromise as Promise<any>).then(() => {
 		currentEvents = undefined;
 		hadOpenServerChannel = pendingChannelCount != 0;
 	});
@@ -980,7 +981,7 @@ function bundledPromiseImplementation() {
 
 	class Promise <T> {
 		/* tslint:disable variable-name */
-		public __state: PromiseState;
+		public __state: PromiseState = PromiseState.Pending;
 		/* tslint:disable variable-name */
 		public __value: any;
 		/* tslint:disable variable-name */
