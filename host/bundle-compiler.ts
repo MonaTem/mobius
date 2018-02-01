@@ -255,6 +255,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 				rewriteInsufficientBrowserThrow(),
 				stripUnusedArgumentCopies(),
 			] : [
+				externalHelpers(babel),
 				optimizeClosuresInRender(babel),
 				addSubresourceIntegrity(publicPath),
 				verifyStylePaths(publicPath),
