@@ -273,7 +273,7 @@ const sessionHeartbeatInterval = 4 * 60 * 1000;
 let heartbeatTimeout: number = 0;
 
 // Websocket support
-const socketURL = serverURL.replace(/^http/, "ws") + "?";
+const socketURL = serverURL.replace(/^http/, "ws").replace(/#.*/, "") + "?";
 let WebSocketClass = (window as any).WebSocket as typeof WebSocket | undefined;
 let websocket: WebSocket | undefined;
 
