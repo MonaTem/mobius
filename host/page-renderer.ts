@@ -190,7 +190,14 @@ export class PageRenderer {
 			bodyParent.replaceChild(this.body, realBody);
 			try {
 				if (cssRules) {
-					const newRules = cssRules.filter((rule: Rule) => rule.type === "rule" && rule.selectors && rule.selectors.some((selector) => document.querySelector(selector) !== null));
+					const newRules = cssRules.filter((rule: Rule) => {
+						try {
+							return rule.type === "rule" && rule.selectors && rule.selectors.some((selector) => document.querySelector(selector) !== null)
+						} catch (e) {
+							// Skip rules that JSDOM doesn't support
+							return false;
+						}
+					});
 					if (newRules.length) {
 						const inlineStyles = this.inlineStyles || (this.inlineStyles = this.head.appendChild(document.createElement("style")));
 						inlineStyles.textContent = stringifyCSS({ type: "stylesheet", stylesheet: { rules: newRules } }, { compress: true });
