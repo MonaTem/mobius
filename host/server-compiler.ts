@@ -108,7 +108,7 @@ function sandboxedScriptAtPath<T extends ServerModuleGlobal>(path: string, publi
 	let generator: JsonSchemaGenerator | null | undefined;
 	const validatorForType = memoize((typeName: string) => {
 		if (typeof generator === "undefined") {
-			generator = buildGenerator(program, {
+			generator = (require("typescript-json-schema").buildGenerator as typeof buildGenerator)(program, {
 				strictNullChecks: true,
 				ref: true,
 				topRef: true,
