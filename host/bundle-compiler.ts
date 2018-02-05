@@ -196,7 +196,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 	const plugins = [
 		includePaths({
 			include: {
-				"preact": packageRelative("dist/common/preact"),
+				preact: packageRelative("dist/common/preact"),
 			},
 		}),
 		rollupTypeScript({
@@ -208,7 +208,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 				packageRelative("*.(ts|tsx|js|jsx)"),
 			] as any,
 			exclude: [
-				packageRelative("node_modules/babel-plugin-transform-async-to-promises/*")
+				packageRelative("node_modules/babel-plugin-transform-async-to-promises/*"),
 			] as any,
 			tsconfig: packageRelative(`tsconfig-${profile}.json`),
 			tsconfigOverride: {
@@ -237,7 +237,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 							packageRelative("node_modules/tslib/tslib"),
 						],
 						"babel-plugin-transform-async-to-promises/helpers": [
-							packageRelative("node_modules/babel-plugin-transform-async-to-promises/helpers")
+							packageRelative("node_modules/babel-plugin-transform-async-to-promises/helpers"),
 						],
 						"preact": [
 							packageRelative("dist/common/preact"),

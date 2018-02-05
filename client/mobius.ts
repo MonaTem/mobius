@@ -334,8 +334,8 @@ if (bootstrapData.sessionID) {
 	afterLoaded.then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(() => {
 		bootstrappingChannels = undefined;
 		// Swap the prerendered DOM element out for the one with mounted components
-		var childNodes = [].slice.call(serverRenderedHostElement.childNodes, 0);
-		for (var i = 0; i < childNodes.length; i++) {
+		const childNodes = [].slice.call(serverRenderedHostElement.childNodes, 0);
+		for (let i = 0; i < childNodes.length; i++) {
 			if (childNodes[i].nodeName === "LINK") {
 				document.body.appendChild(childNodes[i]);
 			}

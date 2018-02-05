@@ -192,7 +192,7 @@ export class PageRenderer {
 				if (cssRules) {
 					const newRules = cssRules.filter((rule: Rule) => {
 						try {
-							return rule.type === "rule" && rule.selectors && rule.selectors.some((selector) => document.querySelector(selector) !== null)
+							return rule.type === "rule" && rule.selectors && rule.selectors.some((selector) => document.querySelector(selector) !== null);
 						} catch (e) {
 							// Skip rules that JSDOM doesn't support
 							return false;

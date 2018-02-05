@@ -82,8 +82,10 @@ function loadAjv() {
 	return ajv = result;
 }
 
-
-type SandboxedScript<T extends ServerModuleGlobal = ServerModuleGlobal> = { sandbox: (global: T) => void, validatorForType: (name: string) => (undefined | ((obj: any) => boolean)) };
+interface SandboxedScript<T extends ServerModuleGlobal = ServerModuleGlobal> {
+	sandbox: (global: T) => void;
+	validatorForType: (name: string) => (undefined | ((obj: any) => boolean));
+}
 
 const sandboxedScripts = new Map<string, SandboxedScript>();
 

@@ -1,7 +1,7 @@
 import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
 import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
-import { loadModule, schemaValidatorForType, ModuleSource, ServerModule } from "./server-compiler";
+import { loadModule, ModuleSource, schemaValidatorForType, ServerModule } from "./server-compiler";
 
 import * as mobiusModule from "mobius";
 import { Channel, JsonValue } from "mobius-types";
@@ -15,7 +15,7 @@ import { JSDOM } from "jsdom";
 import patchJSDOM from "./jsdom-patch";
 
 import { createWriteStream } from "fs";
-import { join as pathJoin, dirname } from "path";
+import { dirname, join as pathJoin } from "path";
 
 export interface HostSandboxOptions {
 	htmlSource: string;
