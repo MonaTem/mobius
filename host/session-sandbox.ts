@@ -653,14 +653,11 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 	public findValueEvent(channelId: number): Event | undefined {
 		const events = this.currentEvents;
 		if (events) {
-			// Events are represented differently inside currentEvents depending on whether we're processing a client message or unarchiving
-			// Makes more sense to handle the special case here than to transform the array just for this one case
-			if (!this.bootstrappingChannels) {
-				if (channelId >= 0) {
-					return;
-				}
+			if (this.bootstrappingChannels) {
 				channelId = -channelId;
 			}
+			// Events are represented differently inside currentEvents depending on whether we're processing a client message or unarchiving
+			// Makes more sense to handle the special case here than to transform the array just for this one case
 			for (const event of events as Event[]) {
 				if (event[0] == channelId) {
 					return event;
@@ -677,7 +674,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			const channelId = ++this.remoteChannelCounter;
 			logOrdering("client", "open", channelId, this.sessionID);
 			// Peek at incoming events to find the value generated on the client
-			const event = this.findValueEvent(-channelId);
+			const event = this.findValueEvent(channelId);
 			if (event) {
 				logOrdering("client", "message", channelId, this.sessionID);
 				logOrdering("client", "close", channelId, this.sessionID);
@@ -694,14 +691,16 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		} else {
 			const channelId = ++this.localChannelCounter;
 			logOrdering("server", "open", channelId, this.sessionID);
-			const event = this.findValueEvent(channelId);
-			if (event) {
-				logOrdering("server", "message", channelId, this.sessionID);
-				logOrdering("server", "close", channelId, this.sessionID);
-				this.sendEvent(event);
-				return parseValueEvent(global, event, (value) => value, (error) => {
-					throw error;
-				}) as T;
+			if (this.bootstrappingChannels) {
+				const event = this.findValueEvent(-channelId);
+				if (event) {
+					logOrdering("server", "message", channelId, this.sessionID);
+					logOrdering("server", "close", channelId, this.sessionID);
+					this.sendEvent(event);
+					return parseValueEvent(global, event, (value) => value, (error) => {
+						throw error;
+					}) as T;
+				}
 			}
 			try {
 				const value = generator();
