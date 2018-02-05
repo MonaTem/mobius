@@ -684,6 +684,7 @@ function sendEvent(event: Event, batched?: boolean, skipsFencing?: boolean) {
 		const eventClone = event.slice() as Event;
 		eventClone[0] = -channelId;
 		dispatchEvent(eventClone);
+		batched = true;
 	}
 	// Queue an event to be sent to the server in the next flush
 	queuedLocalEvents.push(event);
