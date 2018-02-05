@@ -311,7 +311,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		this.currentEvents = events;
 		this.run();
 		for (const event of events) {
-			this.dispatchClientEvent(event);
+			this.dispatchClientEvent(event.slice(0) as Event);
 			await defer();
 		}
 		this.updateOpenServerChannelStatus(this.localChannelCount != 0);
