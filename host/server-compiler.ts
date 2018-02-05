@@ -68,18 +68,23 @@ const diagnosticsHost = {
 };
 
 // Ajv configured to support draft-04 JSON schemas
-const ajv = (() => {
+let ajv: Ajv;
+function loadAjv() {
+	if (ajv) {
+		return ajv;
+	}
 	const result = (new (require("ajv") as any)({
 		meta: false,
 		extendRefs: true,
 		unknownFormats: "ignore",
 	})) as Ajv;
 	result.addMetaSchema(require("ajv/lib/refs/json-schema-draft-04.json"));
-	return result;
-})();
+	return ajv = result;
+}
 
 
 type SandboxedScript<T extends ServerModuleGlobal = ServerModuleGlobal> = { sandbox: (global: T) => void, validatorForType: (name: string) => (undefined | ((obj: any) => boolean)) };
+
 const sandboxedScripts = new Map<string, SandboxedScript>();
 
 function sandboxedScriptAtPath<T extends ServerModuleGlobal>(path: string, publicPath: string): SandboxedScript<T> {
@@ -112,7 +117,7 @@ function sandboxedScriptAtPath<T extends ServerModuleGlobal>(path: string, publi
 			return undefined;
 		}
 		const schema = generator.getSchemaForSymbol(typeName);
-		const schemaValidator = ajv.compile(schema);
+		const schemaValidator = loadAjv().compile(schema);
 		return (value: any) => !!schemaValidator(value);
 	});
 	for (const sourceFile of program.getSourceFiles()) {
