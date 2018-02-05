@@ -53,6 +53,7 @@
     "jsdom": "^11.6.2",
     "mysql": "^2.15.0",
     "node-fetch": "^1.7.3",
+    "opn": "^5.2.0",
     "rimraf": "^2.6.2",
     "rollup": "^0.50.1",
     "rollup-plugin-babel": "^3.0.3",

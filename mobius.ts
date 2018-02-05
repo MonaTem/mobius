@@ -526,6 +526,7 @@ export default function main() {
 			{ name: "generate", type: Boolean, defaultValue: false },
 			{ name: "hostname", type: String },
 			{ name: "simulated-latency", type: Number, defaultValue: 0 },
+			{ name: "launch", type: Boolean, defaultValue: false },
 			{ name: "init", type: Boolean, defaultValue: false },
 			{ name: "help", type: Boolean },
 		]);
@@ -546,7 +547,6 @@ export default function main() {
 							name: "port",
 							typeLabel: "[underline]{number}",
 							description: "The port number to listen on",
-
 						},
 						{
 							name: "base",
@@ -578,6 +578,10 @@ export default function main() {
 						{
 							name: "bundled",
 							description: "Bundle code on the server as well as on the client",
+						},
+						{
+							name: "launch",
+							description: "Open the default browser once server is ready for requests",
 						},
 						{
 							name: "help",
@@ -641,6 +645,9 @@ export default function main() {
 		const acceptSocket = server.listen(port, () => {
 			const publicURL = typeof hostname == "string" ? "http://" + hostname : "http://localhost:" + port;
 			console.log(`Serving ${basePath} on ${publicURL}`);
+			if (args.launch as boolean) {
+				(require("opn") as (url: string) => void)(publicURL);
+			}
 		});
 
 		// Graceful shutdown
