@@ -3,7 +3,7 @@ import * as babel from "babel-core";
 import { readFileSync } from "fs";
 import { cwd } from "process";
 import * as ts from "typescript";
-import { buildGenerator } from "typescript-json-schema";
+import { buildGenerator, JsonSchemaGenerator } from "typescript-json-schema";
 import * as vm from "vm";
 import addSubresourceIntegrity from "./addSubresourceIntegrity";
 import { packageRelative } from "./fileUtils";
@@ -19,6 +19,8 @@ export interface ServerModule {
 	exports: any;
 	paths: string[];
 }
+
+export const schemaValidatorForType = Symbol();
 
 interface ServerModuleGlobal {
 	self: this;
@@ -38,7 +40,7 @@ declare global {
 	}
 }
 
-export type ModuleSource = { from: "file", path: string } | { from: "string", code: string };
+export type ModuleSource = { from: "file", path: string } | { from: "string", code: string, path: string };
 
 const compilerOptions = (() => {
 	const fileName = "tsconfig-server.json";
@@ -76,62 +78,71 @@ const ajv = (() => {
 	return result;
 })();
 
-const sandboxedScriptAtPath = memoize(<T extends ServerModuleGlobal>(path: string, publicPath: string) => {
+
+type SandboxedScript<T extends ServerModuleGlobal = ServerModuleGlobal> = { sandbox: (global: T) => void, validatorForType: (name: string) => (undefined | ((obj: any) => boolean)) };
+const sandboxedScripts = new Map<string, SandboxedScript>();
+
+function sandboxedScriptAtPath<T extends ServerModuleGlobal>(path: string, publicPath: string): SandboxedScript<T> {
+	const existing = sandboxedScripts.get(path);
+	if (existing) {
+		return existing as SandboxedScript<T>;
+	}
 	if (!convertToCommonJS) {
 		convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs")();
 	}
 	if (!optimizeClosuresInRender) {
 		optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render")(babel);
 	}
-	let scriptContents: string | undefined;
-	let scriptMap: string | undefined;
-	let validatorForType: ((name: string) => (obj: any) => boolean) | undefined;
-	const isTypeScript = /\.ts(|x)$/.test(path);
-	if (isTypeScript) {
-		const program = ts.createProgram([path, packageRelative("types/reduced-dom.d.ts")], compilerOptions);
-		const diagnostics = ts.getPreEmitDiagnostics(program);
-		if (diagnostics.length) {
-			console.log(ts.formatDiagnostics(diagnostics, diagnosticsHost));
-		}
-		for (const sourceFile of program.getSourceFiles()) {
-			if (sourceFile.fileName === path) {
-				program.emit(sourceFile, (fileName: string, data: string, writeByteOrderMark: boolean, onError?: (message: string) => void, sourceFiles?: ReadonlyArray<ts.SourceFile>) => {
-					if (/\.js$/.test(fileName)) {
-						scriptContents = data;
-					} else if (/\.js\.map$/.test(fileName)) {
-						scriptMap = data;
-					}
-				});
-			}
-		}
-		const generator = buildGenerator(program, {
-			strictNullChecks: true,
-			ref: true,
-			topRef: true,
-			required: true,
-		});
-		if (generator) {
-			validatorForType = memoize((typeName: string) => {
-				const schema = generator.getSchemaForSymbol(typeName);
-				const schemaValidator = ajv.compile(schema);
-				return (value: any) => !!schemaValidator(value);
+	const program = ts.createProgram([/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), path], compilerOptions);
+	const diagnostics = ts.getPreEmitDiagnostics(program);
+	if (diagnostics.length) {
+		console.log(ts.formatDiagnostics(diagnostics, diagnosticsHost));
+	}
+	let generator: JsonSchemaGenerator | null | undefined;
+	const validatorForType = memoize((typeName: string) => {
+		if (typeof generator === "undefined") {
+			generator = buildGenerator(program, {
+				strictNullChecks: true,
+				ref: true,
+				topRef: true,
+				required: true,
 			});
 		}
-	}
-	const transformed = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(path).toString(), {
-		babelrc: false,
-		plugins: [
-			convertToCommonJS,
-			optimizeClosuresInRender,
-			addSubresourceIntegrity(publicPath),
-			verifyStylePaths(publicPath),
-			rewriteForInStatements(),
-			noImpureGetters(),
-		],
-		inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
+		if (!generator) {
+			return undefined;
+		}
+		const schema = generator.getSchemaForSymbol(typeName);
+		const schemaValidator = ajv.compile(schema);
+		return (value: any) => !!schemaValidator(value);
 	});
-	return { sandbox: sandbox<T>(transformed.code!, path), validatorForType };
-});
+	for (const sourceFile of program.getSourceFiles()) {
+		if (!/\.d\.(js|ts|jsx|tsx)$/.test(sourceFile.fileName)) {
+			let scriptContents: string | undefined;
+			let scriptMap: string | undefined;
+			program.emit(sourceFile, (fileName: string, data: string, writeByteOrderMark: boolean, onError?: (message: string) => void, sourceFiles?: ReadonlyArray<ts.SourceFile>) => {
+				if (/\.js$/.test(fileName)) {
+					scriptContents = data;
+				} else if (/\.js\.map$/.test(fileName)) {
+					scriptMap = data;
+				}
+			});
+			const transformed = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(sourceFile.fileName).toString(), {
+				babelrc: false,
+				plugins: [
+					convertToCommonJS,
+					optimizeClosuresInRender,
+					addSubresourceIntegrity(publicPath),
+					verifyStylePaths(publicPath),
+					rewriteForInStatements(),
+					noImpureGetters(),
+				],
+				inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
+			});
+			sandboxedScripts.set(sourceFile.fileName, { sandbox: sandbox<ServerModuleGlobal>(transformed.code!, sourceFile.fileName), validatorForType });
+		}
+	}
+	return sandboxedScripts.get(path)!;
+}
 
 const sandboxedScriptFromCode = memoize(sandbox);
 
@@ -145,9 +156,7 @@ export function loadModule<T>(source: ModuleSource, module: ServerModule, public
 	moduleGlobal.exports = module.exports;
 	if (source.from === "file") {
 		const script = sandboxedScriptAtPath(source.path, publicPath);
-		if (script.validatorForType) {
-			module.exports._validatorForType = script.validatorForType;
-		}
+		module.exports[schemaValidatorForType] = script.validatorForType;
 		script.sandbox(moduleGlobal);
 	} else {
 		sandboxedScriptFromCode(source.code, "__bundle.js")(moduleGlobal);

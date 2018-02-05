@@ -1,7 +1,7 @@
 import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
 import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
-import { loadModule, ModuleSource, ServerModule } from "./server-compiler";
+import { loadModule, schemaValidatorForType, ModuleSource, ServerModule } from "./server-compiler";
 
 import * as mobiusModule from "mobius";
 import { Channel, JsonValue } from "mobius-types";
@@ -15,7 +15,7 @@ import { JSDOM } from "jsdom";
 import patchJSDOM from "./jsdom-patch";
 
 import { createWriteStream } from "fs";
-import { join as pathJoin } from "path";
+import { join as pathJoin, dirname } from "path";
 
 export interface HostSandboxOptions {
 	htmlSource: string;
@@ -38,8 +38,8 @@ function alwaysBlue() {
 }
 const schemaModule: typeof SchemaModule = {
 	validate(exports: any, name: string): (value: any) => boolean {
-		const validatorForType = exports._validatorForType as ((name: string) => (value: any) => boolean) | undefined;
-		return validatorForType ? validatorForType(name) : alwaysBlue;
+		const validatorForType = exports[schemaValidatorForType] as undefined | ((name: string) => (undefined | ((value: any) => boolean)));
+		return (validatorForType && validatorForType(name)) || alwaysBlue;
 	},
 };
 
@@ -122,7 +122,7 @@ let loadModuleLazy: typeof loadModule = (source, module, publicPath, globalPrope
 
 // Hack so that Module._findPath will find TypeScript files
 const Module = require("module");
-Module._extensions[".ts"] = Module._extensions[".tsx"] = function() {
+Module._extensions[".ts"] = Module._extensions[".tsx"] = Module._extensions[".jsx"] = function() {
 	/* tslint:disable no-empty */
 };
 

@@ -197,18 +197,19 @@ export default async function(profile: "client" | "server", input: string, baseP
 		includePaths({
 			include: {
 				"preact": packageRelative("dist/common/preact"),
-				"babel-plugin-transform-async-to-promises/helpers": packageRelative("node_modules/babel-plugin-transform-async-to-promises/helpers"),
 			},
 		}),
 		rollupTypeScript({
 			cacheRoot: resolve(basePath, ".cache"),
 			include: [
-				resolve(basePath, "**/*.ts+(|x)"),
-				resolve(basePath, "*.ts+(|x)"),
-				packageRelative("**/*.ts+(|x)"),
-				packageRelative("*.ts+(|x)"),
+				resolve(basePath, "**/*.(ts|tsx|js|jsx)"),
+				resolve(basePath, "*.(ts|tsx|js|jsx)"),
+				packageRelative("**/*.(ts|tsx|js|jsx)"),
+				packageRelative("*.(ts|tsx|js|jsx)"),
 			] as any,
-			exclude: [] as any,
+			exclude: [
+				packageRelative("node_modules/babel-plugin-transform-async-to-promises/*")
+			] as any,
 			tsconfig: packageRelative(`tsconfig-${profile}.json`),
 			tsconfigOverride: {
 				include: [
@@ -230,9 +231,16 @@ export default async function(profile: "client" | "server", input: string, baseP
 							packageRelative("common/*"),
 							resolve(basePath, "common/*"),
 							packageRelative("types/*"),
+							resolve(basePath, "*"),
 						],
 						"tslib": [
 							packageRelative("node_modules/tslib/tslib"),
+						],
+						"babel-plugin-transform-async-to-promises/helpers": [
+							packageRelative("node_modules/babel-plugin-transform-async-to-promises/helpers")
+						],
+						"preact": [
+							packageRelative("dist/common/preact"),
 						],
 					},
 				},
@@ -244,7 +252,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 			presets: isClient ? [env.default(null, { targets: { browsers: ["ie 6"] }, modules: false })] : [],
 			plugins: isClient ? [
 				externalHelpers(babel),
-				[transformAsyncToPromises(babel), {externalHelpers: true}],
+				[transformAsyncToPromises(babel), { externalHelpers: true }],
 				optimizeClosuresInRender(babel),
 				addSubresourceIntegrity(publicPath),
 				stripRedact(),
@@ -256,6 +264,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 				stripUnusedArgumentCopies(),
 			] : [
 				externalHelpers(babel),
+				[transformAsyncToPromises(babel), { externalHelpers: true }],
 				optimizeClosuresInRender(babel),
 				addSubresourceIntegrity(publicPath),
 				verifyStylePaths(publicPath),

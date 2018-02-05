@@ -182,7 +182,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	// Start host
 	console.log("Rendering initial page...");
-	const serverSource: ModuleSource = bundled ? { from: "string", code: (await compileBundle("server", serverJSPath, sourcePath, publicPath)).code } : { from: "file", path: serverJSPath };
+	const serverSource: ModuleSource = bundled ? { from: "string", code: (await compileBundle("server", serverJSPath, sourcePath, publicPath)).code, path: serverJSPath } : { from: "file", path: serverJSPath };
 	const host = new Host(serverSource, serverModulePaths, modulePaths, sessionsPath, publicPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, workers, hostname);
 
 	// Read fallback script

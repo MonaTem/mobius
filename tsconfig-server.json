@@ -1,9 +1,9 @@
 {
 	"compilerOptions": {
 		"baseUrl": "./",
-		"allowJs": false,
-		"declaration": true,
-		"declarationDir": "types",
+		"allowJs": true,
+		"declaration": false,
+		"outDir": "/tmp",
 		"sourceMap": true,
 		"jsx": "react",
 		"jsxFactory": "dom.h",
@@ -17,8 +17,7 @@
 		"target": "es2017",
 		"downlevelIteration": false,
 		"types": [
-			"node",
-			"preact"
+			"node"
 		],
 		"typeRoots": [
 			"types",
@@ -26,13 +25,17 @@
 		],
 		"lib": [
 			"es6",
-			"es2015.promise"
+			"es2015.promise",
+			"preact"
 		],
 		"paths": {
 			"*": [
 				"server/*",
 				"common/*",
 				"types/*"
+			],
+			"preact": [
+				"dist/common/preact"
 			]
 		}
 	}
