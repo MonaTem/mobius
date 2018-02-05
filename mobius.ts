@@ -56,8 +56,8 @@ interface StaticFileRoute {
 	etag: string;
 	integrity: string;
 	buffer: Buffer;
-	gzipped: Buffer;
-	brotlied: Buffer;
+	gzipped?: Buffer;
+	brotlied?: Buffer;
 }
 
 function staticFileRoute(path: string, contents: string | Buffer): StaticFileRoute {
@@ -69,12 +69,6 @@ function staticFileRoute(path: string, contents: string | Buffer): StaticFileRou
 		etag: etag(buffer),
 		integrity: "sha256-" + integrity,
 		buffer,
-		gzipped: zlib.gzipSync(buffer, {
-			level: zlib.constants.Z_BEST_COMPRESSION,
-		}),
-		brotlied: brotliCompress(buffer, {
-			mode: 1,
-		}),
 	};
 }
 
@@ -83,10 +77,14 @@ function sendCompressed(request: express.Request, response: express.Response, ro
 	const encodings = accepts(request).encodings();
 	if (encodings.indexOf("br") !== -1) {
 		response.set("Content-Encoding", "br");
-		response.send(route.brotlied);
+		response.send(route.brotlied || (route.brotlied = brotliCompress(route.buffer, {
+			mode: 1,
+		})));
 	} else if (encodings.indexOf("gzip") !== -1) {
 		response.set("Content-Encoding", "gzip");
-		response.send(route.gzipped);
+		response.send(route.gzipped || (route.gzipped = zlib.gzipSync(route.buffer, {
+			level: zlib.constants.Z_BEST_COMPRESSION,
+		})));
 	} else {
 		response.send(route.buffer);
 	}
