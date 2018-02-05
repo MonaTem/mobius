@@ -228,7 +228,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			if (bakedModule) {
 				return bakedModule(this);
 			}
-			const modulePath = Module._findPath(name, newModule.paths, false);
+			const modulePath = Module._findPath(name, [dirname(source.path)].concat(newModule.paths), false);
 			if (modulePath) {
 				const existingModule = this.modules.get(modulePath);
 				if (existingModule) {
