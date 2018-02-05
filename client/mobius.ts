@@ -963,15 +963,16 @@ function bundledPromiseImplementation() {
 		if (!this.__state) {
 			if (value instanceof Promise) {
 				if (value.__state) {
-					state = value.__state;
+					if (state === PromiseState.Fulfilled) {
+						state = value.__state;
+					}
 					value = value.__value;
 				} else {
-					(value.__observers || (value.__observers = [])).push(settlePromise.bind(this, PromiseState.Fulfilled, value));
+					(value.__observers || (value.__observers = [])).push(settlePromise.bind(this, state, value));
 					return;
 				}
 			} else if (isPromiseLike(value)) {
-				const recover = settlePromise.bind(this, PromiseState.Fulfilled);
-				value.then(recover, recover);
+				value.then(settlePromise.bind(this, state), settlePromise.bind(this, PromiseState.Rejected));
 				return;
 			}
 			this.__state = state;
@@ -993,11 +994,13 @@ function bundledPromiseImplementation() {
 		public __value: any;
 		/* tslint:disable variable-name */
 		public __observers?: Task[];
-		constructor(executor?: (resolve: (value?: T | PromiseLike<T>) => void, reject: (reason?: any) => void) => void) {
-			if (executor) {
-				const reject = settlePromise.bind(this, PromiseState.Rejected);
+		constructor(resolver: (resolve: (value?: T | PromiseLike<T>) => void, reject: (reason?: any) => void) => void) {
+			if (resolver !== emptyFunction) {
+				if (typeof resolver !== "function") {
+					throw new TypeError(`Promise resolver ${resolver} is not a function`);
+				}
 				try {
-					executor(settlePromise.bind(this, PromiseState.Fulfilled), reject);
+					resolver(settlePromise.bind(this, PromiseState.Fulfilled), settlePromise.bind(this, PromiseState.Rejected));
 				} catch (e) {
 					this.__state = PromiseState.Rejected;
 					this.__value = e;
@@ -1036,13 +1039,13 @@ function bundledPromiseImplementation() {
 			if (isPromiseLike(value)) {
 				return new Promise<T>((resolve, reject) => value.then(resolve, reject));
 			}
-			const result = new Promise<T>();
+			const result = new Promise<T>(emptyFunction);
 			result.__value = value;
 			result.__state = PromiseState.Fulfilled;
 			return result;
 		}
 		public static reject<T = never>(reason: any): Promise<T> {
-			const result = new Promise<T>();
+			const result = new Promise<T>(emptyFunction);
 			result.__value = reason;
 			result.__state = PromiseState.Rejected;
 			return result;
@@ -1051,12 +1054,12 @@ function bundledPromiseImplementation() {
 			for (let i = 0; i < values.length; i++) {
 				const value = values[i];
 				if (!isPromiseLike(value)) {
-					const result = new Promise<T>();
+					const result = new Promise<T>(emptyFunction);
 					result.__value = value;
 					result.__state = PromiseState.Fulfilled;
 					return result;
 				} else if (value instanceof Promise && value.__state) {
-					const result = new Promise<T>();
+					const result = new Promise<T>(emptyFunction);
 					result.__value = value.__value;
 					result.__state = value.__state;
 					return result;
