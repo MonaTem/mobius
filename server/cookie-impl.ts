@@ -15,6 +15,6 @@ export function set(key: string, value: string) {
 	require("setCookie")(key, value);
 }
 
-export async function all(): Promise<Readonly<{[key: string]: string}>> {
+export function all(): Promise<Readonly<{[key: string]: string}>> {
 	return createServerPromise(populateCachedCookies);
 }
