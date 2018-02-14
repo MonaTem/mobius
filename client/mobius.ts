@@ -1033,6 +1033,14 @@ function bundledPromiseImplementation() {
 		public catch<TResult = never>(onRejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult> {
 			return this.then(undefined, onRejected);
 		}
+		public finally(onFinally: () => void): Promise<T> {
+			return this.then(
+				(value) => Promise.resolve(onFinally()).then(() => value),
+				(error) => Promise.resolve(onFinally()).then(() => {
+					throw error;
+				}),
+			);
+		}
 		public static resolve<T>(value: Promise<T> | T): Promise<T>;
 		public static resolve(): Promise<void>;
 		public static resolve<T>(value?: Promise<T> | T): Promise<T> {
