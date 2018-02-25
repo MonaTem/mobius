@@ -182,6 +182,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 	const optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
 	const transformAsyncToPromises = require("babel-plugin-transform-async-to-promises");
 	const externalHelpers = require("babel-plugin-external-helpers");
+	const dynamicImport = require("babel-plugin-syntax-dynamic-import");
 	const env = require("babel-preset-env");
 
 	// Workaround to allow TypeScript to union two folders. This is definitely not right, but it works :(
@@ -202,10 +203,8 @@ export default async function(profile: "client" | "server", input: string, baseP
 		rollupTypeScript({
 			cacheRoot: resolve(basePath, ".cache"),
 			include: [
-				resolve(basePath, "**/*.(ts|tsx|js|jsx)"),
-				resolve(basePath, "*.(ts|tsx|js|jsx)"),
-				packageRelative("**/*.(ts|tsx|js|jsx)"),
-				packageRelative("*.(ts|tsx|js|jsx)"),
+				resolve(basePath, "**/*.+(ts|tsx|js|jsx)"),
+				packageRelative("**/*.+(ts|tsx|js|jsx)"),
 			] as any,
 			exclude: [
 				packageRelative("node_modules/babel-plugin-transform-async-to-promises/*"),
@@ -251,6 +250,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 			babelrc: false,
 			presets: isClient ? [env.default(null, { targets: { browsers: ["ie 6"] }, modules: false })] : [],
 			plugins: isClient ? [
+				dynamicImport(),
 				externalHelpers(babel),
 				[transformAsyncToPromises(babel), { externalHelpers: true }],
 				optimizeClosuresInRender(babel),
@@ -263,6 +263,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 				rewriteInsufficientBrowserThrow(),
 				stripUnusedArgumentCopies(),
 			] : [
+				dynamicImport(),
 				externalHelpers(babel),
 				[transformAsyncToPromises(babel), { externalHelpers: true }],
 				optimizeClosuresInRender(babel),
@@ -288,10 +289,13 @@ export default async function(profile: "client" | "server", input: string, baseP
 		acorn: {
 			allowReturnOutsideFunction: true,
 		},
+		experimentalCodeSplitting: true,
+		experimentalDynamicImport: true,
 	});
 	const output = await bundle.generate({
 		format: isClient ? "iife" : "cjs",
 		sourcemap: true,
+		name: "app",
 	});
 	// Cleanup some of the mess we made
 	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;

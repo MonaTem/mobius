@@ -9,7 +9,7 @@
 		"noUnusedLocals": true,
 		"noImplicitThis": true,
 		"allowUnusedLabels": true,
-		"module": "ES6",
+		"module": "esnext",
 		"moduleResolution": "node",
 		"sourceMap": true,
 		"target": "es2017",

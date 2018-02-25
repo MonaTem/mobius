@@ -12,7 +12,7 @@
 		"noUnusedLocals": true,
 		"noImplicitThis": true,
 		"allowUnusedLabels": true,
-		"module": "ES6",
+		"module": "esnext",
 		"moduleResolution": "node",
 		"target": "es2017",
 		"downlevelIteration": false,

@@ -9,11 +9,13 @@ import addSubresourceIntegrity from "./addSubresourceIntegrity";
 import { packageRelative } from "./fileUtils";
 import memoize from "./memoize";
 import noImpureGetters from "./noImpureGetters";
+import rewriteDynamicImport from "./rewriteDynamicImport";
 import rewriteForInStatements from "./rewriteForInStatements";
 import verifyStylePaths from "./verify-style-paths";
 
 let convertToCommonJS: any;
 let optimizeClosuresInRender: any;
+let dynamicImport: any;
 
 export interface ServerModule {
 	exports: any;
@@ -100,6 +102,9 @@ function sandboxedScriptAtPath<T extends ServerModuleGlobal>(path: string, publi
 	if (!optimizeClosuresInRender) {
 		optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render")(babel);
 	}
+	if (!dynamicImport) {
+		dynamicImport = require("babel-plugin-syntax-dynamic-import")();
+	}
 	const program = ts.createProgram([/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), path], compilerOptions);
 	const diagnostics = ts.getPreEmitDiagnostics(program);
 	if (diagnostics.length) {
@@ -136,6 +141,8 @@ function sandboxedScriptAtPath<T extends ServerModuleGlobal>(path: string, publi
 			const transformed = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(sourceFile.fileName).toString(), {
 				babelrc: false,
 				plugins: [
+					dynamicImport,
+					rewriteDynamicImport,
 					convertToCommonJS,
 					optimizeClosuresInRender,
 					addSubresourceIntegrity(publicPath),

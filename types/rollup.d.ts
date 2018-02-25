@@ -66,6 +66,8 @@ export interface GenerateOptions extends BundleOptions {
 	 * The map.file property is the basename of sourceMapFile, as the location of the sourcemap is assumed to be adjacent to the bundle.
 	 */
 	sourceMapFile?: string
+	/** The name of the generated bundle */
+	name?: string
 }
 
 export interface WriteOptions extends BundleOptions {
@@ -116,6 +118,10 @@ export interface Options {
 	moduleContext?: ((id: string) => any) | { [id: string]: any }
 	/** Adds support for very old environments like IE8, at the cost of some extra code. */
 	legacy?: boolean
+	/** Adds support for experimental code splitting */
+	experimentalCodeSplitting?: boolean
+	/** Adds support for dynamic imports */
+	experimentalDynamicImport?: boolean
 }
 
 // https://github.com/rollup/rollup/wiki/Plugins#creating-plugins
