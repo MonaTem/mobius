@@ -1,21 +1,10 @@
 import { defaultEventProperties } from "_dom";
+import { registeredListeners } from "_dom";
 import { restoreDefaults, stripDefaults } from "_internal";
 import { createClientChannel, createClientPromise } from "mobius";
 import { Channel } from "mobius-types";
 import * as preact from "preact";
 export { h, Component, AnyComponent, ComponentProps } from "preact";
-
-const registeredListeners: { [ eventId: number ]: (event: any) => void } = {};
-
-export function dispatchRacedEvents(defer: () => void) {
-	const resolved = Promise.resolve();
-	const racedEvents = (window as any)._mobiusEvents as ReadonlyArray<[number, any]>;
-	if (racedEvents) {
-		return racedEvents.reduce((promise, event) => promise.then(() => registeredListeners[event[0]](event[1])).then(defer), resolved);
-	} else {
-		return resolved;
-	}
-}
 
 type PreactNode = Node & {
 	_listeners?: { [ event: string ]: (event: any) => void },

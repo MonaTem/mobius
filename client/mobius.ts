@@ -1,6 +1,6 @@
+import { registeredListeners } from "_dom";
 import { BootstrapData, ClientMessage, deserializeMessageFromText, disconnectedError, Event, eventForException, eventForValue, logOrdering, parseValueEvent, roundTrip, serializeMessageAsText, ServerMessage } from "_internal";
 import { interceptGlobals } from "determinism";
-import { dispatchRacedEvents } from "dom";
 import { Channel, JsonValue } from "mobius-types";
 /**
  * @license THE MIT License (MIT)
@@ -315,6 +315,7 @@ const synchronizeChannels = escaping(() => {
 	}
 });
 
+let afterHydration: Promise<void>;
 if (bootstrapData.sessionID) {
 	++outgoingMessageId;
 	const events = bootstrapData.events || [];
@@ -331,7 +332,7 @@ if (bootstrapData.sessionID) {
 	const clientRenderedHostElement = document.createElement("div");
 	clientRenderedHostElement.style.display = "none";
 	document.body.insertBefore(clientRenderedHostElement, serverRenderedHostElement);
-	afterLoaded.then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(() => {
+	afterHydration = afterLoaded.then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(() => {
 		bootstrappingChannels = undefined;
 		// Swap the prerendered DOM element out for the one with mounted components
 		const childNodes = [].slice.call(serverRenderedHostElement.childNodes, 0);
@@ -345,10 +346,20 @@ if (bootstrapData.sessionID) {
 			window.scrollTo(bootstrapData.x, bootstrapData.y);
 		}
 		clientRenderedHostElement.style.display = null;
-	}).then(didExitCallback).then(synchronizeChannels).then(dispatchRacedEvents.bind(null, defer));
+	}).then(didExitCallback).then(synchronizeChannels);
 } else {
-	afterLoaded.then(didExitCallback).then(dispatchRacedEvents.bind(null, defer));
+	afterHydration = afterLoaded.then(didExitCallback);
 }
+
+afterHydration.then(() => {
+	// Dispatch DOM events that occurred as the page was loading
+	const racedEvents = (window as any)._mobiusEvents as ReadonlyArray<[number, any]>;
+	if (racedEvents) {
+		delete (window as any)._mobiusEvents;
+		(window as any)._dispatch = emptyFunction;
+		return racedEvents.reduce((promise: Promise<void>, event: [number, any]) => promise.then(() => registeredListeners[event[0]](event[1])).then(defer as () => Promise<void>), resolvedPromise);
+	}
+});
 
 function produceMessage(): Partial<ClientMessage> {
 	const result: Partial<ClientMessage> = { messageID: outgoingMessageId++ };
