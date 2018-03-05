@@ -3,7 +3,7 @@ import { NodePath } from "babel-traverse";
 import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as types from "babel-types";
 import { resolve } from "path";
-import { Plugin, rollup } from "rollup";
+import { Plugin, SourceMap, rollup } from "rollup";
 import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
@@ -175,6 +175,11 @@ interface CompilerOutput {
 	map: string;
 }
 
+interface RollupOutput {
+	code: string;
+	map: SourceMap;
+}
+
 export default async function(profile: "client" | "server", input: string, basePath: string, publicPath: string, minify?: boolean): Promise<CompilerOutput> {
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
@@ -293,14 +298,20 @@ export default async function(profile: "client" | "server", input: string, baseP
 		experimentalDynamicImport: true,
 	});
 	const output = await bundle.generate({
-		format: isClient ? "iife" : "cjs",
+		format: isClient ? "amd" : "cjs",
 		sourcemap: true,
 		name: "app",
 	});
 	// Cleanup some of the mess we made
 	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;
+	const chunks: { [name: string]: RollupOutput } = "code" in output ? { "./main.js": output as RollupOutput } : output;
+	console.log(Object.keys(chunks).map(name => name + "=>" + Object.keys(chunks[name]).join(", ")))
+	const main = chunks["./main.js"];
+	if (!main) {
+		throw new Error("Could not find main.js in compiled output!");
+	}
 	return {
-		code: output.code,
-		map: output.map.toString(),
+		code: main.code,
+		map: main.map.toString(),
 	};
 }

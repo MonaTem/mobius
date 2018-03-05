@@ -6,7 +6,7 @@
 import { RawSourceMap } from 'source-map'
 import * as acorn from 'acorn'
 
-export type Format = 'amd' | 'cjs' | 'es' | 'iife' | 'umd'
+export type Format = 'amd' | 'cjs' | 'es' | 'iife' | 'umd' | 'system'
 
 export interface SourceMap extends RawSourceMap {
 	toString(): string
@@ -81,7 +81,7 @@ export interface WriteOptions extends BundleOptions {
 
 export interface Bundle {
 	/** Generate bundled code as an object */
-	generate(options: GenerateOptions): Promise<{ code: string, map: SourceMap }>
+	generate(options: GenerateOptions): Promise<{ code: string, map: SourceMap } | { [file: string]: { code: string, map: SourceMap } }>
 	/** writes the file (and accompanying sourcemap file, if appropriate) to the file system. */
 	write(options: WriteOptions): Promise<void>
 }
