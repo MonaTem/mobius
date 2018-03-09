@@ -3,7 +3,8 @@ import { NodePath } from "babel-traverse";
 import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as types from "babel-types";
 import { resolve } from "path";
-import { Plugin, SourceMap, rollup } from "rollup";
+import { Chunk, OutputOptions, Plugin, getExportBlock, rollup } from "rollup";
+import { Bundle, SourceMap } from "magic-string";
 import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
@@ -172,15 +173,40 @@ function stripUnusedArgumentCopies() {
 
 interface CompilerOutput {
 	code: string;
-	map: string;
-}
-
-interface RollupOutput {
-	code: string;
 	map: SourceMap;
 }
 
-export default async function(profile: "client" | "server", input: string, basePath: string, publicPath: string, minify?: boolean): Promise<CompilerOutput> {
+function customFinalizer(
+	chunk: Chunk,
+	magicString: Bundle,
+	{
+		exportMode,
+		getPath,
+		indentString,
+		intro,
+		outro,
+		dynamicImport
+	}: {
+		exportMode: string;
+		indentString: string;
+		getPath: (name: string) => string;
+		intro: string;
+		outro: string;
+		dynamicImport: boolean;
+	},
+	options: OutputOptions
+) {
+	const { dependencies, exports } = chunk.getModuleDeclarations();
+	magicString.prepend("-function(){\n");
+	const exportBlock = getExportBlock(exports, dependencies, exportMode);
+	if (exportBlock) {
+		magicString.append("\n\n" + exportBlock, {});
+	}
+	magicString.append("\n}()", {});
+	return magicString;
+}
+
+export default async function(profile: "client" | "server", input: string, basePath: string, publicPath: string, minify?: boolean): Promise<{ [name: string]: CompilerOutput }> {
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
@@ -288,7 +314,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 		}) as Plugin);
 	}
 	const bundle = await rollup({
-		input: packageRelative("client/main.js"),
+		input: [packageRelative("client/main.js")],
 		external: profile === "client" ? [] : ["mobius", "_broadcast"],
 		plugins,
 		acorn: {
@@ -296,22 +322,18 @@ export default async function(profile: "client" | "server", input: string, baseP
 		},
 		experimentalCodeSplitting: true,
 		experimentalDynamicImport: true,
+		aggressivelyMergeModules: true,
+		hashedChunkNames: true,
 	});
 	const output = await bundle.generate({
-		format: isClient ? "amd" : "cjs",
+		format: isClient ? customFinalizer : "cjs",
 		sourcemap: true,
 		name: "app",
+		legacy: isClient,
 	});
 	// Cleanup some of the mess we made
 	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;
-	const chunks: { [name: string]: RollupOutput } = "code" in output ? { "./main.js": output as RollupOutput } : output;
-	console.log(Object.keys(chunks).map(name => name + "=>" + Object.keys(chunks[name]).join(", ")))
-	const main = chunks["./main.js"];
-	if (!main) {
-		throw new Error("Could not find main.js in compiled output!");
-	}
-	return {
-		code: main.code,
-		map: main.map.toString(),
-	};
+	const chunks: { [name: string]: CompilerOutput } = "code" in output ? { "./main.js": output as CompilerOutput } : output;
+	Object.keys(chunks).forEach(name => console.log(name + " =>\n" + chunks[name].code + "\n"));
+	return chunks;
 }

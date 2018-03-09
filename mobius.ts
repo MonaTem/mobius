@@ -180,7 +180,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	// Start host
 	console.log("Rendering initial page...");
-	const serverSource: ModuleSource = bundled ? { from: "string", code: (await compileBundle("server", serverJSPath, sourcePath, publicPath)).code, path: serverJSPath } : { from: "file", path: serverJSPath };
+	const serverSource: ModuleSource = bundled ? { from: "string", code: (await compileBundle("server", serverJSPath, sourcePath, publicPath))["./main.js"].code, path: serverJSPath } : { from: "file", path: serverJSPath };
 	const host = new Host(serverSource, serverModulePaths, modulePaths, sessionsPath, publicPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, workers, hostname);
 
 	// Read fallback script
@@ -195,11 +195,15 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	const prerender = initialPageSession.prerenderContent();
 
 	// Compile client code while userspace is running
-	const clientCompiled = await compileBundle("client", serverJSPath, sourcePath, publicPath, minify);
-	const clientScript = staticFileRoute("/client.js", clientCompiled.code);
+	const clientScripts = await compileBundle("client", serverJSPath, sourcePath, publicPath, minify);
+	const main = clientScripts["./main.js"];
+	if (!main) {
+		throw new Error("Could not find main.js in compiled output!");
+	}
+	const mainRoute = staticFileRoute("/main.js", main.code);
 
 	// Finish with fallback
-	const fallbackScript = staticFileRoute("/fallback.js", await fallbackContentsAsync);
+	const fallbackRoute = staticFileRoute("/fallback.js", await fallbackContentsAsync);
 	const fallbackMapContents = await fallbackMapContentsAsync;
 
 	// Finish prerender of initial page
@@ -207,10 +211,10 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	const defaultRenderedHTML = staticFileRoute("/", await initialPageSession.render({
 		mode: PageRenderMode.Bare,
 		client: { clientID: 0, incomingMessageId: 0 },
-		clientURL: clientScript.foreverPath,
-		clientIntegrity: clientScript.integrity,
-		fallbackURL: fallbackScript.foreverPath,
-		fallbackIntegrity: fallbackScript.integrity,
+		clientURL: mainRoute.foreverPath,
+		clientIntegrity: mainRoute.integrity,
+		fallbackURL: fallbackRoute.foreverPath,
+		fallbackIntegrity: fallbackRoute.integrity,
 		noScriptURL: "/?js=no",
 		cssBasePath: publicPath,
 	}));
@@ -253,10 +257,10 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					const html = await session.render({
 						mode: PageRenderMode.IncludeForm,
 						client,
-						clientURL: clientScript.foreverPath,
-						clientIntegrity: clientScript.integrity,
-						fallbackURL: fallbackScript.foreverPath,
-						fallbackIntegrity: fallbackScript.integrity,
+						clientURL: mainRoute.foreverPath,
+						clientIntegrity: mainRoute.integrity,
+						fallbackURL: fallbackRoute.foreverPath,
+						fallbackIntegrity: fallbackRoute.integrity,
 						bootstrap: true,
 						cssBasePath: publicPath,
 					});
@@ -316,10 +320,10 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						const html = await client.session.render({
 							mode: PageRenderMode.IncludeFormAndStripScript,
 							client,
-							clientURL: clientScript.foreverPath,
-							clientIntegrity: clientScript.integrity,
-							fallbackURL: fallbackScript.foreverPath,
-							fallbackIntegrity: fallbackScript.integrity,
+							clientURL: mainRoute.foreverPath,
+							clientIntegrity: mainRoute.integrity,
+							fallbackURL: fallbackRoute.foreverPath,
+							fallbackIntegrity: fallbackRoute.integrity,
 						});
 						let responseContent = html;
 						if (isJavaScript) {
@@ -473,18 +477,31 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				}
 			}
 
+			for (let relativePath of Object.keys(clientScripts)) {
+				const script = clientScripts[relativePath];
+				const fullPath = relativePath.substr(1);
+				const scriptRoute = fullPath === "/main.js" ? mainRoute : staticFileRoute(fullPath, script.code);
+				if (sourceMaps) {
+					const mapRoute = staticFileRoute(fullPath + ".map", script.map.toString());
+					registerStatic(scriptRoute, (response) => {
+						response.set("Content-Type", "text/javascript; charset=utf-8");
+						response.set("X-Content-Type-Options", "nosniff");
+						response.set("SourceMap", mapRoute.foreverPath);
+					});
+					registerStatic(mapRoute, (response) => {
+						response.set("Content-Type", "application/json; charset=utf-8");
+					});
+				} else {
+					registerStatic(scriptRoute, (response) => {
+						response.set("Content-Type", "text/javascript; charset=utf-8");
+						response.set("X-Content-Type-Options", "nosniff");
+					});
+				}
+			}
+
 			if (sourceMaps) {
-				const clientMap = staticFileRoute("/client.js.map", clientCompiled.map);
-				registerStatic(clientScript, (response) => {
-					response.set("Content-Type", "text/javascript; charset=utf-8");
-					response.set("X-Content-Type-Options", "nosniff");
-					response.set("SourceMap", clientMap.foreverPath);
-				});
-				registerStatic(clientMap, (response) => {
-					response.set("Content-Type", "application/json; charset=utf-8");
-				});
 				const fallbackMap = staticFileRoute("/fallback.js.map", fallbackMapContents);
-				registerStatic(fallbackScript, (response) => {
+				registerStatic(fallbackRoute, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");
 					response.set("X-Content-Type-Options", "nosniff");
 					response.set("SourceMap", fallbackMap.foreverPath);
@@ -493,11 +510,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					response.set("Content-Type", "application/json; charset=utf-8");
 				});
 			} else {
-				registerStatic(clientScript, (response) => {
-					response.set("Content-Type", "text/javascript; charset=utf-8");
-					response.set("X-Content-Type-Options", "nosniff");
-				});
-				registerStatic(fallbackScript, (response) => {
+				registerStatic(fallbackRoute, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");
 					response.set("X-Content-Type-Options", "nosniff");
 				});
