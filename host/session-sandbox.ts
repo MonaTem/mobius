@@ -640,8 +640,8 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 				if (!argumentValidator || argumentValidator(event)) {
 					resolvedPromise.then(() => callback.apply(null, event));
 				} else {
-					escape(new Error("Arguments from client did not validate to the expected schema: " + JSON.stringify(event)));
 					this.destroy();
+					throw new Error("Arguments from client did not validate to the expected schema: " + JSON.stringify(event));
 				}
 			} else {
 				channel.close();

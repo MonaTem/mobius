@@ -4,7 +4,7 @@ import { restoreDefaults, stripDefaults } from "_internal";
 import { createClientChannel, createClientPromise } from "mobius";
 import { Channel } from "mobius-types";
 import * as preact from "preact";
-export { h, Component, AnyComponent, ComponentProps } from "preact";
+export { h, Component, ComponentFactory, ComponentProps, FunctionalComponent } from "preact";
 
 type PreactNode = Node & {
 	_listeners?: { [ event: string ]: (event: any) => void },

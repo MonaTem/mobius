@@ -201,9 +201,20 @@ function shouldImplementLocalChannel(channelId: number) {
 let dispatchingEvent = 1;
 let dispatchingAPIImplementation: number = 0;
 let insideCallback: boolean = true;
+// and whether or not a module is loading
+let loadingModules = 0;
+
 function updateInsideCallback() {
 	insideCallback = dispatchingEvent != 0 && dispatchingAPIImplementation == 0;
+	if (!dispatchingEvent && (!loadingModules || dead)) {
+		const callback = idleCallbacks.shift();
+		if (callback) {
+			defer().then(updateInsideCallback);
+			callback();
+		}
+	}
 }
+
 function willEnterCallback() {
 	dispatchingEvent++;
 	insideCallback = true;
@@ -212,6 +223,17 @@ function willEnterCallback() {
 function didExitCallback() {
 	dispatchingEvent--;
 	updateInsideCallback();
+}
+
+let idleCallbacks: Array<() => void> = [];
+function idle(first?: true) : Promise<void> {
+	return !dispatchingEvent && (!loadingModules || dead) ? resolvedPromise : new Promise((resolve) => {
+		if (first) {
+			idleCallbacks.unshift(resolve);
+		} else {
+			idleCallbacks.push(resolve);
+		}
+	});
 }
 
 function runAPIImplementation<T>(block: () => T): T {
@@ -277,22 +299,6 @@ const socketURL = serverURL.replace(/^http/, "ws").replace(/#.*/, "") + "?";
 let WebSocketClass = (window as any).WebSocket as typeof WebSocket | undefined;
 let websocket: WebSocket | undefined;
 
-const afterLoaded = new Promise((resolve) => {
-	let eventTarget: EventTarget = window;
-	for (let i = 0; i < startupScripts.length; i++) {
-		const element = startupScripts[i];
-		if (/\/client\.js$/.test(element.src)) {
-			eventTarget = element;
-			break;
-		}
-	}
-	const onload = () => {
-		resolve();
-		eventTarget.removeEventListener("load", onload, false);
-	};
-	eventTarget.addEventListener("load", onload, false);
-}).then(defer);
-
 const wrapperForm = document.getElementById("mobius-form") as HTMLFormElement;
 if (wrapperForm) {
 	wrapperForm.onsubmit = () => false;
@@ -332,10 +338,10 @@ if (bootstrapData.sessionID) {
 	const clientRenderedHostElement = document.createElement("div");
 	clientRenderedHostElement.style.display = "none";
 	document.body.insertBefore(clientRenderedHostElement, serverRenderedHostElement);
-	afterHydration = afterLoaded.then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(() => {
+	afterHydration = defer().then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(() => {
 		bootstrappingChannels = undefined;
 		// Swap the prerendered DOM element out for the one with mounted components
-		const childNodes = [].slice.call(serverRenderedHostElement.childNodes, 0);
+		const childNodes = slice.call(serverRenderedHostElement.childNodes, 0);
 		for (let i = 0; i < childNodes.length; i++) {
 			if (childNodes[i].nodeName === "LINK") {
 				document.body.appendChild(childNodes[i]);
@@ -348,7 +354,7 @@ if (bootstrapData.sessionID) {
 		clientRenderedHostElement.style.display = null;
 	}).then(didExitCallback).then(synchronizeChannels);
 } else {
-	afterHydration = afterLoaded.then(didExitCallback);
+	afterHydration = defer().then(didExitCallback);
 }
 
 afterHydration.then(() => {
@@ -479,20 +485,22 @@ function callChannelWithEvent(channel: ((event: Event) => void) | undefined, eve
 }
 
 function processEvents(events: Array<Event | boolean>) {
-	hadOpenServerChannel = pendingChannelCount != 0;
-	currentEvents = events;
-	return events.reduce((promise: Promise<any>, event: Event | boolean) => {
-		if (typeof event == "boolean") {
-			return promise.then(() => {
-				allEvents.push(event);
-				hadOpenServerChannel = event;
-			});
-		} else {
-			return promise.then(() => escapingDispatchEvent(event)).then(defer);
-		}
-	}, resolvedPromise as Promise<any>).then(() => {
-		currentEvents = undefined;
+	return idle().then(() => {
 		hadOpenServerChannel = pendingChannelCount != 0;
+		currentEvents = events;
+		return events.reduce((promise: Promise<any>, event: Event | boolean) => {
+			if (typeof event == "boolean") {
+				return promise.then(() => {
+					allEvents.push(event);
+					hadOpenServerChannel = event;
+				});
+			} else {
+				return promise.then(escapingDispatchEvent.bind(null, event)).then(defer).then(() => idle(true));
+			}
+		}, resolvedPromise as Promise<any>).then(() => {
+			currentEvents = undefined;
+			hadOpenServerChannel = pendingChannelCount != 0;
+		});
 	});
 }
 
@@ -786,7 +794,7 @@ export function createClientPromise<T extends JsonValue | void>(ask: () => (Prom
 		};
 		if (shouldImplementLocalChannel(channelId)) {
 			// Resolve value
-			new Promise<T>((innerResolve) => innerResolve(runAPIImplementation(ask))).then(
+			idle().then(() => runAPIImplementation(ask)).then(
 				escaping((value: T) => sendEvent(eventForValue(channelId, value), batched)),
 			).catch(
 				escaping((error: any) => sendEvent(eventForException(channelId, error), batched)),
@@ -846,7 +854,7 @@ export function createClientChannel<T extends Function, U = void>(callback: T, o
 				if (channelId >= 0) {
 					const message = roundTrip(slice.call(arguments));
 					message.unshift(channelId);
-					resolvedPromise.then(escaping(sendEvent.bind(null, message, batched)));
+					idle().then(escaping(sendEvent.bind(null, message, batched)));
 				}
 			} as any as T));
 			if (onClose) {
@@ -1138,4 +1146,59 @@ interceptGlobals(window, () => insideCallback && !dead, coordinateValue, <T exte
 	};
 });
 
-(window as any)._mobius = true;
+type ImportFunction = (moduleName: string, integrity?: string) => Promise<any>;
+
+const modules: { [name: string]: any } = {};
+const moduleResolve: { [name: string]: [(value: any) => void, boolean] } = {};
+
+declare global {
+	let _import: ImportFunction;
+}
+_import = (moduleName: string, integrity?: string) => {
+	if (Object.hasOwnProperty.call(modules, moduleName)) {
+		return Promise.resolve(modules[moduleName]);
+	}
+	return modules[moduleName] = new Promise((resolve, reject) => {
+		const element = document.createElement("script");
+		if (integrity) {
+			element.setAttribute("integrity", integrity);
+		}
+		element.onerror = () => {
+			delete moduleResolve[moduleName];
+			disconnect();
+			reject(new Error("Unable to load bundle!"));
+		}
+		element.src = moduleName;
+		document.head.appendChild(element);
+		moduleResolve[moduleName] = [resolve, insideCallback];
+		if (insideCallback) {
+			loadingModules++;
+		}
+	});
+};
+
+(window as any)._mobius = function(moduleContents: (exports: { [name: string]: any }, _import: ImportFunction, mainModule: typeof exports) => void, moduleName: string, ...dependencies: string[]) {
+	const resolve = moduleResolve[moduleName];
+	if (resolve) {
+		delete moduleResolve[moduleName];
+		const dependencies: Promise<any>[] = [];
+		if (resolve[1]) {
+			willEnterCallback();
+		}
+		for (var i = 2; i < arguments.length; i++) {
+			dependencies.push(_import(arguments[i]));
+		}
+		resolve[0](Promise.all(dependencies).then(resolvedDependencies => {
+			if (resolve[1]) {
+				willEnterCallback();
+				loadingModules--;
+			}
+			const moduleExports: { [name: string]: any } = {};
+			const result = moduleContents.apply(null, [moduleExports, _import, exports].concat(resolvedDependencies));
+			if (typeof result !== "undefined") {
+				moduleExports.default = result;
+			}
+			return moduleExports;
+		}));
+	}
+}

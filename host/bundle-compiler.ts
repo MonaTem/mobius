@@ -3,7 +3,7 @@ import { NodePath } from "babel-traverse";
 import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as types from "babel-types";
 import { resolve } from "path";
-import { Chunk, OutputOptions, Plugin, getExportBlock, rollup } from "rollup";
+import { Chunk, Finaliser, OutputOptions, Plugin, getExportBlock, rollup } from "rollup";
 import { Bundle, SourceMap } from "magic-string";
 import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
@@ -176,35 +176,66 @@ interface CompilerOutput {
 	map: SourceMap;
 }
 
-function customFinalizer(
-	chunk: Chunk,
-	magicString: Bundle,
-	{
-		exportMode,
-		getPath,
-		indentString,
-		intro,
-		outro,
-		dynamicImport
-	}: {
-		exportMode: string;
-		indentString: string;
-		getPath: (name: string) => string;
-		intro: string;
-		outro: string;
-		dynamicImport: boolean;
+const customFinalizer: Finaliser = {
+	finalise(
+		chunk: Chunk,
+		magicString: Bundle,
+		{
+			exportMode,
+			getPath,
+			indentString,
+			intro,
+			outro,
+			dynamicImport
+		}: {
+			exportMode: string;
+			indentString: string;
+			getPath: (name: string) => string;
+			intro: string;
+			outro: string;
+			dynamicImport: boolean;
+		},
+		options: OutputOptions
+	) {
+		const isMain = chunk.id === "./main.js";
+		const { dependencies, exports } = chunk.getModuleDeclarations();
+
+		const mainIndex = dependencies.findIndex(m => m.id === "./main.js");
+		let mainIdentifier: string = "__main_js";
+		if (mainIndex !== -1) {
+			mainIdentifier = dependencies[mainIndex].name;
+			dependencies.splice(mainIndex, 1);
+		}
+		const deps = dependencies.map(m => JSON.stringify(getPath(m.id)));
+		const args = dependencies.map(m => m.name);
+		if (args.length || mainIndex !== -1) {
+			args.unshift(mainIdentifier);
+		}
+		args.unshift("_import");
+		args.unshift("exports");
+
+		const exportBlock = getExportBlock(exports, dependencies, exportMode);
+		magicString.prepend(`function(${args.join(", ")}) {\n`);
+		if (exportBlock) {
+			magicString.append("\n\n" + exportBlock, {});
+		}
+		magicString.append("\n}", {});
+
+		if (isMain) {
+			magicString.prepend("(");
+			magicString.append(")({})", {});
+		} else {
+			magicString.prepend("_mobius(");
+			magicString.append(["", JSON.stringify(chunk.id)].concat(deps).join(", ") + ")", {});
+		}
+
+		return magicString;
 	},
-	options: OutputOptions
-) {
-	const { dependencies, exports } = chunk.getModuleDeclarations();
-	magicString.prepend("-function(){\n");
-	const exportBlock = getExportBlock(exports, dependencies, exportMode);
-	if (exportBlock) {
-		magicString.append("\n\n" + exportBlock, {});
-	}
-	magicString.append("\n}()", {});
-	return magicString;
-}
+	dynamicImportMechanism: {
+		left: '_import(',
+		right: ')'
+	},
+};
 
 export default async function(profile: "client" | "server", input: string, basePath: string, publicPath: string, minify?: boolean): Promise<{ [name: string]: CompilerOutput }> {
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
@@ -225,6 +256,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 		return result;
 	} as any;
 	const isClient = profile === "client";
+	const mainPath = packageRelative("client/main.js");
 	const plugins = [
 		includePaths({
 			include: {
@@ -314,7 +346,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 		}) as Plugin);
 	}
 	const bundle = await rollup({
-		input: [packageRelative("client/main.js")],
+		input: isClient ? [mainPath] : mainPath,
 		external: profile === "client" ? [] : ["mobius", "_broadcast"],
 		plugins,
 		acorn: {
@@ -333,7 +365,5 @@ export default async function(profile: "client" | "server", input: string, baseP
 	});
 	// Cleanup some of the mess we made
 	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;
-	const chunks: { [name: string]: CompilerOutput } = "code" in output ? { "./main.js": output as CompilerOutput } : output;
-	Object.keys(chunks).forEach(name => console.log(name + " =>\n" + chunks[name].code + "\n"));
-	return chunks;
+	return "code" in output ? { "./main.js": output as CompilerOutput } : output;
 }

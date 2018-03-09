@@ -56,7 +56,7 @@
     "node-fetch": "^1.7.3",
     "opn": "^5.2.0",
     "rimraf": "^2.6.2",
-    "rollup": "^0.56.3",
+    "rollup": "github:rpetrich/rollup#d2751630ad8f1082039953cb1b18e8819210391b",
     "rollup-plugin-babel": "^3.0.3",
     "rollup-plugin-closure-compiler-js": "^1.0.6",
     "rollup-plugin-includepaths": "^0.2.2",
@@ -81,11 +81,10 @@
     "@types/diff-match-patch": "^1.0.32",
     "@types/qs": "^6.5.1",
     "@types/rimraf": "^2.0.2",
-    "@types/rollup": "^0.41.1",
     "@types/uuid": "^3.4.3",
     "diff-match-patch": "^1.0.0",
     "magic-string": "^0.22.4",
-    "preact": "https://github.com/rpetrich/preact/tarball/5537021206ffbb6e1fe9c84ed0569f0d44ce80a0",
+    "preact": "https://github.com/rpetrich/preact/tarball/a3741a0fe282e0d189d25d556389d4280d66c406",
     "set-dom": "^7.5.2",
     "tslint": "^5.9.1"
   }
