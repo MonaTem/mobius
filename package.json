@@ -74,7 +74,7 @@
     "rollup-plugin-typescript2": "github:rpetrich/rollup-plugin-typescript2#b3d973513f2dfaa8037e819da8a15cf37fd36f7d",
     "side-effects-safe": "0.0.1",
     "typescript": "^2.7.2",
-    "typescript-json-schema": "https://github.com/rpetrich/typescript-json-schema/tarball/1be9c2f13f9eafc75bc2fea92f8c3c6585e6bccd",
+    "typescript-json-schema": "github:rpetrich/typescript-json-schema#1be9c2f13f9eafc75bc2fea92f8c3c6585e6bccd",
     "uuid": "^3.2.1",
     "zlib": "^1.0.5"
   },
