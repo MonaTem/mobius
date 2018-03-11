@@ -2,6 +2,7 @@
 	"compilerOptions": {
 		"allowJs": true,
 		"declaration": false,
+		"forceConsistentCasingInFileNames": true,
 		"jsx": "react",
 		"jsxFactory": "dom.h",
 		"strict": true,

@@ -3,6 +3,7 @@
 		"baseUrl": "./",
 		"allowJs": true,
 		"declaration": false,
+		"forceConsistentCasingInFileNames": true,
 		"outDir": "/tmp",
 		"sourceMap": true,
 		"jsx": "react",
