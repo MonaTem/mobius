@@ -196,11 +196,11 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	// Compile client code while userspace is running
 	const clientScripts = await compileBundle("client", serverJSPath, sourcePath, publicPath, minify);
-	const main = clientScripts["./main.js"];
-	if (!main) {
+	const mainScript = clientScripts["./main.js"];
+	if (!mainScript) {
 		throw new Error("Could not find main.js in compiled output!");
 	}
-	const mainRoute = staticFileRoute("/main.js", main.code);
+	const mainRoute = staticFileRoute("/main.js", mainScript.code);
 
 	// Finish with fallback
 	const fallbackRoute = staticFileRoute("/fallback.js", await fallbackContentsAsync);
@@ -477,7 +477,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				}
 			}
 
-			for (let relativePath of Object.keys(clientScripts)) {
+			for (const relativePath of Object.keys(clientScripts)) {
 				const script = clientScripts[relativePath];
 				const fullPath = relativePath.substr(1);
 				const scriptRoute = fullPath === "/main.js" ? mainRoute : staticFileRoute(fullPath, script.code);

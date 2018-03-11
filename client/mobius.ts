@@ -225,8 +225,8 @@ function didExitCallback() {
 	updateInsideCallback();
 }
 
-let idleCallbacks: Array<() => void> = [];
-function idle(first?: true) : Promise<void> {
+const idleCallbacks: Array<() => void> = [];
+function idle(first?: true): Promise<void> {
 	return !dispatchingEvent && (!loadingModules || dead) ? resolvedPromise : new Promise((resolve) => {
 		if (first) {
 			idleCallbacks.unshift(resolve);
@@ -1167,7 +1167,7 @@ _import = (moduleName: string, integrity?: string) => {
 			delete moduleResolve[moduleName];
 			disconnect();
 			reject(new Error("Unable to load bundle!"));
-		}
+		};
 		element.src = moduleName;
 		document.head.appendChild(element);
 		moduleResolve[moduleName] = [resolve, insideCallback];
@@ -1181,14 +1181,14 @@ _import = (moduleName: string, integrity?: string) => {
 	const resolve = moduleResolve[moduleName];
 	if (resolve) {
 		delete moduleResolve[moduleName];
-		const dependencies: Promise<any>[] = [];
+		const promisedDependencies: Array<Promise<any>> = [];
 		if (resolve[1]) {
 			willEnterCallback();
 		}
-		for (var i = 2; i < arguments.length; i++) {
-			dependencies.push(_import(arguments[i]));
+		for (let i = 2; i < arguments.length; i++) {
+			promisedDependencies.push(_import(arguments[i]));
 		}
-		resolve[0](Promise.all(dependencies).then(resolvedDependencies => {
+		resolve[0](Promise.all(promisedDependencies).then((resolvedDependencies) => {
 			if (resolve[1]) {
 				willEnterCallback();
 				loadingModules--;
@@ -1201,4 +1201,4 @@ _import = (moduleName: string, integrity?: string) => {
 			return moduleExports;
 		}));
 	}
-}
+};

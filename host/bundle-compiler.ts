@@ -2,9 +2,9 @@ import * as babel from "babel-core";
 import { NodePath } from "babel-traverse";
 import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as types from "babel-types";
-import { resolve } from "path";
-import { Chunk, Finaliser, OutputOptions, Plugin, getExportBlock, rollup } from "rollup";
 import { Bundle, SourceMap } from "magic-string";
+import { resolve } from "path";
+import { Chunk, Finaliser, getExportBlock, OutputOptions, Plugin, rollup } from "rollup";
 import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
@@ -186,7 +186,7 @@ const customFinalizer: Finaliser = {
 			indentString,
 			intro,
 			outro,
-			dynamicImport
+			dynamicImport,
 		}: {
 			exportMode: string;
 			indentString: string;
@@ -195,19 +195,19 @@ const customFinalizer: Finaliser = {
 			outro: string;
 			dynamicImport: boolean;
 		},
-		options: OutputOptions
+		options: OutputOptions,
 	) {
 		const isMain = chunk.id === "./main.js";
 		const { dependencies, exports } = chunk.getModuleDeclarations();
 
-		const mainIndex = dependencies.findIndex(m => m.id === "./main.js");
+		const mainIndex = dependencies.findIndex((m) => m.id === "./main.js");
 		let mainIdentifier: string = "__main_js";
 		if (mainIndex !== -1) {
 			mainIdentifier = dependencies[mainIndex].name;
 			dependencies.splice(mainIndex, 1);
 		}
-		const deps = dependencies.map(m => JSON.stringify(getPath(m.id)));
-		const args = dependencies.map(m => m.name);
+		const deps = dependencies.map((m) => JSON.stringify(getPath(m.id)));
+		const args = dependencies.map((m) => m.name);
 		if (args.length || mainIndex !== -1) {
 			args.unshift(mainIdentifier);
 		}
@@ -232,8 +232,8 @@ const customFinalizer: Finaliser = {
 		return magicString;
 	},
 	dynamicImportMechanism: {
-		left: '_import(',
-		right: ')'
+		left: "_import(",
+		right: ")",
 	},
 };
 
