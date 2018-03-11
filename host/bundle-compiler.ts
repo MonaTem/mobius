@@ -270,6 +270,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 				packageRelative("**/*.+(ts|tsx|js|jsx)"),
 			] as any,
 			exclude: [
+				resolve(basePath, "node_modules/babel-plugin-transform-async-to-promises/*"),
 				packageRelative("node_modules/babel-plugin-transform-async-to-promises/*"),
 			] as any,
 			tsconfig: packageRelative(`tsconfig-${profile}.json`),
