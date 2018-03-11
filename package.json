@@ -23,6 +23,18 @@
   "bugs": {
     "url": "https://github.com/rpetrich/mobius/issues"
   },
+  "keywords": [
+    "framework",
+    "preact",
+    "isomorphic",
+    "code splitting",
+    "async",
+    "lockstep",
+    "import",
+    "websockets",
+    "promise",
+    "prerendering"
+  ],
   "homepage": "https://github.com/rpetrich/mobius#readme",
   "dependencies": {
     "@types/accepts": "^1.3.5",
