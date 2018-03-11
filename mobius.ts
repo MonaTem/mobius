@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { createHash } from "crypto";
 import { cpus } from "os";
 import { resolve as resolvePath } from "path";
 import * as util from "util";
@@ -7,10 +6,7 @@ const Module = require("module");
 
 import * as accepts from "accepts";
 import * as bodyParser from "body-parser";
-import * as etag from "etag";
 import * as express from "express";
-import { compressSync as brotliCompress } from "iltorb";
-import * as zlib from "zlib";
 
 import { diff_match_patch } from "diff-match-patch";
 const diffMatchPatchNode = new (require("diff-match-patch-node") as typeof diff_match_patch)();
@@ -24,6 +20,7 @@ import { Host } from "./host/host";
 import { PageRenderMode } from "./host/page-renderer";
 import { ModuleSource } from "./host/server-compiler";
 import { Session } from "./host/session";
+import { StaticFileRoute, staticFileRoute, gzipped, brotlied } from "./host/static-file-route";
 
 import { ClientMessage, deserializeMessageFromText, serializeMessageAsText } from "./common/_internal";
 
@@ -50,41 +47,15 @@ function checkAndHandleETag(request: express.Request, response: express.Response
 	return false;
 }
 
-interface StaticFileRoute {
-	path: string;
-	foreverPath: string;
-	etag: string;
-	integrity: string;
-	buffer: Buffer;
-	gzipped?: Buffer;
-	brotlied?: Buffer;
-}
-
-function staticFileRoute(path: string, contents: string | Buffer): StaticFileRoute {
-	const buffer = typeof contents === "string" ? Buffer.from(contents) : contents;
-	const integrity = createHash("sha256").update(buffer).digest("base64");
-	return {
-		path,
-		foreverPath: path.replace(".", "." + integrity.replace(/\//g, "_").replace(/\+/g, "-").replace(/=/g, "").substring(0, 16) + "."),
-		etag: etag(buffer),
-		integrity: "sha256-" + integrity,
-		buffer,
-	};
-}
-
 function sendCompressed(request: express.Request, response: express.Response, route: StaticFileRoute) {
 	response.set("Vary", "Accept-Encoding");
 	const encodings = accepts(request).encodings();
 	if (encodings.indexOf("br") !== -1) {
 		response.set("Content-Encoding", "br");
-		response.send(route.brotlied || (route.brotlied = brotliCompress(route.buffer, {
-			mode: 1,
-		})));
+		response.send(brotlied(route));
 	} else if (encodings.indexOf("gzip") !== -1) {
 		response.set("Content-Encoding", "gzip");
-		response.send(route.gzipped || (route.gzipped = zlib.gzipSync(route.buffer, {
-			level: zlib.constants.Z_BEST_COMPRESSION,
-		})));
+		response.send(gzipped(route));
 	} else {
 		response.send(route.buffer);
 	}
@@ -180,7 +151,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	// Start host
 	console.log("Rendering initial page...");
-	const serverSource: ModuleSource = bundled ? { from: "string", code: (await compileBundle("server", serverJSPath, sourcePath, publicPath))["./main.js"].code, path: serverJSPath } : { from: "file", path: serverJSPath };
+	const serverSource: ModuleSource = bundled ? { from: "string", code: (await compileBundle("server", serverJSPath, sourcePath, publicPath))["/main.js"].route.buffer.toString(), path: serverJSPath } : { from: "file", path: serverJSPath };
 	const host = new Host(serverSource, serverModulePaths, modulePaths, sessionsPath, publicPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, workers, hostname);
 
 	// Read fallback script
@@ -196,11 +167,11 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 	// Compile client code while userspace is running
 	const clientScripts = await compileBundle("client", serverJSPath, sourcePath, publicPath, minify);
-	const mainScript = clientScripts["./main.js"];
+	const mainScript = clientScripts["/main.js"];
 	if (!mainScript) {
 		throw new Error("Could not find main.js in compiled output!");
 	}
-	const mainRoute = staticFileRoute("/main.js", mainScript.code);
+	const mainRoute = mainScript.route;
 
 	// Finish with fallback
 	const fallbackRoute = staticFileRoute("/fallback.js", await fallbackContentsAsync);
@@ -477,10 +448,9 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				}
 			}
 
-			for (const relativePath of Object.keys(clientScripts)) {
-				const script = clientScripts[relativePath];
-				const fullPath = relativePath.substr(1);
-				const scriptRoute = fullPath === "/main.js" ? mainRoute : staticFileRoute(fullPath, script.code);
+			for (const fullPath of Object.keys(clientScripts)) {
+				const script = clientScripts[fullPath];
+				const scriptRoute = script.route;
 				if (sourceMaps) {
 					const mapRoute = staticFileRoute(fullPath + ".map", script.map.toString());
 					registerStatic(scriptRoute, (response) => {

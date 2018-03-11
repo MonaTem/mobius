@@ -1146,7 +1146,7 @@ interceptGlobals(window, () => insideCallback && !dead, coordinateValue, <T exte
 	};
 });
 
-type ImportFunction = (moduleName: string, integrity?: string) => Promise<any>;
+type ImportFunction = (moduleName: string) => Promise<any>;
 
 const modules: { [name: string]: any } = {};
 const moduleResolve: { [name: string]: [(value: any) => void, boolean] } = {};
@@ -1154,21 +1154,25 @@ const moduleResolve: { [name: string]: [(value: any) => void, boolean] } = {};
 declare global {
 	let _import: ImportFunction;
 }
-_import = (moduleName: string, integrity?: string) => {
+const moduleMappings: { [name: string]: [string, string] } = _import as any;
+_import = (moduleName: string) => {
 	if (Object.hasOwnProperty.call(modules, moduleName)) {
 		return Promise.resolve(modules[moduleName]);
 	}
 	return modules[moduleName] = new Promise((resolve, reject) => {
 		const element = document.createElement("script");
-		if (integrity) {
-			element.setAttribute("integrity", integrity);
-		}
 		element.onerror = () => {
 			delete moduleResolve[moduleName];
 			disconnect();
 			reject(new Error("Unable to load bundle!"));
 		};
-		element.src = moduleName;
+		const mapping = moduleMappings[moduleName];
+		if (mapping) {
+			element.src = mapping[0];
+			element.setAttribute("integrity", mapping[1]);
+		} else {
+			element.src = moduleName;
+		}
 		document.head.appendChild(element);
 		moduleResolve[moduleName] = [resolve, insideCallback];
 		if (insideCallback) {

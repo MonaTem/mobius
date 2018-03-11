@@ -4,7 +4,7 @@ import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatem
 import * as types from "babel-types";
 import { Bundle, SourceMap } from "magic-string";
 import { resolve } from "path";
-import { Chunk, Finaliser, getExportBlock, OutputOptions, Plugin, rollup } from "rollup";
+import { Chunk, Finaliser, getExportBlock, OutputOptions, Plugin, rollup, SourceDescription } from "rollup";
 import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
@@ -16,6 +16,7 @@ import importBindingForCall from "./importBindingForCall";
 import noImpureGetters from "./noImpureGetters";
 import rewriteForInStatements from "./rewriteForInStatements";
 import verifyStylePaths from "./verify-style-paths";
+import { staticFileRoute, StaticFileRoute } from "./static-file-route";
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
 interface RedactedExportData { [exportName: string]: Array<boolean | undefined>; }
@@ -172,72 +173,11 @@ function stripUnusedArgumentCopies() {
 }
 
 interface CompilerOutput {
-	code: string;
+	route: StaticFileRoute;
 	map: SourceMap;
 }
 
-const customFinalizer: Finaliser = {
-	finalise(
-		chunk: Chunk,
-		magicString: Bundle,
-		{
-			exportMode,
-			getPath,
-			indentString,
-			intro,
-			outro,
-			dynamicImport,
-		}: {
-			exportMode: string;
-			indentString: string;
-			getPath: (name: string) => string;
-			intro: string;
-			outro: string;
-			dynamicImport: boolean;
-		},
-		options: OutputOptions,
-	) {
-		const isMain = chunk.id === "./main.js";
-		const { dependencies, exports } = chunk.getModuleDeclarations();
-
-		const mainIndex = dependencies.findIndex((m) => m.id === "./main.js");
-		let mainIdentifier: string = "__main_js";
-		if (mainIndex !== -1) {
-			mainIdentifier = dependencies[mainIndex].name;
-			dependencies.splice(mainIndex, 1);
-		}
-		const deps = dependencies.map((m) => JSON.stringify(getPath(m.id)));
-		const args = dependencies.map((m) => m.name);
-		if (args.length || mainIndex !== -1) {
-			args.unshift(mainIdentifier);
-		}
-		args.unshift("_import");
-		args.unshift("exports");
-
-		const exportBlock = getExportBlock(exports, dependencies, exportMode);
-		magicString.prepend(`function(${args.join(", ")}) {\n`);
-		if (exportBlock) {
-			magicString.append("\n\n" + exportBlock, {});
-		}
-		magicString.append("\n}", {});
-
-		if (isMain) {
-			magicString.prepend("(");
-			magicString.append(")({})", {});
-		} else {
-			magicString.prepend("_mobius(");
-			magicString.append(["", JSON.stringify(chunk.id)].concat(deps).join(", ") + ")", {});
-		}
-
-		return magicString;
-	},
-	dynamicImportMechanism: {
-		left: "_import(",
-		right: ")",
-	},
-};
-
-export default async function(profile: "client" | "server", input: string, basePath: string, publicPath: string, minify?: boolean): Promise<{ [name: string]: CompilerOutput }> {
+export default async function(profile: "client" | "server", input: string, basePath: string, publicPath: string, minify?: boolean): Promise<{ [path: string]: CompilerOutput }> {
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
@@ -346,6 +286,80 @@ export default async function(profile: "client" | "server", input: string, baseP
 			rewritePolyfills: false,
 		}) as Plugin);
 	}
+
+	const mainChunkId = "./main.js";
+	const routes: { [path: string]: StaticFileRoute } = {};
+	plugins.push({
+		name: "mobius-hash-collector",
+		ongenerate(options: OutputOptions, source: SourceDescription) {
+			const path = ((options as any).bundle.name as string);
+			routes[path] = staticFileRoute(path.substr(1), source.code);
+		}
+	});
+	const customFinalizer: Finaliser = {
+		finalise(
+			chunk: Chunk,
+			magicString: Bundle,
+			{
+				exportMode,
+				getPath,
+				indentString,
+				intro,
+				outro,
+				dynamicImport,
+			}: {
+				exportMode: string;
+				indentString: string;
+				getPath: (name: string) => string;
+				intro: string;
+				outro: string;
+				dynamicImport: boolean;
+			},
+			options: OutputOptions,
+		) {
+			console.log(chunk.id);
+			const isMain = chunk.id === mainChunkId;
+			const { dependencies, exports } = chunk.getModuleDeclarations();
+
+			const mainIndex = dependencies.findIndex((m) => m.id === mainChunkId);
+			let mainIdentifier: string = "__main_js";
+			if (mainIndex !== -1) {
+				mainIdentifier = dependencies[mainIndex].name;
+				dependencies.splice(mainIndex, 1);
+			}
+			const deps = dependencies.map((m) => JSON.stringify(getPath(m.id)));
+			const args = dependencies.map((m) => m.name);
+			if (args.length || mainIndex !== -1) {
+				args.unshift(mainIdentifier);
+			}
+			args.unshift("_import");
+			args.unshift("exports");
+
+			const exportBlock = getExportBlock(exports, dependencies, exportMode);
+			magicString.prepend(`function(${args.join(", ")}) {\n`);
+			if (exportBlock) {
+				magicString.append("\n\n" + exportBlock, {});
+			}
+			magicString.append("\n}", {});
+
+			if (isMain) {
+				magicString.prepend("(");
+				const imports: { [path: string]: [string, string] } = {};
+				Object.keys(routes).forEach(path => imports[path] = [routes[path].foreverPath, routes[path].integrity]);
+				magicString.append(`)({}, ${JSON.stringify(imports)})`, {});
+			} else {
+				magicString.prepend("_mobius(");
+				magicString.append(["", JSON.stringify(chunk.id)].concat(deps).join(", ") + ")", {});
+			}
+
+			return magicString;
+		},
+		dynamicImportMechanism: {
+			left: "_import(",
+			right: ")",
+		},
+	};
+
 	const bundle = await rollup({
 		input: isClient ? [mainPath] : mainPath,
 		external: profile === "client" ? [] : ["mobius", "_broadcast"],
@@ -356,7 +370,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 		experimentalCodeSplitting: true,
 		experimentalDynamicImport: true,
 		aggressivelyMergeModules: true,
-		hashedChunkNames: true,
+		hashedChunkNames: false,
 	});
 	const output = await bundle.generate({
 		format: isClient ? customFinalizer : "cjs",
@@ -366,5 +380,13 @@ export default async function(profile: "client" | "server", input: string, baseP
 	});
 	// Cleanup some of the mess we made
 	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;
-	return "code" in output ? { "./main.js": output as CompilerOutput } : output;
+	const maps = "code" in output ? { "./main.js": output } as { [name: string]: { code: string, map: SourceMap } } : output;
+	const result: { [path: string]: CompilerOutput } = {};
+	Object.keys(routes).forEach(name => {
+		result[name.substr(1)] = {
+			route: routes[name],
+			map: maps[name].map,
+		};
+	});
+	return result;
 }
