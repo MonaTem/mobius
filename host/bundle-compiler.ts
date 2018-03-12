@@ -317,7 +317,6 @@ export default async function(profile: "client" | "server", input: string, baseP
 			},
 			options: OutputOptions,
 		) {
-			console.log(chunk.id);
 			const isMain = chunk.id === mainChunkId;
 			const { dependencies, exports } = chunk.getModuleDeclarations();
 
