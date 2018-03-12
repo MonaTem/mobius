@@ -15,8 +15,8 @@ import { packageRelative } from "./fileUtils";
 import importBindingForCall from "./importBindingForCall";
 import noImpureGetters from "./noImpureGetters";
 import rewriteForInStatements from "./rewriteForInStatements";
-import verifyStylePaths from "./verify-style-paths";
 import { staticFileRoute, StaticFileRoute } from "./static-file-route";
+import verifyStylePaths from "./verify-style-paths";
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
 interface RedactedExportData { [exportName: string]: Array<boolean | undefined>; }
@@ -184,7 +184,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 	const optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
 	const transformAsyncToPromises = require("babel-plugin-transform-async-to-promises");
 	const externalHelpers = require("babel-plugin-external-helpers");
-	const dynamicImport = require("babel-plugin-syntax-dynamic-import");
+	const syntaxDynamicImport = require("babel-plugin-syntax-dynamic-import");
 	const env = require("babel-preset-env");
 
 	// Workaround to allow TypeScript to union two folders. This is definitely not right, but it works :(
@@ -254,7 +254,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 			babelrc: false,
 			presets: isClient ? [env.default(null, { targets: { browsers: ["ie 6"] }, modules: false })] : [],
 			plugins: isClient ? [
-				dynamicImport(),
+				syntaxDynamicImport(),
 				externalHelpers(babel),
 				[transformAsyncToPromises(babel), { externalHelpers: true }],
 				optimizeClosuresInRender(babel),
@@ -267,7 +267,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 				rewriteInsufficientBrowserThrow(),
 				stripUnusedArgumentCopies(),
 			] : [
-				dynamicImport(),
+				syntaxDynamicImport(),
 				externalHelpers(babel),
 				[transformAsyncToPromises(babel), { externalHelpers: true }],
 				optimizeClosuresInRender(babel),
@@ -294,7 +294,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 		ongenerate(options: OutputOptions, source: SourceDescription) {
 			const path = ((options as any).bundle.name as string);
 			routes[path] = staticFileRoute(path.substr(1), source.code);
-		}
+		},
 	});
 	const customFinalizer: Finaliser = {
 		finalise(
@@ -344,7 +344,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 			if (isMain) {
 				magicString.prepend("(");
 				const imports: { [path: string]: [string, string] } = {};
-				Object.keys(routes).forEach(path => imports[path] = [routes[path].foreverPath, routes[path].integrity]);
+				Object.keys(routes).forEach((path) => imports[path] = [routes[path].foreverPath, routes[path].integrity]);
 				magicString.append(`)({}, ${JSON.stringify(imports)})`, {});
 			} else {
 				magicString.prepend("_mobius(");
@@ -371,7 +371,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 		aggressivelyMergeModules: true,
 		hashedChunkNames: false,
 	});
-	const output = await bundle.generate({
+	const rollupOutput = await bundle.generate({
 		format: isClient ? customFinalizer : "cjs",
 		sourcemap: true,
 		name: "app",
@@ -379,13 +379,13 @@ export default async function(profile: "client" | "server", input: string, baseP
 	});
 	// Cleanup some of the mess we made
 	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;
-	const maps = "code" in output ? { "./main.js": output } as { [name: string]: { code: string, map: SourceMap } } : output;
-	const result: { [path: string]: CompilerOutput } = {};
-	Object.keys(routes).forEach(name => {
-		result[name.substr(1)] = {
+	const maps = "code" in rollupOutput ? { "./main.js": rollupOutput } as { [name: string]: { code: string, map: SourceMap } } : rollupOutput;
+	const output: { [path: string]: CompilerOutput } = {};
+	Object.keys(routes).forEach((name) => {
+		output[name.substr(1)] = {
 			route: routes[name],
 			map: maps[name].map,
 		};
 	});
-	return result;
+	return output;
 }

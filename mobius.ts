@@ -20,7 +20,7 @@ import { Host } from "./host/host";
 import { PageRenderMode } from "./host/page-renderer";
 import { ModuleSource } from "./host/server-compiler";
 import { Session } from "./host/session";
-import { StaticFileRoute, staticFileRoute, gzipped, brotlied } from "./host/static-file-route";
+import { brotlied, gzipped, StaticFileRoute, staticFileRoute } from "./host/static-file-route";
 
 import { ClientMessage, deserializeMessageFromText, serializeMessageAsText } from "./common/_internal";
 
