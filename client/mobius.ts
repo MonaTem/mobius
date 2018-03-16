@@ -5,7 +5,7 @@ import { Channel, JsonValue } from "mobius-types";
 /**
  * @license THE MIT License (MIT)
  *
- * Copyright (c) 2017 Ryan Petrich
+ * Copyright (c) 2017-2018 Ryan Petrich
  * Copyright (c) 2017 Jason Miller
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy

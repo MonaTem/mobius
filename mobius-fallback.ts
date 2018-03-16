@@ -1,7 +1,7 @@
 /**
  * @license THE MIT License (MIT)
  * 
- * Copyright (c) 2017 Ryan Petrich
+ * Copyright (c) 2017-2018 Ryan Petrich
  * Copyright (c) 2017 Dylan Piercey
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
