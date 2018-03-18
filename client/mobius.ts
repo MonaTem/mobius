@@ -1165,7 +1165,7 @@ const moduleResolve: { [name: string]: [(value: any) => void, boolean] } = {};
 
 const moduleMappings: { [name: string]: [string, string] } = _import as any;
 _import = (moduleName: string | Promise<any>) => {
-	if (typeof moduleName !== "string") {
+	if (typeof moduleName == "object") {
 		loadingModules++;
 		function finished() {
 			loadingModules--;

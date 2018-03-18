@@ -308,7 +308,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 			const script = clientScripts[fullPath];
 			const scriptRoute = script.route;
 			if (sourceMaps) {
-				const mapRoute = staticFileRoute(fullPath + ".map", script.map.toString());
+				const mapRoute = staticFileRoute(fullPath + ".map", JSON.stringify(script.map));
 				registerStatic(server, scriptRoute, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");
 					response.set("X-Content-Type-Options", "nosniff");

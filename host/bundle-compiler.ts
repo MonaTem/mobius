@@ -2,7 +2,7 @@ import * as babel from "babel-core";
 import { NodePath } from "babel-traverse";
 import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as types from "babel-types";
-import { Bundle, SourceMap } from "magic-string";
+import { RawSourceMap } from "source-map";
 import { resolve } from "path";
 import { Chunk, Finaliser, getExportBlock, OutputOptions, Plugin, rollup, SourceDescription } from "rollup";
 import _rollupBabel from "rollup-plugin-babel";
@@ -174,7 +174,7 @@ function stripUnusedArgumentCopies() {
 
 export interface CompilerOutput {
 	route: StaticFileRoute;
-	map: SourceMap;
+	map: RawSourceMap;
 }
 
 export default async function(profile: "client" | "server", fileRead: (path: string) => void, input: string, basePath: string, publicPath: string, minify?: boolean): Promise<{ [path: string]: CompilerOutput }> {
@@ -288,7 +288,8 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	}
 
 	const mainChunkId = "./main.js";
-	const routes: { [path: string]: StaticFileRoute } = {};
+	const output: { [path: string]: CompilerOutput } = {};
+	const routeIndexes: string[] = [];
 	plugins.push({
 		name: "mobius-hash-collector",
 		transform(code, id) {
@@ -297,13 +298,16 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 		},
 		ongenerate(options: OutputOptions, source: SourceDescription) {
 			const path = ((options as any).bundle.name as string);
-			routes[path] = staticFileRoute(path.substr(1), source.code);
+			output[path.substr(1)] = {
+				route: staticFileRoute(minify && path != mainChunkId ? "/" + routeIndexes.indexOf(path).toString(36) + ".js" : path.substr(1), source.code),
+				map: source.map!,
+			};
 		},
 	});
 	const customFinalizer: Finaliser = {
 		finalise(
 			chunk: Chunk,
-			magicString: Bundle,
+			magicString,
 			{
 				exportMode,
 				getPath,
@@ -330,7 +334,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				mainIdentifier = dependencies[mainIndex].name;
 				dependencies.splice(mainIndex, 1);
 			}
-			const deps = dependencies.map((m) => JSON.stringify(getPath(m.id)));
+			const deps = dependencies.map((m) => minify ? routeIndexes.indexOf(m.id).toString() : JSON.stringify(getPath(m.id)));
 			const args = dependencies.map((m) => m.name);
 			if (args.length || mainIndex !== -1) {
 				args.unshift(mainIdentifier);
@@ -347,12 +351,23 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 
 			if (isMain) {
 				magicString.prepend("(");
-				const imports: { [path: string]: [string, string] } = {};
-				Object.keys(routes).forEach((path) => imports[path] = [routes[path].foreverPath, routes[path].integrity]);
+				let imports: any;
+				function loadDataForModuleWithName(name: string) : [string, string] {
+					const route = output[name.substr(1)].route;
+					return [route.foreverPath, route.integrity];
+				}
+				if (minify) {
+					const importsArray = routeIndexes.map(loadDataForModuleWithName);
+					imports = importsArray;
+				} else {
+					const importsObject: { [path: string]: [string, string] } = {};
+					routeIndexes.forEach((path) => importsObject[path] = loadDataForModuleWithName(path));
+					imports = importsObject;
+				}
 				magicString.append(`)({}, ${JSON.stringify(imports)})`, {});
 			} else {
 				magicString.prepend("_mobius(");
-				magicString.append(["", JSON.stringify(chunk.id)].concat(deps).join(", ") + ")", {});
+				magicString.append(["", minify ? routeIndexes.indexOf(chunk.id).toString() : JSON.stringify(chunk.id)].concat(deps).join(", ") + ")", {});
 			}
 
 			return magicString;
@@ -360,6 +375,11 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 		dynamicImportMechanism: {
 			left: "_import(",
 			right: ")",
+			replacer: (text: string) => {
+				if (minify) {
+					return routeIndexes.indexOf(JSON.parse(text)).toString();
+				}
+			},
 		},
 	};
 
@@ -376,7 +396,15 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 		hashedChunkNames: false,
 		minifyInternalNames: minify,
 	});
-	const rollupOutput = await bundle.generate({
+	if ("chunks" in bundle) {
+		const chunks = bundle.chunks;
+		for (const chunkName of Object.keys(chunks)) {
+			if (chunkName !== mainChunkId) {
+				routeIndexes.push(chunkName);
+			}
+		}
+	}
+	await bundle.generate({
 		format: isClient ? customFinalizer : "cjs",
 		sourcemap: true,
 		name: "app",
@@ -384,13 +412,5 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	});
 	// Cleanup some of the mess we made
 	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;
-	const maps = "code" in rollupOutput ? { "./main.js": rollupOutput } as { [name: string]: { code: string, map: SourceMap } } : rollupOutput;
-	const output: { [path: string]: CompilerOutput } = {};
-	Object.keys(routes).forEach((name) => {
-		output[name.substr(1)] = {
-			route: routes[name],
-			map: maps[name].map,
-		};
-	});
 	return output;
 }
