@@ -14,7 +14,7 @@ export default async function init(basePath: string) {
 					[mobiusPackageData.name]: "^" + mobiusPackageData.version,
 				},
 				scripts: {
-					start: "mobius",
+					start: "mobius --launch",
 				},
 				main: "app.tsx",
 			};
