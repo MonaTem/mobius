@@ -147,7 +147,7 @@ function suppressUnhandledRejection<T>(promise: Promise<T>) {
 	return promise;
 }
 
-export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0, bundled = false, generate = false, watch = true }: Config) {
+export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0, bundled = false, generate = false, watch = false }: Config) {
 	const fallbackMapContentsAsync = sourceMaps ? readFile(fallbackPath + ".map") : "";
 	const secretsPath = resolvePath(sourcePath, "secrets.json");
 	const gracefulExitAsync = suppressUnhandledRejection(validateSessionsAndPrepareGracefulExit(sessionsPath));
@@ -698,6 +698,7 @@ export default function main() {
 			simulatedLatency: args["simulated-latency"] as number,
 			bundled: args.bundled as boolean,
 			generate: args.generate as boolean,
+			watch: args.watch as boolean,
 		});
 
 		const expressAsync = require("express") as typeof express;
