@@ -201,12 +201,18 @@ class OutOfProcessSession implements Session {
 
 type BroadcastMessage = [false, string, JsonValue];
 
-function isCommandMessage(message: CommandMessage | Event | BroadcastMessage): message is CommandMessage {
+type FileReadMessage = [true, string];
+
+function isCommandMessage(message: CommandMessage | Event | BroadcastMessage | FileReadMessage): message is CommandMessage {
 	return typeof message[0] === "string";
 }
 
-function isEvent(message: CommandMessage | Event | BroadcastMessage): message is Event {
+function isEvent(message: CommandMessage | Event | BroadcastMessage | FileReadMessage): message is Event {
 	return typeof message[0] === "number";
+}
+
+function isBroadcastMessage(message: CommandMessage | Event | BroadcastMessage | FileReadMessage): message is BroadcastMessage {
+	return typeof message[0] === "boolean" && !message[0];
 }
 
 function constructBroadcastModule() {
@@ -243,7 +249,10 @@ function constructBroadcastModule() {
 if (require.main === module) {
 	process.addListener("message", function bootstrap(options: HostSandboxOptions) {
 		const basicBroadcast = constructBroadcastModule();
-		const host = new HostSandbox(options, {
+		const host = new HostSandbox(options, (path: string) => {
+			const fileReadMessage: FileReadMessage = [true, path];
+			process.send!(fileReadMessage);
+		}, {
 			send(topic: string, message: JsonValue) {
 				const broadcastMessage: BroadcastMessage = [false, topic, message];
 				process.send!(broadcastMessage);
@@ -275,7 +284,7 @@ if (require.main === module) {
 					workerResolves.delete(message[0]);
 					parseValueEvent(global, message, resolve[0], resolve[1]);
 				}
-			} else {
+			} else if (isBroadcastMessage(message)) {
 				// Receive broadcast from another worker
 				basicBroadcast.send(message[1], message[2]);
 			}
@@ -283,9 +292,11 @@ if (require.main === module) {
 	});
 }
 
-export function createSessionGroup(options: HostSandboxOptions, sessions: Map<string, Session>, workerCount: number) {
+let currentDebugPort = (process as any).debugPort as number;
+
+export function createSessionGroup(options: HostSandboxOptions, fileRead: (path: string) => void, sessions: Map<string, Session>, workerCount: number) {
 	if (workerCount <= 0) {
-		const host = new HostSandbox(options, constructBroadcastModule());
+		const host = new HostSandbox(options, fileRead, constructBroadcastModule());
 		return (sessionID: string, request?: Request) => new InProcessSession(host, new InProcessClients(sessionID, sessions, request), sessionID);
 	}
 	const workers: ChildProcess[] = [];
@@ -298,12 +309,12 @@ export function createSessionGroup(options: HostSandboxOptions, sessions: Map<st
 				if (!debugOption) {
 					return option;
 				}
-				return debugOption[1] + "=" + (((process as any).debugPort as number) + i + 1);
+				return debugOption[1] + "=" + ++currentDebugPort;
 			}),
 			stdio: [0, 1, 2, "ipc"],
 		});
 		worker.send(options);
-		worker.addListener("message", async (message: CommandMessage | Event | BroadcastMessage) => {
+		worker.addListener("message", async (message: CommandMessage | Event | BroadcastMessage | FileReadMessage) => {
 			if (isCommandMessage(message)) {
 				// Dispatch commands from worker
 				const sessionID = message[0];
@@ -326,13 +337,15 @@ export function createSessionGroup(options: HostSandboxOptions, sessions: Map<st
 					workerResolves.delete(message[0]);
 					parseValueEvent(global, message, resolve[0], resolve[1]);
 				}
-			} else {
+			} else if (isBroadcastMessage(message)) {
 				// Forward broadcast message to other workers
 				for (const otherWorker of workers) {
 					if (otherWorker !== worker) {
 						otherWorker.send(message);
 					}
 				}
+			} else {
+				fileRead(message[1]);
 			}
 		});
 	}

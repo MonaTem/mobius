@@ -1,7 +1,7 @@
 import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
 import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
-import { loadModule, ModuleSource, schemaValidatorForType, ServerModule } from "./server-compiler";
+import { ModuleSource, schemaValidatorForType, ServerCompiler, ServerModule } from "./server-compiler";
 
 import * as mobiusModule from "mobius";
 import { Channel, JsonValue } from "mobius-types";
@@ -26,6 +26,7 @@ export interface HostSandboxOptions {
 	source: ModuleSource;
 	publicPath: string;
 	sessionsPath: string;
+	watch: boolean;
 	hostname?: string;
 }
 
@@ -50,7 +51,8 @@ export class HostSandbox {
 	public noscript: Element;
 	public metaRedirect: Element;
 	public broadcastModule: typeof BroadcastModule;
-	constructor(options: HostSandboxOptions, broadcastModule: typeof BroadcastModule) {
+	public serverCompiler: ServerCompiler;
+	constructor(options: HostSandboxOptions, fileRead: (path: string) => void, broadcastModule: typeof BroadcastModule) {
 		this.options = options;
 		this.dom = new (require("jsdom").JSDOM)(options.htmlSource) as JSDOM;
 		this.document = (this.dom.window as Window).document as Document;
@@ -59,6 +61,7 @@ export class HostSandbox {
 		this.metaRedirect = this.document.createElement("meta");
 		this.metaRedirect.setAttribute("http-equiv", "refresh");
 		this.noscript.appendChild(this.metaRedirect);
+		this.serverCompiler = new ServerCompiler(fileRead);
 		this.broadcastModule = broadcastModule;
 	}
 }
@@ -114,12 +117,6 @@ const enum ArchiveStatus {
 	Full,
 }
 
-// Lazy version of loadModule so that the sandbox module is loaded on first use
-let loadModuleLazy: typeof loadModule = (source, module, publicPath, globalProperties, requireFunction) => {
-	loadModuleLazy = require("./server-compiler").loadModule as typeof loadModule;
-	return loadModuleLazy(source, module, publicPath, globalProperties, requireFunction);
-};
-
 // Hack so that Module._findPath will find TypeScript files
 const Module = require("module");
 Module._extensions[".ts"] = Module._extensions[".tsx"] = Module._extensions[".jsx"] = function() {
@@ -136,8 +133,9 @@ export interface RenderOptions {
 	fallbackURL: string;
 	fallbackIntegrity: string;
 	noScriptURL?: string;
-	bootstrap?: boolean;
+	bootstrap?: true;
 	cssBasePath?: string;
+	connect?: true;
 }
 
 export interface SessionSandbox {
@@ -223,7 +221,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 	}
 
 	public loadModule(source: ModuleSource, newModule: ServerModule, allowNodeModules: boolean) {
-		loadModuleLazy(source, newModule, this.host.options.publicPath, this.globalProperties, (name: string) => {
+		this.host.serverCompiler.loadModule(source, newModule, this.host.options.publicPath, this.globalProperties, (name: string) => {
 			const bakedModule = bakedModules[name];
 			if (bakedModule) {
 				return bakedModule(this);
@@ -900,6 +898,9 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		}
 		if (client.clientID) {
 			result.clientID = client.clientID;
+		}
+		if (this.host.options.watch) {
+			result.connect = true;
 		}
 		return result;
 	}

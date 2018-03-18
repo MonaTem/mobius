@@ -102,8 +102,8 @@ export class Client {
 		return result;
 	}
 
-	public async dequeueEvents(): Promise<true | void> {
-		const hasLocalChannels = await this.session.hasLocalChannels();
+	public async dequeueEvents(watch: boolean): Promise<true | void> {
+		const hasLocalChannels = watch || await this.session.hasLocalChannels();
 		return new Promise<true | void>((resolve, reject) => {
 			// Wait until events are ready, a new event handler comes in, or no more local channels exist
 			const oldResolve = this.queuedLocalEventsResolve;

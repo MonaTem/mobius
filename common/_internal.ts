@@ -102,13 +102,17 @@ export function restoreDefaults<T extends JsonMap, U extends JsonMap>(obj: T, de
 
 export type Event = [number] | [number, any] | [number, any, any];
 
-export interface ServerMessage {
+export interface Message {
 	events: Event[];
 	messageID: number;
-	close?: boolean;
+	close?: true;
 }
 
-export interface ClientMessage extends ServerMessage {
+export interface ServerMessage extends Message {
+	reload?: true;
+}
+
+export interface ClientMessage extends Message {
 	sessionID?: string;
 	clientID?: number;
 	destroy?: true;
@@ -122,6 +126,7 @@ export interface BootstrapData {
 	channels?: number[];
 	x?: number;
 	y?: number;
+	connect?: true;
 }
 
 export function logOrdering(from: "client" | "server", type: "open" | "close" | "message", channelId: number, sessionID?: string) {
@@ -180,7 +185,7 @@ export function parseValueEvent<T>(global: any, event: Event | undefined, resolv
 	return reject(value);
 }
 
-export function deserializeMessageFromText<T extends ServerMessage>(messageText: string, defaultMessageID: number): T {
+export function deserializeMessageFromText<T extends Message>(messageText: string, defaultMessageID: number): T {
 	const result = ((messageText.length == 0 || messageText[0] == "[") ? { events: JSON.parse("[" + messageText + "]") } : JSON.parse(messageText)) as T;
 	result.messageID = result.messageID | defaultMessageID;
 	if (!result.events) {
@@ -190,7 +195,7 @@ export function deserializeMessageFromText<T extends ServerMessage>(messageText:
 }
 
 export function serializeMessageAsText(message: Partial<ServerMessage | ClientMessage>): string {
-	if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message) && !("clientID" in message)) {
+	if ("events" in message && !("messageID" in message) && !("close" in message) && !("destroy" in message) && !("clientID" in message) && !("reload" in message)) {
 		// Only send events, if that's all we have to send
 		return JSON.stringify(message.events).slice(1, -1);
 	}

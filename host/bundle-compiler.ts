@@ -172,12 +172,12 @@ function stripUnusedArgumentCopies() {
 	};
 }
 
-interface CompilerOutput {
+export interface CompilerOutput {
 	route: StaticFileRoute;
 	map: SourceMap;
 }
 
-export default async function(profile: "client" | "server", input: string, basePath: string, publicPath: string, minify?: boolean): Promise<{ [path: string]: CompilerOutput }> {
+export default async function(profile: "client" | "server", fileRead: (path: string) => void, input: string, basePath: string, publicPath: string, minify?: boolean): Promise<{ [path: string]: CompilerOutput }> {
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
@@ -258,7 +258,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 				externalHelpers(babel),
 				[transformAsyncToPromises(babel), { externalHelpers: true }],
 				optimizeClosuresInRender(babel),
-				addSubresourceIntegrity(publicPath),
+				addSubresourceIntegrity(publicPath, fileRead),
 				stripRedact(),
 				verifyStylePaths(publicPath),
 				rewriteForInStatements(),
@@ -271,7 +271,7 @@ export default async function(profile: "client" | "server", input: string, baseP
 				externalHelpers(babel),
 				[transformAsyncToPromises(babel), { externalHelpers: true }],
 				optimizeClosuresInRender(babel),
-				addSubresourceIntegrity(publicPath),
+				addSubresourceIntegrity(publicPath, fileRead),
 				verifyStylePaths(publicPath),
 				rewriteForInStatements(),
 				noImpureGetters(),
@@ -291,6 +291,10 @@ export default async function(profile: "client" | "server", input: string, baseP
 	const routes: { [path: string]: StaticFileRoute } = {};
 	plugins.push({
 		name: "mobius-hash-collector",
+		transform(code, id) {
+			fileRead(id.toString());
+			return Promise.resolve();
+		},
 		ongenerate(options: OutputOptions, source: SourceDescription) {
 			const path = ((options as any).bundle.name as string);
 			routes[path] = staticFileRoute(path.substr(1), source.code);

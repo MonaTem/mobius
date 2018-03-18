@@ -89,90 +89,98 @@ interface SandboxedScript<T extends ServerModuleGlobal = ServerModuleGlobal> {
 	validatorForType: (name: string) => (undefined | ((obj: any) => boolean));
 }
 
-const sandboxedScripts = new Map<string, SandboxedScript>();
+export class ServerCompiler {
+	private sandboxedScriptFromCode = memoize(sandbox);
+	private sandboxedScripts = new Map<string, SandboxedScript>();
 
-function sandboxedScriptAtPath<T extends ServerModuleGlobal>(path: string, publicPath: string): SandboxedScript<T> {
-	const existing = sandboxedScripts.get(path);
-	if (existing) {
-		return existing as SandboxedScript<T>;
+	public fileRead: (path: string) => void;
+
+	constructor(fileRead: (path: string) => void) {
+		this.fileRead = memoize(fileRead);
 	}
-	if (!convertToCommonJS) {
-		convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs")();
-	}
-	if (!optimizeClosuresInRender) {
-		optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render")(babel);
-	}
-	if (!dynamicImport) {
-		dynamicImport = require("babel-plugin-syntax-dynamic-import")();
-	}
-	const program = ts.createProgram([/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), path], compilerOptions);
-	const diagnostics = ts.getPreEmitDiagnostics(program);
-	if (diagnostics.length) {
-		console.log(ts.formatDiagnostics(diagnostics, diagnosticsHost));
-	}
-	let generator: JsonSchemaGenerator | null | undefined;
-	const validatorForType = memoize((typeName: string) => {
-		if (typeof generator === "undefined") {
-			generator = (require("typescript-json-schema").buildGenerator as typeof buildGenerator)(program, {
-				strictNullChecks: true,
-				ref: true,
-				topRef: true,
-				required: true,
-			});
-		}
-		if (!generator) {
-			return undefined;
-		}
-		const schema = generator.getSchemaForSymbol(typeName);
-		const schemaValidator = loadAjv().compile(schema);
-		return (value: any) => !!schemaValidator(value);
-	});
-	for (const sourceFile of program.getSourceFiles()) {
-		if (!/\.d\.(js|ts|jsx|tsx)$/.test(sourceFile.fileName)) {
-			let scriptContents: string | undefined;
-			let scriptMap: string | undefined;
-			program.emit(sourceFile, (fileName: string, data: string, writeByteOrderMark: boolean, onError?: (message: string) => void, sourceFiles?: ReadonlyArray<ts.SourceFile>) => {
-				if (/\.js$/.test(fileName)) {
-					scriptContents = data;
-				} else if (/\.js\.map$/.test(fileName)) {
-					scriptMap = data;
-				}
-			});
-			const transformed = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(sourceFile.fileName).toString(), {
-				babelrc: false,
-				plugins: [
-					dynamicImport,
-					rewriteDynamicImport,
-					convertToCommonJS,
-					optimizeClosuresInRender,
-					addSubresourceIntegrity(publicPath),
-					verifyStylePaths(publicPath),
-					rewriteForInStatements(),
-					noImpureGetters(),
-				],
-				inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
-			});
-			sandboxedScripts.set(sourceFile.fileName, { sandbox: sandbox<ServerModuleGlobal>(transformed.code!, sourceFile.fileName), validatorForType });
+
+	public loadModule<T>(source: ModuleSource, module: ServerModule, publicPath: string, globalProperties: T, require: (name: string) => any) {
+		const moduleGlobal: ServerModuleGlobal & T = Object.create(global);
+		Object.assign(moduleGlobal, globalProperties);
+		moduleGlobal.self = moduleGlobal;
+		moduleGlobal.global = global;
+		moduleGlobal.require = require;
+		moduleGlobal.module = module;
+		moduleGlobal.exports = module.exports;
+		if (source.from === "file") {
+			this.fileRead(source.path);
+			const script = this.sandboxedScriptAtPath(source.path, publicPath);
+			module.exports[schemaValidatorForType] = script.validatorForType;
+			script.sandbox(moduleGlobal);
+		} else {
+			this.sandboxedScriptFromCode(source.code, "__bundle.js")(moduleGlobal);
 		}
 	}
-	return sandboxedScripts.get(path)!;
-}
 
-const sandboxedScriptFromCode = memoize(sandbox);
-
-export function loadModule<T>(source: ModuleSource, module: ServerModule, publicPath: string, globalProperties: T, require: (name: string) => any) {
-	const moduleGlobal: ServerModuleGlobal & T = Object.create(global);
-	Object.assign(moduleGlobal, globalProperties);
-	moduleGlobal.self = moduleGlobal;
-	moduleGlobal.global = global;
-	moduleGlobal.require = require;
-	moduleGlobal.module = module;
-	moduleGlobal.exports = module.exports;
-	if (source.from === "file") {
-		const script = sandboxedScriptAtPath(source.path, publicPath);
-		module.exports[schemaValidatorForType] = script.validatorForType;
-		script.sandbox(moduleGlobal);
-	} else {
-		sandboxedScriptFromCode(source.code, "__bundle.js")(moduleGlobal);
+	private sandboxedScriptAtPath<T extends ServerModuleGlobal>(path: string, publicPath: string): SandboxedScript<T> {
+		const existing = this.sandboxedScripts.get(path);
+		if (existing) {
+			return existing as SandboxedScript<T>;
+		}
+		if (!convertToCommonJS) {
+			convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs")();
+		}
+		if (!optimizeClosuresInRender) {
+			optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render")(babel);
+		}
+		if (!dynamicImport) {
+			dynamicImport = require("babel-plugin-syntax-dynamic-import")();
+		}
+		const program = ts.createProgram([/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), path], compilerOptions);
+		const diagnostics = ts.getPreEmitDiagnostics(program);
+		if (diagnostics.length) {
+			console.log(ts.formatDiagnostics(diagnostics, diagnosticsHost));
+		}
+		let generator: JsonSchemaGenerator | null | undefined;
+		const validatorForType = memoize((typeName: string) => {
+			if (typeof generator === "undefined") {
+				generator = (require("typescript-json-schema").buildGenerator as typeof buildGenerator)(program, {
+					strictNullChecks: true,
+					ref: true,
+					topRef: true,
+					required: true,
+				});
+			}
+			if (!generator) {
+				return undefined;
+			}
+			const schema = generator.getSchemaForSymbol(typeName);
+			const schemaValidator = loadAjv().compile(schema);
+			return (value: any) => !!schemaValidator(value);
+		});
+		for (const sourceFile of program.getSourceFiles()) {
+			if (!/\.d\.(js|ts|jsx|tsx)$/.test(sourceFile.fileName)) {
+				let scriptContents: string | undefined;
+				let scriptMap: string | undefined;
+				program.emit(sourceFile, (fileName: string, data: string, writeByteOrderMark: boolean, onError?: (message: string) => void, sourceFiles?: ReadonlyArray<ts.SourceFile>) => {
+					if (/\.js$/.test(fileName)) {
+						scriptContents = data;
+					} else if (/\.js\.map$/.test(fileName)) {
+						scriptMap = data;
+					}
+				});
+				const transformed = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(sourceFile.fileName).toString(), {
+					babelrc: false,
+					plugins: [
+						dynamicImport,
+						rewriteDynamicImport,
+						convertToCommonJS,
+						optimizeClosuresInRender,
+						addSubresourceIntegrity(publicPath, this.fileRead),
+						verifyStylePaths(publicPath),
+						rewriteForInStatements(),
+						noImpureGetters(),
+					],
+					inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
+				});
+				this.sandboxedScripts.set(sourceFile.fileName, { sandbox: sandbox<ServerModuleGlobal>(transformed.code!, sourceFile.fileName), validatorForType });
+			}
+		}
+		return this.sandboxedScripts.get(path)!;
 	}
 }

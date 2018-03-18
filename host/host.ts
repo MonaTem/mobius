@@ -18,7 +18,7 @@ export class Host {
 	public options: HostSandboxOptions;
 	public staleSessionTimeout: any;
 	public constructSession: (sessionID: string, request?: Request) => Session;
-	constructor(source: ModuleSource, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, publicPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, workerCount: number, hostname?: string) {
+	constructor(source: ModuleSource, fileRead: (path: string) => void, watch: boolean, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, publicPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, workerCount: number, hostname?: string) {
 		this.destroying = false;
 		this.constructSession = createSessionGroup(this.options = {
 			htmlSource,
@@ -29,8 +29,9 @@ export class Host {
 			source,
 			publicPath,
 			sessionsPath,
+			watch,
 			hostname,
-		}, this.sessions, workerCount);
+		}, fileRead, this.sessions, workerCount);
 		// Session timeout
 		this.staleSessionTimeout = setInterval(() => {
 			const now = Date.now();
