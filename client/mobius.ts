@@ -1157,16 +1157,23 @@ interceptGlobals(window, () => insideCallback && !dead, coordinateValue, <T exte
 	};
 });
 
-type ImportFunction = (moduleName: string) => Promise<any>;
+type ImportFunction = (moduleName: string | Promise<any>) => Promise<any>;
+declare global {
+	let _import: ImportFunction;
+}
 
 const modules: { [name: string]: any } = {};
 const moduleResolve: { [name: string]: [(value: any) => void, boolean] } = {};
 
-declare global {
-	let _import: ImportFunction;
-}
 const moduleMappings: { [name: string]: [string, string] } = _import as any;
-_import = (moduleName: string) => {
+_import = (moduleName: string | Promise<any>) => {
+	if (typeof moduleName !== "string") {
+		loadingModules++;
+		function finished() {
+			loadingModules--;
+		}
+		return moduleName.then(finished, finished);
+	}
 	if (Object.hasOwnProperty.call(modules, moduleName)) {
 		return Promise.resolve(modules[moduleName]);
 	}

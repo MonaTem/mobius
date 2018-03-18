@@ -1,7 +1,7 @@
 import { defaultEventProperties } from "_dom";
 import { registeredListeners } from "_dom";
 import { restoreDefaults, stripDefaults } from "_internal";
-import { createClientChannel, createClientPromise } from "mobius";
+import { createClientChannel } from "mobius";
 import { Channel } from "mobius-types";
 import * as preact from "preact";
 export { h, Component, ComponentFactory, ComponentProps, FunctionalComponent } from "preact";
@@ -66,36 +66,32 @@ export function title(newTitle: string): void {
 const requestedStyles: { [href: string]: Promise<void> } = {};
 
 export function style(href: string, subresourceIntegrity?: string): Promise<void> {
-	let result = requestedStyles[href];
-	if (!result) {
-		result = requestedStyles[href] = createClientPromise(() => new Promise<void>((resolve, reject) => {
-			let link: HTMLLinkElement | undefined;
-			const existingStyles = document.getElementsByTagName("link");
-			for (let i = 0; i < existingStyles.length; i++) {
-				if (existingStyles[i].getAttribute("href") === href && "sheet" in existingStyles[i]) {
-					if (existingStyles[i].sheet) {
-						return resolve();
-					}
-					link = existingStyles[i];
+	return requestedStyles[href] || (requestedStyles[href] = _import(new Promise<void>((resolve, reject) => {
+		let link: HTMLLinkElement | undefined;
+		const existingStyles = document.getElementsByTagName("link");
+		for (let i = 0; i < existingStyles.length; i++) {
+			if (existingStyles[i].getAttribute("href") === href && "sheet" in existingStyles[i]) {
+				if (existingStyles[i].sheet) {
+					return resolve();
 				}
+				link = existingStyles[i];
 			}
-			if (!link) {
-				link = self.document.createElement("link");
-				link.rel = "stylesheet";
-				link.href = href;
-				if (subresourceIntegrity) {
-					link.setAttribute("integrity", subresourceIntegrity);
-				}
-				document.body.appendChild(link);
+		}
+		if (!link) {
+			link = self.document.createElement("link");
+			link.rel = "stylesheet";
+			link.href = href;
+			if (subresourceIntegrity) {
+				link.setAttribute("integrity", subresourceIntegrity);
 			}
-			link.addEventListener("load", () => resolve(), false);
-			link.addEventListener("error", () => {
-				document.body.removeChild(link!);
-				reject(new Error("Failed to load styles from " + href + "!"));
-			}, false);
-		}), true);
-	}
-	return result;
+			document.body.appendChild(link);
+		}
+		link.addEventListener("load", () => resolve(), false);
+		link.addEventListener("error", () => {
+			document.body.removeChild(link!);
+			reject(new Error("Failed to load styles from " + href + "!"));
+		}, false);
+	})));
 }
 
 export function ref<T, V>(component: preact.Component<T, V>): Element | null {

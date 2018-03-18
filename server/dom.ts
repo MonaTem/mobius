@@ -1,6 +1,6 @@
 import * as _dom from "_dom";
 import { restoreDefaults } from "_internal";
-import { createClientChannel, createClientPromise } from "mobius";
+import { createClientChannel } from "mobius";
 import { Channel } from "mobius-types";
 import * as preact from "preact";
 export { h, Component, ComponentFactory, ComponentProps, FunctionalComponent } from "preact";
@@ -96,8 +96,7 @@ export function title(newTitle: string): void {
 const requestedStyles: { [href: string]: Promise<void> } = {};
 
 export function style(href: string, subresourceIntegrity?: string): Promise<void> {
-	let result = requestedStyles[href];
-	if (!result) {
+	return requestedStyles[href] || (requestedStyles[href] = new Promise<void>((resolve) => {
 		const link = (require("document") as Document).createElement("link");
 		link.rel = "stylesheet";
 		link.href = href;
@@ -106,9 +105,6 @@ export function style(href: string, subresourceIntegrity?: string): Promise<void
 		}
 		const body = (require("body") as HTMLBodyElement);
 		body.insertBefore(link, body.lastElementChild && body.lastElementChild.previousElementSibling);
-		result = requestedStyles[href] = createClientPromise(() => {
-			// Fallback is to return immediately--if unable to track client's ability to load CSS, just proceed
-		});
-	}
-	return result;
+		resolve();
+	}));
 }
