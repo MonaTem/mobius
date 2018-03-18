@@ -36,7 +36,7 @@ insufficient_browser_throw:
 	throw new Error("Insufficient browser support. Falling back to server-side rendering...");
 }
 
-document.body.className = "mobius-active mobius-full";
+document.body.className = "notranslate mobius-active mobius-full";
 
 if (history.replaceState) {
 	const queryComponents = location.search.substr(1).split(/\&/g);
