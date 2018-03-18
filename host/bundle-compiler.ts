@@ -374,6 +374,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 		experimentalDynamicImport: true,
 		aggressivelyMergeModules: true,
 		hashedChunkNames: false,
+		minifyInternalNames: minify,
 	});
 	const rollupOutput = await bundle.generate({
 		format: isClient ? customFinalizer : "cjs",

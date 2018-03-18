@@ -68,7 +68,7 @@
     "node-fetch": "^1.7.3",
     "opn": "^5.3.0",
     "rimraf": "^2.6.2",
-    "rollup": "github:rpetrich/rollup#08095ac5bfc242a34abccf88f631eca495792709",
+    "rollup": "github:rpetrich/rollup#465da0dde74fa14aa9e2b9937fcc2f89c412404e",
     "rollup-plugin-babel": "^3.0.3",
     "rollup-plugin-closure-compiler-js": "^1.0.6",
     "rollup-plugin-includepaths": "^0.2.2",
