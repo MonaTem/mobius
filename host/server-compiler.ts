@@ -92,11 +92,57 @@ interface SandboxedScript<T extends ServerModuleGlobal = ServerModuleGlobal> {
 export class ServerCompiler {
 	private sandboxedScriptFromCode = memoize(sandbox);
 	private sandboxedScripts = new Map<string, SandboxedScript>();
+	private languageService: ts.LanguageService;
 
 	public fileRead: (path: string) => void;
 
-	constructor(fileRead: (path: string) => void) {
-		this.fileRead = memoize(fileRead);
+	constructor(mainFile: string, fileRead: (path: string) => void) {
+		this.fileRead = fileRead = memoize(fileRead);
+		const fileNames = [/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), mainFile];
+		const host: ts.LanguageServiceHost = {
+			getScriptFileNames() {
+				return fileNames;
+			},
+			getScriptVersion(fileName) {
+				return "0";
+			},
+			getScriptSnapshot(fileName) {
+				const contents = ts.sys.readFile(fileName);
+				if (typeof contents !== "undefined") {
+					return ts.ScriptSnapshot.fromString(contents);
+				}
+				return undefined;
+			},
+			getCurrentDirectory() {
+				return ts.sys.getCurrentDirectory();
+			},
+			getCompilationSettings() {
+				return compilerOptions;
+			},
+			getDefaultLibFileName(options) {
+				return ts.getDefaultLibFilePath(options);
+			},
+			readFile(fileName: string, encoding?: string) {
+				fileRead(fileName);
+				return ts.sys.readFile(fileName, encoding);
+			},
+			fileExists(fileName: string) {
+				return ts.sys.fileExists(fileName);
+			},
+			readDirectory: ts.sys.readDirectory,
+			directoryExists(directoryName: string): boolean {
+				return ts.sys.directoryExists(directoryName);
+			},
+			getDirectories(directoryName: string): string[] {
+				return ts.sys.getDirectories(directoryName);
+			},
+		};
+		this.languageService = ts.createLanguageService(host, ts.createDocumentRegistry());
+		const program = this.languageService.getProgram();
+		const diagnostics = ts.getPreEmitDiagnostics(program);
+		if (diagnostics.length) {
+			console.log(ts.formatDiagnostics(diagnostics, diagnosticsHost));
+		}
 	}
 
 	public loadModule<T>(source: ModuleSource, module: ServerModule, publicPath: string, globalProperties: T, require: (name: string) => any) {
@@ -108,7 +154,6 @@ export class ServerCompiler {
 		moduleGlobal.module = module;
 		moduleGlobal.exports = module.exports;
 		if (source.from === "file") {
-			this.fileRead(source.path);
 			const script = this.sandboxedScriptAtPath(source.path, publicPath);
 			module.exports[schemaValidatorForType] = script.validatorForType;
 			script.sandbox(moduleGlobal);
@@ -131,15 +176,10 @@ export class ServerCompiler {
 		if (!dynamicImport) {
 			dynamicImport = require("babel-plugin-syntax-dynamic-import")();
 		}
-		const program = ts.createProgram([/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), path], compilerOptions);
-		const diagnostics = ts.getPreEmitDiagnostics(program);
-		if (diagnostics.length) {
-			console.log(ts.formatDiagnostics(diagnostics, diagnosticsHost));
-		}
 		let generator: JsonSchemaGenerator | null | undefined;
 		const validatorForType = memoize((typeName: string) => {
 			if (typeof generator === "undefined") {
-				generator = (require("typescript-json-schema").buildGenerator as typeof buildGenerator)(program, {
+				generator = (require("typescript-json-schema").buildGenerator as typeof buildGenerator)(this.languageService.getProgram(), {
 					strictNullChecks: true,
 					ref: true,
 					topRef: true,
@@ -153,34 +193,33 @@ export class ServerCompiler {
 			const schemaValidator = loadAjv().compile(schema);
 			return (value: any) => !!schemaValidator(value);
 		});
-		for (const sourceFile of program.getSourceFiles()) {
-			if (!/\.d\.(js|ts|jsx|tsx)$/.test(sourceFile.fileName)) {
-				let scriptContents: string | undefined;
-				let scriptMap: string | undefined;
-				program.emit(sourceFile, (fileName: string, data: string, writeByteOrderMark: boolean, onError?: (message: string) => void, sourceFiles?: ReadonlyArray<ts.SourceFile>) => {
-					if (/\.js$/.test(fileName)) {
-						scriptContents = data;
-					} else if (/\.js\.map$/.test(fileName)) {
-						scriptMap = data;
-					}
-				});
-				const transformed = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(sourceFile.fileName).toString(), {
-					babelrc: false,
-					plugins: [
-						dynamicImport,
-						rewriteDynamicImport,
-						convertToCommonJS,
-						optimizeClosuresInRender,
-						addSubresourceIntegrity(publicPath, this.fileRead),
-						verifyStylePaths(publicPath),
-						rewriteForInStatements(),
-						noImpureGetters(),
-					],
-					inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
-				});
-				this.sandboxedScripts.set(sourceFile.fileName, { sandbox: sandbox<ServerModuleGlobal>(transformed.code!, sourceFile.fileName), validatorForType });
+		let scriptContents: string | undefined;
+		let scriptMap: string | undefined;
+		if (this.languageService.getProgram().getSourceFile(path)) {
+			for (const { name, text } of this.languageService.getEmitOutput(path).outputFiles) {
+				if (/\.js$/.test(name)) {
+					scriptContents = text;
+				} else if (/\.js\.map$/.test(name)) {
+					scriptMap = text;
+				}
 			}
 		}
-		return this.sandboxedScripts.get(path)!;
+		const transformed = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(path).toString(), {
+			babelrc: false,
+			plugins: [
+				dynamicImport,
+				rewriteDynamicImport,
+				convertToCommonJS,
+				optimizeClosuresInRender,
+				addSubresourceIntegrity(publicPath, this.fileRead),
+				verifyStylePaths(publicPath),
+				rewriteForInStatements(),
+				noImpureGetters(),
+			],
+			inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
+		});
+		const result = { sandbox: sandbox<ServerModuleGlobal>(transformed.code!, path), validatorForType };
+		this.sandboxedScripts.set(path, result);
+		return result;
 	}
 }

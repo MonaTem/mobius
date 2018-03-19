@@ -20,7 +20,6 @@ import { escape } from "./host/event-loop";
 import { exists, mkdir, packageRelative, readFile, readJSON, rimraf, stat, symlink, unlink, writeFile } from "./host/fileUtils";
 import { Host } from "./host/host";
 import { PageRenderMode } from "./host/page-renderer";
-import { ModuleSource } from "./host/server-compiler";
 import { Session } from "./host/session";
 import { brotlied, gzipped, StaticFileRoute, staticFileRoute } from "./host/static-file-route";
 
@@ -220,8 +219,8 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 			// Start compiling server
 			console.log("Compiling server bundle...");
-			const serverSource: ModuleSource = bundled ? { from: "string", code: (await compileBundle("server", watchFile, serverJSPath, sourcePath, publicPath))["/main.js"].route.buffer.toString(), path: serverJSPath } : { from: "file", path: serverJSPath };
-			const newHost = new Host(serverSource, watchFile, watch, serverModulePaths, modulePaths, sessionsPath, publicPath, await htmlContents, await secretsAsync, allowMultipleClientsPerSession, workers, hostname);
+			const bundledSource = bundled ? (await compileBundle("server", watchFile, serverJSPath, sourcePath, publicPath))["/main.js"].route.buffer.toString() : undefined;
+			const newHost = new Host(serverJSPath, bundledSource, watchFile, watch, serverModulePaths, modulePaths, sessionsPath, publicPath, await htmlContents, await secretsAsync, allowMultipleClientsPerSession, workers, hostname);
 
 			// Start initial page render
 			console.log("Rendering initial page...");

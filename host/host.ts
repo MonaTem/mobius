@@ -1,6 +1,5 @@
 import { escape } from "./event-loop";
 import { exists } from "./fileUtils";
-import { ModuleSource } from "./server-compiler";
 import { createSessionGroup, Session } from "./session";
 import { archivePathForSessionId, HostSandboxOptions } from "./session-sandbox";
 
@@ -18,7 +17,7 @@ export class Host {
 	public options: HostSandboxOptions;
 	public staleSessionTimeout: any;
 	public constructSession: (sessionID: string, request?: Request) => Session;
-	constructor(source: ModuleSource, fileRead: (path: string) => void, watch: boolean, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, publicPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, workerCount: number, hostname?: string) {
+	constructor(mainPath: string, bakedSource: string | undefined, fileRead: (path: string) => void, watch: boolean, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, publicPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, workerCount: number, hostname?: string) {
 		this.destroying = false;
 		this.constructSession = createSessionGroup(this.options = {
 			htmlSource,
@@ -26,11 +25,12 @@ export class Host {
 			secrets,
 			serverModulePaths,
 			modulePaths,
-			source,
+			mainPath,
 			publicPath,
 			sessionsPath,
 			watch,
 			hostname,
+			source : typeof bakedSource !== "undefined" ? { from: "string", code: bakedSource, path: mainPath } : { from: "file", path: mainPath },
 		}, fileRead, this.sessions, workerCount);
 		// Session timeout
 		this.staleSessionTimeout = setInterval(() => {

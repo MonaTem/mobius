@@ -24,6 +24,7 @@ export interface HostSandboxOptions {
 	serverModulePaths: string[];
 	modulePaths: string[];
 	source: ModuleSource;
+	mainPath: string;
 	publicPath: string;
 	sessionsPath: string;
 	watch: boolean;
@@ -61,7 +62,7 @@ export class HostSandbox {
 		this.metaRedirect = this.document.createElement("meta");
 		this.metaRedirect.setAttribute("http-equiv", "refresh");
 		this.noscript.appendChild(this.metaRedirect);
-		this.serverCompiler = new ServerCompiler(fileRead);
+		this.serverCompiler = new ServerCompiler(options.mainPath, fileRead);
 		this.broadcastModule = broadcastModule;
 	}
 }
