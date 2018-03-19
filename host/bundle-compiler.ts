@@ -249,6 +249,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				},
 			},
 			verbosity: 0,
+			typescript: require("typescript"),
 		}) as any as Plugin,
 		rollupBabel({
 			babelrc: false,
