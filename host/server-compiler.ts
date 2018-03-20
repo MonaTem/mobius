@@ -1,9 +1,7 @@
-import * as Ajv from "ajv";
 import * as babel from "babel-core";
 import { readFileSync } from "fs";
 import { cwd } from "process";
 import * as ts from "typescript";
-import { getDefaultArgs, JsonSchemaGenerator } from "typescript-json-schema";
 import * as vm from "vm";
 import addSubresourceIntegrity from "./addSubresourceIntegrity";
 import { packageRelative } from "./fileUtils";
@@ -12,6 +10,7 @@ import noImpureGetters from "./noImpureGetters";
 import rewriteDynamicImport from "./rewriteDynamicImport";
 import rewriteForInStatements from "./rewriteForInStatements";
 import verifyStylePaths from "./verify-style-paths";
+import { validationModule } from "./validation-module";
 
 let convertToCommonJS: any;
 let optimizeClosuresInRender: any;
@@ -22,7 +21,7 @@ export interface ServerModule {
 	paths: string[];
 }
 
-interface ServerModuleGlobal {
+export interface ServerModuleGlobal {
 	self: this;
 	global: this | NodeJS.Global;
 	require: (name: string) => any;
@@ -67,14 +66,6 @@ const diagnosticsHost = {
 	},
 };
 
-// Ajv configured to support draft-04 JSON schemas
-const ajv = new Ajv({
-	meta: false,
-	extendRefs: true,
-	unknownFormats: "ignore",
-});
-ajv.addMetaSchema(require("ajv/lib/refs/json-schema-draft-04.json"));
-
 type ModuleInitializer = (global: any) => void;
 
 const validatorsPathPattern = /\!validators\.d\.ts$/;
@@ -97,7 +88,7 @@ export class ServerCompiler {
 		const fileNames = [/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), mainFile];
 		function readFile(fileName: string, encoding?: string) {
 			if (validatorsPathPattern.test(fileName)) {
-				return `declare const schema: { [symbol: string]: (value: any) => boolean };\nexport default schema;\n`;
+				return validationModule.generateTypeDeclaration(fileName);
 			}
 			fileRead(fileName);
 			return ts.sys.readFile(fileName, encoding);
@@ -190,48 +181,7 @@ export class ServerCompiler {
 				const parentModulePath = path.replace(validatorsPathPattern, ext);
 				const parentSourceFile = this.program.getSourceFile(parentModulePath);
 				if (parentSourceFile) {
-					const localNames: string[] = [];
-					const tc = this.program.getTypeChecker();
-					const allSymbols: { [name: string]: ts.Type } = {};
-					const userSymbols: { [name: string]: ts.Symbol } = {};
-					const inheritingTypes: { [baseName: string]: string[] } = {};
-					function visit(node: ts.Node) {
-						if (node.kind === ts.SyntaxKind.ClassDeclaration
-							|| node.kind === ts.SyntaxKind.InterfaceDeclaration
-						 	|| node.kind === ts.SyntaxKind.EnumDeclaration
-							|| node.kind === ts.SyntaxKind.TypeAliasDeclaration
-						) {
-							const symbol: ts.Symbol = (<any>node).symbol;
-							const localName = tc.getFullyQualifiedName(symbol).replace(/".*"\./, "");
-							const nodeType = tc.getTypeAtLocation(node);
-		                    allSymbols[localName] = nodeType;
-							localNames.push(localName);
-		                    userSymbols[localName] = symbol;
-							for (const baseType of nodeType.getBaseTypes() || []) {
-								const baseName = tc.typeToString(baseType, undefined, ts.TypeFormatFlags.UseFullyQualifiedType);
-								(inheritingTypes[baseName] || (inheritingTypes[baseName] = [])).push(localName);
-							}
-						} else {
-							ts.forEachChild(node, visit);
-						}
-					}
-					visit(parentSourceFile);
-					const generator = new JsonSchemaGenerator(allSymbols, userSymbols, inheritingTypes, tc, Object.assign({
-						strictNullChecks: true,
-						ref: true,
-						topRef: true,
-						required: true,
-					}, getDefaultArgs()));
-					const validators: { [symbol: string]: (value: any) => boolean } = {};
-					for (const name of localNames) {
-						const schema = generator.getSchemaForSymbol(name);
-						const schemaValidator = ajv.compile(schema);
-						validators[name] = (value: any) => !!schemaValidator(value);
-					}
-					const result = (global: ServerModuleGlobal) => {
-						global.exports.__esModule = true;
-						global.exports.default = global.exports.schema = validators;
-					};
+					const result = validationModule.instantiateModule(parentModulePath, parentSourceFile, this.program);
 					this.initializersForPaths.set(path, result);
 					return result;
 				}
