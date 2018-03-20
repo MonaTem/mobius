@@ -1,5 +1,4 @@
 import { Channel, JsonValue } from "mobius-types";
-import { Definition } from "typescript-json-schema";
 
 export let dead: boolean;
 export function disconnect(): void;
