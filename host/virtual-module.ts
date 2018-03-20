@@ -1,5 +1,5 @@
-import { ServerModuleGlobal } from "./server-compiler";
 import * as ts from "typescript";
+import { ServerModuleGlobal } from "./server-compiler";
 
 export interface VirtualModule {
 	readonly suffix: string;

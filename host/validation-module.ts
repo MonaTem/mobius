@@ -1,7 +1,7 @@
-import { VirtualModule } from "./virtual-module";
-import * as ts from "typescript";
 import * as Ajv from "ajv";
+import * as ts from "typescript";
 import { getDefaultArgs, JsonSchemaGenerator } from "typescript-json-schema";
+import { VirtualModule } from "./virtual-module";
 
 function buildSchemas(sourceFile: ts.SourceFile, program: ts.Program) {
 	const localNames: string[] = [];
@@ -15,12 +15,12 @@ function buildSchemas(sourceFile: ts.SourceFile, program: ts.Program) {
 		 	|| node.kind === ts.SyntaxKind.EnumDeclaration
 			|| node.kind === ts.SyntaxKind.TypeAliasDeclaration
 		) {
-			const symbol: ts.Symbol = (<any>node).symbol;
+			const symbol: ts.Symbol = (node as any).symbol;
 			const localName = tc.getFullyQualifiedName(symbol).replace(/".*"\./, "");
 			const nodeType = tc.getTypeAtLocation(node);
-            allSymbols[localName] = nodeType;
+   allSymbols[localName] = nodeType;
 			localNames.push(localName);
-            userSymbols[localName] = symbol;
+   userSymbols[localName] = symbol;
 			for (const baseType of nodeType.getBaseTypes() || []) {
 				const baseName = tc.typeToString(baseType, undefined, ts.TypeFormatFlags.UseFullyQualifiedType);
 				(inheritingTypes[baseName] || (inheritingTypes[baseName] = [])).push(localName);
@@ -36,7 +36,7 @@ function buildSchemas(sourceFile: ts.SourceFile, program: ts.Program) {
 		topRef: true,
 		required: true,
 	}, getDefaultArgs()));
-	return localNames.map(name => ({ name, schema: generator.getSchemaForSymbol(name) }));
+	return localNames.map((name) => ({ name, schema: generator.getSchemaForSymbol(name) }));
 }
 
 // Ajv configured to support draft-04 JSON schemas
@@ -83,4 +83,4 @@ export const validationModule: VirtualModule = {
 			global.exports.default = global.exports.validators = validators;
 		};
 	},
-}
+};

@@ -9,8 +9,8 @@ import memoize from "./memoize";
 import noImpureGetters from "./noImpureGetters";
 import rewriteDynamicImport from "./rewriteDynamicImport";
 import rewriteForInStatements from "./rewriteForInStatements";
-import verifyStylePaths from "./verify-style-paths";
 import { validationModule } from "./validation-module";
+import verifyStylePaths from "./verify-style-paths";
 
 let convertToCommonJS: any;
 let optimizeClosuresInRender: any;
@@ -141,7 +141,7 @@ export class ServerCompiler {
 		};
 		this.languageService = ts.createLanguageService(this.host, ts.createDocumentRegistry());
 		this.program = this.languageService.getProgram();
-		this.resolutionCache = ts.createModuleResolutionCache(this.host.getCurrentDirectory(), s => s);
+		this.resolutionCache = ts.createModuleResolutionCache(this.host.getCurrentDirectory(), (s) => s);
 		const diagnostics = ts.getPreEmitDiagnostics(this.program);
 		if (diagnostics.length) {
 			console.log(ts.formatDiagnostics(diagnostics, diagnosticsHost));
@@ -181,9 +181,9 @@ export class ServerCompiler {
 				const parentModulePath = path.replace(validatorsPathPattern, ext);
 				const parentSourceFile = this.program.getSourceFile(parentModulePath);
 				if (parentSourceFile) {
-					const result = validationModule.instantiateModule(parentModulePath, parentSourceFile, this.program);
-					this.initializersForPaths.set(path, result);
-					return result;
+					const validatorResult = validationModule.instantiateModule(parentModulePath, parentSourceFile, this.program);
+					this.initializersForPaths.set(path, validatorResult);
+					return validatorResult;
 				}
 			}
 		}

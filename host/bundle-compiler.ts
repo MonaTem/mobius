@@ -2,13 +2,13 @@ import * as babel from "babel-core";
 import { NodePath } from "babel-traverse";
 import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as types from "babel-types";
-import { RawSourceMap } from "source-map";
 import { resolve } from "path";
 import { Chunk, Finaliser, getExportBlock, OutputOptions, Plugin, rollup, SourceDescription } from "rollup";
 import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
 import { pureBabylon as pure } from "side-effects-safe";
+import { RawSourceMap } from "source-map";
 import * as ts from "typescript";
 import addSubresourceIntegrity from "./addSubresourceIntegrity";
 import { packageRelative } from "./fileUtils";
@@ -353,7 +353,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			if (isMain) {
 				magicString.prepend("(");
 				let imports: any;
-				function loadDataForModuleWithName(name: string) : [string, string] {
+				function loadDataForModuleWithName(name: string): [string, string] {
 					const route = output[name.substr(1)].route;
 					return [route.foreverPath, route.integrity];
 				}
