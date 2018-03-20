@@ -1,12 +1,11 @@
 import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
 import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
-import { loadModule, ModuleSource, schemaValidatorForType, ServerModule } from "./server-compiler";
+import { ModuleSource, ServerCompiler, ServerModule } from "./server-compiler";
 
 import * as mobiusModule from "mobius";
 import { Channel, JsonValue } from "mobius-types";
 import * as BroadcastModule from "../server/_broadcast";
-import * as SchemaModule from "../server/schema";
 
 import { BootstrapData, disconnectedError, Event, eventForException, eventForValue, logOrdering, parseValueEvent, roundTrip } from "../common/_internal";
 import { FakedGlobals, interceptGlobals } from "../common/determinism";
@@ -15,7 +14,7 @@ import { JSDOM } from "jsdom";
 import patchJSDOM from "./jsdom-patch";
 
 import { createWriteStream } from "fs";
-import { dirname, join as pathJoin } from "path";
+import { join as pathJoin } from "path";
 
 export interface HostSandboxOptions {
 	htmlSource: string;
@@ -24,24 +23,16 @@ export interface HostSandboxOptions {
 	serverModulePaths: string[];
 	modulePaths: string[];
 	source: ModuleSource;
+	mainPath: string;
 	publicPath: string;
 	sessionsPath: string;
+	watch: boolean;
 	hostname?: string;
 }
 
 export function archivePathForSessionId(sessionsPath: string, sessionID: string) {
 	return pathJoin(sessionsPath, encodeURIComponent(sessionID) + ".json");
 }
-
-function alwaysBlue() {
-	return true;
-}
-const schemaModule: typeof SchemaModule = {
-	validate(exports: any, name: string): (value: any) => boolean {
-		const validatorForType = exports[schemaValidatorForType] as undefined | ((name: string) => (undefined | ((value: any) => boolean)));
-		return (validatorForType && validatorForType(name)) || alwaysBlue;
-	},
-};
 
 export class HostSandbox {
 	public options: HostSandboxOptions;
@@ -50,7 +41,8 @@ export class HostSandbox {
 	public noscript: Element;
 	public metaRedirect: Element;
 	public broadcastModule: typeof BroadcastModule;
-	constructor(options: HostSandboxOptions, broadcastModule: typeof BroadcastModule) {
+	public serverCompiler: ServerCompiler;
+	constructor(options: HostSandboxOptions, fileRead: (path: string) => void, broadcastModule: typeof BroadcastModule) {
 		this.options = options;
 		this.dom = new (require("jsdom").JSDOM)(options.htmlSource) as JSDOM;
 		this.document = (this.dom.window as Window).document as Document;
@@ -59,6 +51,7 @@ export class HostSandbox {
 		this.metaRedirect = this.document.createElement("meta");
 		this.metaRedirect.setAttribute("http-equiv", "refresh");
 		this.noscript.appendChild(this.metaRedirect);
+		this.serverCompiler = new ServerCompiler(options.mainPath, options.publicPath, fileRead);
 		this.broadcastModule = broadcastModule;
 	}
 }
@@ -86,7 +79,6 @@ const bakedModules: { [moduleName: string]: (sandbox: LocalSessionSandbox) => an
 	body: (sandbox: LocalSessionSandbox) => sandbox.pageRenderer.body,
 	secrets: (sandbox: LocalSessionSandbox) => sandbox.host.options.secrets,
 	_broadcast: (sandbox: LocalSessionSandbox) => sandbox.host.broadcastModule,
-	schema: (sandbox: LocalSessionSandbox) => schemaModule,
 };
 
 export interface SessionSandboxClient {
@@ -114,12 +106,6 @@ const enum ArchiveStatus {
 	Full,
 }
 
-// Lazy version of loadModule so that the sandbox module is loaded on first use
-let loadModuleLazy: typeof loadModule = (source, module, publicPath, globalProperties, requireFunction) => {
-	loadModuleLazy = require("./server-compiler").loadModule as typeof loadModule;
-	return loadModuleLazy(source, module, publicPath, globalProperties, requireFunction);
-};
-
 // Hack so that Module._findPath will find TypeScript files
 const Module = require("module");
 Module._extensions[".ts"] = Module._extensions[".tsx"] = Module._extensions[".jsx"] = function() {
@@ -136,8 +122,9 @@ export interface RenderOptions {
 	fallbackURL: string;
 	fallbackIntegrity: string;
 	noScriptURL?: string;
-	bootstrap?: boolean;
+	bootstrap?: true;
 	cssBasePath?: string;
+	connect?: true;
 }
 
 export interface SessionSandbox {
@@ -223,12 +210,12 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 	}
 
 	public loadModule(source: ModuleSource, newModule: ServerModule, allowNodeModules: boolean) {
-		loadModuleLazy(source, newModule, this.host.options.publicPath, this.globalProperties, (name: string) => {
+		this.host.serverCompiler.loadModule(source, newModule, this.globalProperties, (name: string) => {
 			const bakedModule = bakedModules[name];
 			if (bakedModule) {
 				return bakedModule(this);
 			}
-			const modulePath = Module._findPath(name, [dirname(source.path)].concat(newModule.paths), false);
+			const modulePath = this.host.serverCompiler.resolveModule(name, source.path);
 			if (modulePath) {
 				const existingModule = this.modules.get(modulePath);
 				if (existingModule) {
@@ -900,6 +887,9 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		}
 		if (client.clientID) {
 			result.clientID = client.clientID;
+		}
+		if (this.host.options.watch) {
+			result.connect = true;
 		}
 		return result;
 	}

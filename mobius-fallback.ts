@@ -23,7 +23,7 @@
  * SOFTWARE.
  */
 (() => {
-	document.body.className = "mobius-active";
+	document.body.className = "notranslate mobius-active";
 
 	const queryComponents = location.search.substr(1).split(/\&/g);
 	const jsNoIndex = queryComponents.indexOf("js=no");

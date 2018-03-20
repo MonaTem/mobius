@@ -36,8 +36,6 @@ insufficient_browser_throw:
 	throw new Error("Insufficient browser support. Falling back to server-side rendering...");
 }
 
-document.body.className = "mobius-active mobius-full";
-
 if (history.replaceState) {
 	const queryComponents = location.search.substr(1).split(/\&/g);
 	let i = queryComponents.length;
@@ -270,6 +268,7 @@ const bootstrapData = (() => {
 	return {} as Partial<BootstrapData>;
 })();
 const sessionID: string = bootstrapData.sessionID || uuid();
+const alwaysConnected = bootstrapData.connect;
 const clientID = (bootstrapData.clientID as number) | 0;
 const serverURL = location.href.match(/^[^?]*/)![0];
 let activeConnectionCount = 0;
@@ -305,9 +304,13 @@ if (wrapperForm) {
 }
 
 const synchronizeChannels = escaping(() => {
+	if (loadingModules) {
+		idleCallbacks.push(synchronizeChannels);
+		return;
+	}
 	willSynchronizeChannels = false;
 	if (!dead) {
-		const useWebSockets = pendingChannelCount != 0;
+		const useWebSockets = pendingChannelCount != 0 || alwaysConnected;
 		if ((useWebSockets && activeConnectionCount == 0) || queuedLocalEvents.length) {
 			sendMessages(useWebSockets);
 			restartHeartbeat();
@@ -321,7 +324,7 @@ const synchronizeChannels = escaping(() => {
 	}
 });
 
-let afterHydration: Promise<void>;
+let afterHydration: Promise<void> = defer().then(didExitCallback);
 if (bootstrapData.sessionID) {
 	++outgoingMessageId;
 	const events = bootstrapData.events || [];
@@ -338,7 +341,7 @@ if (bootstrapData.sessionID) {
 	const clientRenderedHostElement = document.createElement("div");
 	clientRenderedHostElement.style.display = "none";
 	document.body.insertBefore(clientRenderedHostElement, serverRenderedHostElement);
-	afterHydration = defer().then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(() => {
+	afterHydration = afterHydration.then(escaping(processMessage.bind(null, bootstrapData))).then(defer).then(() => {
 		bootstrappingChannels = undefined;
 		// Swap the prerendered DOM element out for the one with mounted components
 		const childNodes = slice.call(serverRenderedHostElement.childNodes, 0);
@@ -352,9 +355,10 @@ if (bootstrapData.sessionID) {
 			window.scrollTo(bootstrapData.x, bootstrapData.y);
 		}
 		clientRenderedHostElement.style.display = null;
-	}).then(didExitCallback).then(synchronizeChannels);
-} else {
-	afterHydration = defer().then(didExitCallback);
+	}).then(synchronizeChannels);
+} else if (alwaysConnected) {
+	willSynchronizeChannels = true;
+	afterHydration = afterHydration.then(synchronizeChannels);
 }
 
 afterHydration.then(() => {
@@ -506,6 +510,11 @@ function processEvents(events: Array<Event | boolean>) {
 
 let serverDisconnectCount = 0;
 function processMessage(message: ServerMessage): Promise<void> {
+	if (message.reload) {
+		disconnect();
+		location.reload();
+		return resolvedPromise;
+	}
 	// Process messages in order
 	const messageId = message.messageID;
 	if (messageId > incomingMessageId) {
@@ -1146,16 +1155,23 @@ interceptGlobals(window, () => insideCallback && !dead, coordinateValue, <T exte
 	};
 });
 
-type ImportFunction = (moduleName: string) => Promise<any>;
+type ImportFunction = (moduleName: string | Promise<any>) => Promise<any>;
+declare global {
+	let _import: ImportFunction;
+}
 
 const modules: { [name: string]: any } = {};
 const moduleResolve: { [name: string]: [(value: any) => void, boolean] } = {};
 
-declare global {
-	let _import: ImportFunction;
-}
 const moduleMappings: { [name: string]: [string, string] } = _import as any;
-_import = (moduleName: string) => {
+_import = (moduleName: string | Promise<any>) => {
+	if (typeof moduleName == "object") {
+		loadingModules++;
+		function finished() {
+			loadingModules--;
+		}
+		return moduleName.then(finished, finished);
+	}
 	if (Object.hasOwnProperty.call(modules, moduleName)) {
 		return Promise.resolve(modules[moduleName]);
 	}
@@ -1206,3 +1222,5 @@ _import = (moduleName: string) => {
 		}));
 	}
 };
+
+document.body.className = "notranslate mobius-active mobius-full";

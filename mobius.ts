@@ -11,14 +11,15 @@ import * as express from "express";
 import { diff_match_patch } from "diff-match-patch";
 const diffMatchPatchNode = new (require("diff-match-patch-node") as typeof diff_match_patch)();
 
-import compileBundle from "./host/bundle-compiler";
+import * as chokidar from "chokidar";
+
+import compileBundle, { CompilerOutput } from "./host/bundle-compiler";
 import { Client } from "./host/client";
 import * as csrf from "./host/csrf";
 import { escape } from "./host/event-loop";
 import { exists, mkdir, packageRelative, readFile, readJSON, rimraf, stat, symlink, unlink, writeFile } from "./host/fileUtils";
 import { Host } from "./host/host";
 import { PageRenderMode } from "./host/page-renderer";
-import { ModuleSource } from "./host/server-compiler";
 import { Session } from "./host/session";
 import { brotlied, gzipped, StaticFileRoute, staticFileRoute } from "./host/static-file-route";
 
@@ -87,10 +88,10 @@ function messageFromBody(body: { [key: string]: any }): ClientMessage {
 		clientID: (body.clientID as number) | 0,
 		events: body.events ? JSON.parse("[" + body.events + "]") : [],
 	};
-	if ("close" in body) {
-		message.close = (body.close | 0) == 1;
+	if (body.close) {
+		message.close = true;
 	}
-	if ("destroy" in body) {
+	if (body.destroy) {
 		message.destroy = true;
 	}
 	return message;
@@ -99,7 +100,6 @@ function messageFromBody(body: { [key: string]: any }): ClientMessage {
 interface Config {
 	sourcePath: string;
 	publicPath: string;
-	secrets: { [key: string]: any };
 	sessionsPath?: string;
 	allowMultipleClientsPerSession?: boolean;
 	minify?: boolean;
@@ -109,29 +109,15 @@ interface Config {
 	simulatedLatency?: number;
 	bundled?: boolean;
 	generate?: boolean;
+	watch?: boolean;
 }
 
 function defaultSessionPath(sourcePath: string) {
 	return resolvePath(sourcePath, ".sessions");
 }
 
-export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), secrets, allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0, bundled = false, generate = false }: Config) {
-	let serverJSPath: string;
-	const packagePath = resolvePath(sourcePath, "package.json");
-	if (await exists(packagePath)) {
-		serverJSPath = resolvePath(sourcePath, (await readJSON(packagePath)).main);
-	} else {
-		const foundPath = Module._findPath("app", [sourcePath]);
-		if (!foundPath) {
-			throw new Error("Could not find app.ts or app.tsx in " + sourcePath);
-		}
-		serverJSPath = foundPath;
-	}
-
-	const htmlContents = readFile(packageRelative("public/index.html"));
-
+async function validateSessionsAndPrepareGracefulExit(sessionsPath: string) {
 	const gracefulPath = resolvePath(sessionsPath, ".graceful");
-
 	// Check if we can reuse existing sessions
 	let lastGraceful = 0;
 	try {
@@ -139,60 +125,218 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	} catch (e) {
 		/* tslint:disable no-empty */
 	}
-	if (lastGraceful < (await stat(serverJSPath)).mtimeMs) {
+	// if (lastGraceful < (await stat(serverJSPath)).mtimeMs) {
+	if (lastGraceful < 1) {
 		await rimraf(sessionsPath);
 		await mkdir(sessionsPath);
 	} else {
 		await unlink(gracefulPath);
 	}
+	return async () => {
+		await writeFile(gracefulPath, "");
+	};
+}
 
+const htmlContents = suppressUnhandledRejection(readFile(packageRelative("public/index.html")).then((contents) => contents.toString()));
+const fallbackPath = packageRelative("dist/fallback.js");
+const fallbackRouteAsync = suppressUnhandledRejection(readFile(fallbackPath).then((contents) => staticFileRoute("/fallback.js", contents)));
+
+function suppressUnhandledRejection<T>(promise: Promise<T>) {
+	promise.catch(emptyFunction);
+	return promise;
+}
+
+export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0, bundled = false, generate = false, watch = false }: Config) {
+	const fallbackMapContentsAsync = sourceMaps ? readFile(fallbackPath + ".map") : "";
+	const secretsPath = resolvePath(sourcePath, "secrets.json");
+	const gracefulExitAsync = suppressUnhandledRejection(validateSessionsAndPrepareGracefulExit(sessionsPath));
 	const serverModulePaths = [packageRelative("server"), resolvePath(sourcePath, "server")];
 	const modulePaths = serverModulePaths.concat([packageRelative("common"), packageRelative("dist/common"), resolvePath(sourcePath, "common")]);
 
-	// Start host
-	console.log("Rendering initial page...");
-	const serverSource: ModuleSource = bundled ? { from: "string", code: (await compileBundle("server", serverJSPath, sourcePath, publicPath))["/main.js"].route.buffer.toString(), path: serverJSPath } : { from: "file", path: serverJSPath };
-	const host = new Host(serverSource, serverModulePaths, modulePaths, sessionsPath, publicPath, (await htmlContents).toString(), secrets, allowMultipleClientsPerSession, workers, hostname);
-
-	// Read fallback script
-	const fallbackPath = packageRelative("dist/fallback.js");
-	const fallbackContentsAsync = readFile(fallbackPath);
-	const fallbackMapContentsAsync = readFile(fallbackPath + ".map");
-
-	// Start initial page render
-	const initialPageSession = host.constructSession("initial-render");
-	host.sessions.set("initial-render", initialPageSession);
-	initialPageSession.updateOpenServerChannelStatus(true);
-	const prerender = initialPageSession.prerenderContent();
-
-	// Compile client code while userspace is running
-	const clientScripts = await compileBundle("client", serverJSPath, sourcePath, publicPath, minify);
-	const mainScript = clientScripts["/main.js"];
-	if (!mainScript) {
-		throw new Error("Could not find main.js in compiled output!");
+	// Start compiling client
+	let watchFile: (path: string) => void;
+	let compiling = true;
+	let pendingRecompile = false;
+	let host: Host;
+	let mainRoute: StaticFileRoute;
+	let defaultRenderedRoute: StaticFileRoute;
+	let clientScripts: { [path: string]: CompilerOutput };
+	const servers: express.Express[] = [];
+	if (watch) {
+		const watcher = (require("chokidar") as typeof chokidar).watch([]);
+		watchFile = (path: string) => {
+			watcher.add(path);
+		};
+		watchFile(secretsPath);
+		watcher.on("change", async (path) => {
+			try {
+				console.log("File changed, recompiling: " + path);
+				if (compiling) {
+					pendingRecompile = true;
+				} else {
+					try {
+						compiling = true;
+						await recompile();
+						console.log("Reloading existing clients...");
+					} finally {
+						compiling = false;
+					}
+				}
+			} catch (e) {
+				console.error(e);
+			}
+		});
+	} else {
+		watchFile = emptyFunction;
 	}
-	const mainRoute = mainScript.route;
 
-	// Finish with fallback
-	const fallbackRoute = staticFileRoute("/fallback.js", await fallbackContentsAsync);
+	async function loadMainPath() {
+		try {
+			const packagePath = resolvePath(sourcePath, "package.json");
+			watchFile(packagePath);
+			const mainPath = (await readJSON(packagePath)).main;
+			if (typeof mainPath === "string") {
+				return resolvePath(sourcePath, mainPath);
+			}
+		} catch (e) {
+		}
+		const result = Module._findPath("app", [sourcePath]);
+		if (typeof result === "string") {
+			return result;
+		}
+		throw new Error("Could not find app.ts or app.tsx in " + sourcePath);
+	}
+
+	async function recompile() {
+		do {
+			pendingRecompile = false;
+
+			// Start compiling client
+			console.log("Compiling client bundle...");
+			const secretsAsync: Promise<{ [key: string]: any }> = readJSON(secretsPath).catch(() => {});
+			const serverJSPath = await loadMainPath();
+			const clientScriptsAsync = suppressUnhandledRejection(compileBundle("client", watchFile, serverJSPath, sourcePath, publicPath, minify));
+
+			// Start compiling server
+			console.log("Compiling server bundle...");
+			const bundledSource = bundled ? (await compileBundle("server", watchFile, serverJSPath, sourcePath, publicPath))["/main.js"].route.buffer.toString() : undefined;
+			const newHost = new Host(serverJSPath, bundledSource, watchFile, watch, serverModulePaths, modulePaths, sessionsPath, publicPath, await htmlContents, await secretsAsync, allowMultipleClientsPerSession, workers, hostname);
+
+			// Start initial page render
+			console.log("Rendering initial page...");
+			const initialPageSession = newHost.constructSession("");
+			newHost.sessions.set("initial-render", initialPageSession);
+			initialPageSession.updateOpenServerChannelStatus(true);
+			await initialPageSession.prerenderContent();
+
+			// Finish compiling client
+			const newClientScripts = await clientScriptsAsync;
+			const mainScript = newClientScripts["/main.js"];
+			if (!mainScript) {
+				throw new Error("Could not find main.js in compiled output!");
+			}
+			const newMainRoute = mainScript.route;
+			const fallback = await fallbackRouteAsync;
+			const newDefaultRenderedRoute = staticFileRoute("/", await initialPageSession.render({
+				mode: PageRenderMode.Bare,
+				client: { clientID: 0, incomingMessageId: 0 },
+				clientURL: newMainRoute.foreverPath,
+				clientIntegrity: newMainRoute.integrity,
+				fallbackURL: fallback.foreverPath,
+				fallbackIntegrity: fallback.integrity,
+				noScriptURL: "/?js=no",
+				cssBasePath: publicPath,
+				bootstrap: watch ? true : undefined,
+			}));
+			await initialPageSession.destroy();
+			// Publish the new compiled output
+			const oldHost = host;
+			host = newHost;
+			mainRoute = newMainRoute;
+			defaultRenderedRoute = newDefaultRenderedRoute;
+			clientScripts = newClientScripts;
+			for (const server of servers) {
+				registerScriptRoutes(server);
+			}
+			if (oldHost) {
+				await oldHost.destroy();
+			}
+		} while (pendingRecompile);
+	}
+
+	function registerStatic(server: express.Express, route: StaticFileRoute, additionalHeaders: (response: express.Response) => void) {
+		server.get(route.path, async (request: express.Request, response: express.Response) => {
+			if (simulatedLatency) {
+				await delay(simulatedLatency);
+			}
+			if (!checkAndHandleETag(request, response, route.etag)) {
+				response.set("Cache-Control", "max-age=0, must-revalidate, no-transform");
+				additionalHeaders(response);
+				sendCompressed(request, response, route);
+			}
+		});
+		server.get(route.foreverPath, async (request: express.Request, response: express.Response) => {
+			if (simulatedLatency) {
+				await delay(simulatedLatency);
+			}
+			response.set("Cache-Control", "max-age=31536000, no-transform, immutable");
+			response.set("Expires", "Sun, 17 Jan 2038 19:14:07 GMT");
+			additionalHeaders(response);
+			sendCompressed(request, response, route);
+		});
+		if (generate) {
+			(async () => {
+				const foreverPathRelative = route.foreverPath.replace(/^\//, "");
+				const pathRelative = route.path.replace(/^\//, "");
+				const foreverPath = resolvePath(publicPath, foreverPathRelative);
+				if (await exists(foreverPath)) {
+					await unlink(foreverPath);
+				}
+				await writeFile(foreverPath, route.buffer);
+				const path = resolvePath(publicPath, pathRelative);
+				if (await exists(path)) {
+					await unlink(path);
+				}
+				await symlink(foreverPathRelative, path);
+			})();
+		}
+	}
+
+	function registerScriptRoutes(server: express.Express) {
+		for (const fullPath of Object.keys(clientScripts)) {
+			const script = clientScripts[fullPath];
+			const scriptRoute = script.route;
+			if (sourceMaps) {
+				const mapRoute = staticFileRoute(fullPath + ".map", JSON.stringify(script.map));
+				registerStatic(server, scriptRoute, (response) => {
+					response.set("Content-Type", "text/javascript; charset=utf-8");
+					response.set("X-Content-Type-Options", "nosniff");
+					response.set("SourceMap", mapRoute.foreverPath);
+				});
+				registerStatic(server, mapRoute, (response) => {
+					response.set("Content-Type", "application/json; charset=utf-8");
+				});
+			} else {
+				registerStatic(server, scriptRoute, (response) => {
+					response.set("Content-Type", "text/javascript; charset=utf-8");
+					response.set("X-Content-Type-Options", "nosniff");
+				});
+			}
+		}
+	}
+
+	// Compile and run the first instance of the app
+	await recompile();
+	compiling = false;
+
+	// Await remaining assets
 	const fallbackMapContents = await fallbackMapContentsAsync;
-
-	// Finish prerender of initial page
-	await prerender;
-	const defaultRenderedHTML = staticFileRoute("/", await initialPageSession.render({
-		mode: PageRenderMode.Bare,
-		client: { clientID: 0, incomingMessageId: 0 },
-		clientURL: mainRoute.foreverPath,
-		clientIntegrity: mainRoute.integrity,
-		fallbackURL: fallbackRoute.foreverPath,
-		fallbackIntegrity: fallbackRoute.integrity,
-		noScriptURL: "/?js=no",
-		cssBasePath: publicPath,
-	}));
-	await initialPageSession.destroy();
-
+	const gracefulExit = await gracefulExitAsync;
+	const fallbackRoute = await fallbackRouteAsync;
 	return {
 		install(server: express.Express) {
+			servers.push(server);
+
 			server.use(bodyParser.urlencoded({
 				extended: true,
 				type: () => true, // Accept all MIME types
@@ -214,7 +358,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 							if (simulatedLatency) {
 								await delay(simulatedLatency);
 							}
-							return topFrameHTML(request, response, defaultRenderedHTML, defaultRenderedHTML.etag);
+							return topFrameHTML(request, response, defaultRenderedRoute, defaultRenderedRoute.etag);
 						}
 						// New session
 						client = await host.newClient(request);
@@ -282,7 +426,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						await client.receiveFallbackMessage(message, body);
 						if (isJavaScript) {
 							// Wait for events to be ready
-							await client.dequeueEvents();
+							await client.dequeueEvents(false);
 						} else {
 							// Wait for content to be ready
 							await client.session.prerenderContent();
@@ -320,9 +464,13 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						// Dispatch the events contained in the message
 						await client.receiveMessage(message);
 						// Wait for events to be ready
-						const keepGoing = await client.dequeueEvents();
+						const keepGoing = await client.dequeueEvents(watch);
 						// Send the serialized response message back to the client
-						const responseMessage = serializeMessageAsText(client.produceMessage(!keepGoing));
+						const rawResponseMessage = client.produceMessage(!keepGoing);
+						if (compiling) {
+							rawResponseMessage.reload = true;
+						}
+						const responseMessage = serializeMessageAsText(rawResponseMessage);
 						if (simulatedLatency) {
 							await delay(simulatedLatency);
 						}
@@ -380,11 +528,14 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						// Dequeue response messages in a loop until socket is closed
 						while (!processingEvents && !closed) {
 							processingEvents = true;
-							const keepGoing = await client.dequeueEvents();
+							const keepGoing = await client.dequeueEvents(watch);
 							processingEvents = false;
 							if (!closed) {
-								closed = !keepGoing || !(await client.session.hasLocalChannels());
+								closed = !keepGoing || !((await client.session.hasLocalChannels()) || watch);
 								const message = client.produceMessage(closed);
+								if (compiling) {
+									message.reload = true;
+								}
 								if (lastOutgoingMessageId == message.messageID) {
 									delete message.messageID;
 								}
@@ -410,77 +561,20 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				}
 			});
 
-			function registerStatic(route: StaticFileRoute, additionalHeaders: (response: express.Response) => void) {
-				server.get(route.path, async (request: express.Request, response: express.Response) => {
-					if (simulatedLatency) {
-						await delay(simulatedLatency);
-					}
-					if (!checkAndHandleETag(request, response, route.etag)) {
-						response.set("Cache-Control", "max-age=0, must-revalidate, no-transform");
-						additionalHeaders(response);
-						sendCompressed(request, response, route);
-					}
-				});
-				server.get(route.foreverPath, async (request: express.Request, response: express.Response) => {
-					if (simulatedLatency) {
-						await delay(simulatedLatency);
-					}
-					response.set("Cache-Control", "max-age=31536000, no-transform, immutable");
-					response.set("Expires", "Sun, 17 Jan 2038 19:14:07 GMT");
-					additionalHeaders(response);
-					sendCompressed(request, response, route);
-				});
-				if (generate) {
-					(async () => {
-						const foreverPathRelative = route.foreverPath.replace(/^\//, "");
-						const pathRelative = route.path.replace(/^\//, "");
-						const foreverPath = resolvePath(publicPath, foreverPathRelative);
-						if (await exists(foreverPath)) {
-							await unlink(foreverPath);
-						}
-						await writeFile(foreverPath, route.buffer);
-						const path = resolvePath(publicPath, pathRelative);
-						if (await exists(path)) {
-							await unlink(path);
-						}
-						await symlink(foreverPathRelative, path);
-					})();
-				}
-			}
-
-			for (const fullPath of Object.keys(clientScripts)) {
-				const script = clientScripts[fullPath];
-				const scriptRoute = script.route;
-				if (sourceMaps) {
-					const mapRoute = staticFileRoute(fullPath + ".map", script.map.toString());
-					registerStatic(scriptRoute, (response) => {
-						response.set("Content-Type", "text/javascript; charset=utf-8");
-						response.set("X-Content-Type-Options", "nosniff");
-						response.set("SourceMap", mapRoute.foreverPath);
-					});
-					registerStatic(mapRoute, (response) => {
-						response.set("Content-Type", "application/json; charset=utf-8");
-					});
-				} else {
-					registerStatic(scriptRoute, (response) => {
-						response.set("Content-Type", "text/javascript; charset=utf-8");
-						response.set("X-Content-Type-Options", "nosniff");
-					});
-				}
-			}
+			registerScriptRoutes(server);
 
 			if (sourceMaps) {
 				const fallbackMap = staticFileRoute("/fallback.js.map", fallbackMapContents);
-				registerStatic(fallbackRoute, (response) => {
+				registerStatic(server, fallbackRoute, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");
 					response.set("X-Content-Type-Options", "nosniff");
 					response.set("SourceMap", fallbackMap.foreverPath);
 				});
-				registerStatic(fallbackMap, (response) => {
+				registerStatic(server, fallbackMap, (response) => {
 					response.set("Content-Type", "application/json; charset=utf-8");
 				});
 			} else {
-				registerStatic(fallbackRoute, (response) => {
+				registerStatic(server, fallbackRoute, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");
 					response.set("X-Content-Type-Options", "nosniff");
 				});
@@ -488,7 +582,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 		},
 		async stop() {
 			await host.destroy();
-			await writeFile(gracefulPath, "");
+			await gracefulExit();
 		},
 	};
 }
@@ -505,6 +599,7 @@ export default function main() {
 			{ name: "workers", type: Number, defaultValue: cpuCount },
 			{ name: "bundled", type: Boolean, defaultValue: false },
 			{ name: "generate", type: Boolean, defaultValue: false },
+			{ name: "watch", type: Boolean, defaultValue: false },
 			{ name: "hostname", type: String },
 			{ name: "simulated-latency", type: Number, defaultValue: 0 },
 			{ name: "launch", type: Boolean, defaultValue: false },
@@ -591,17 +686,10 @@ export default function main() {
 
 		const basePath = resolvePath(cwd, args.base as string);
 
-		let secrets = {};
-		try {
-			secrets = await readJSON(resolvePath(basePath, "secrets.json"));
-		} catch (e) {
-			/* tslint:disable no-empty */
-		}
 		const publicPath = resolvePath(basePath, "public");
 		const mobius = await prepare({
 			sourcePath: basePath,
 			publicPath,
-			secrets,
 			minify: args.minify as boolean,
 			sourceMaps: args["source-map"] as boolean,
 			hostname: args.hostname as string | undefined,
@@ -609,6 +697,7 @@ export default function main() {
 			simulatedLatency: args["simulated-latency"] as number,
 			bundled: args.bundled as boolean,
 			generate: args.generate as boolean,
+			watch: args.watch as boolean,
 		});
 
 		const expressAsync = require("express") as typeof express;
@@ -659,4 +748,7 @@ export default function main() {
 
 if (require.main === module) {
 	main();
+}
+
+function emptyFunction() {
 }

@@ -6,7 +6,7 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import importBindingForCall from "./importBindingForCall";
 
-export default function(basePath: string) {
+export default function(basePath: string, fileRead: (path: string) => void) {
 	return {
 		visitor: {
 			CallExpression(path: NodePath<CallExpression>) {
@@ -17,7 +17,9 @@ export default function(basePath: string) {
 						if (firstArg.isStringLiteral()) {
 							const value = (firstArg.node as StringLiteral).value;
 							if (!/^\w+:/.test(value)) {
-								const fileContents = readFileSync(resolve(basePath, value));
+								const filePath = resolve(basePath, value);
+								fileRead(filePath);
+								const fileContents = readFileSync(filePath);
 								const hash = createHash("sha256").update(fileContents).digest("base64");
 								path.node.arguments.push(types.stringLiteral("sha256-" + hash));
 							}
