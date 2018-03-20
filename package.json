@@ -71,6 +71,7 @@
     "rollup": "github:rpetrich/rollup#286f87f328ecd9dd1f2fba33fb23e3ead4ca314a",
     "rollup-plugin-babel": "^3.0.3",
     "rollup-plugin-closure-compiler-js": "^1.0.6",
+    "rollup-plugin-commonjs": "^9.1.0",
     "rollup-plugin-includepaths": "^0.2.2",
     "rollup-plugin-typescript2": "github:rpetrich/rollup-plugin-typescript2#469d679a60b768178750aeae56d783c769eccf1d",
     "side-effects-safe": "0.0.1",

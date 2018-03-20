@@ -60,10 +60,10 @@ export const validationModule: VirtualModule = {
 		for (const { name, schema } of buildSchemas(parentSource, program)) {
 			entries.push(` ${JSON.stringify(name)}: validatorForSchema(${JSON.stringify(schema)})`);
 		}
-		return `import * as Ajv;\n` +
+		return `import * as Ajv from "ajv";\n` +
 			`const ajv = new Ajv(${JSON.stringify(ajvConfig)});\n` +
 			`ajv.addMetaSchema(${JSON.stringify(require(draft04Path))});\n` +
-			`function validatorForSchema(schema){\n` +
+			`function validatorForSchema(schema) {\n` +
 				`\tconst compiled = ajv.compile(schema);\n` +
 				`\treturn function(value) {\n` +
 					`\t\treturn !!compiled(value);\n` +

@@ -7,6 +7,7 @@ import { Chunk, Finaliser, getExportBlock, OutputOptions, Plugin, rollup, Source
 import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
+//import _rollupCommonJS from "rollup-plugin-commonjs";
 import { pureBabylon as pure } from "side-effects-safe";
 import { RawSourceMap } from "source-map";
 import * as ts from "typescript";
@@ -16,6 +17,7 @@ import importBindingForCall from "./importBindingForCall";
 import noImpureGetters from "./noImpureGetters";
 import rewriteForInStatements from "./rewriteForInStatements";
 import { staticFileRoute, StaticFileRoute } from "./static-file-route";
+import { validationModule } from "./validation-module";
 import verifyStylePaths from "./verify-style-paths";
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
@@ -172,6 +174,10 @@ function stripUnusedArgumentCopies() {
 	};
 }
 
+const validatorsPathPattern = /\!validators\.d\.ts$/;
+const validatorsJSPathPattern = /\!validators\.js$/;
+const typescriptExtensions = [".ts", ".tsx", ".d.ts"];
+
 export interface CompilerOutput {
 	route: StaticFileRoute;
 	map: RawSourceMap;
@@ -181,6 +187,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
+	const rollupCommonJS = require("rollup-plugin-commonjs");// as typeof _rollupCommonJS;
 	const optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
 	const transformAsyncToPromises = require("babel-plugin-transform-async-to-promises");
 	const externalHelpers = require("babel-plugin-external-helpers");
@@ -197,6 +204,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	} as any;
 	const isClient = profile === "client";
 	const mainPath = packageRelative("client/main.js");
+	let program: ts.Program | undefined;
 	const plugins = [
 		includePaths({
 			include: {
@@ -250,7 +258,37 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			},
 			verbosity: 0,
 			typescript: require("typescript"),
+			programCreated(newProgram: ts.Program) {
+				program = newProgram;
+			},
+			fileExistsHook(path: string) {
+				if (validatorsPathPattern.test(path) || validatorsJSPathPattern.test(path)) {
+					for (const ext of typescriptExtensions) {
+						if (ts.sys.fileExists(path.replace(validatorsPathPattern, ext).replace(validatorsJSPathPattern, ext))) {
+							return true;
+						}
+					}
+				}
+				return false;
+			},
+			readFileHook(path: string) {
+				if (validatorsPathPattern.test(path)) {
+					return validationModule.generateTypeDeclaration(path);
+				}
+				if (program && validatorsJSPathPattern.test(path)) {
+					for (const ext of typescriptExtensions) {
+						const parentPath = path.replace(validatorsJSPathPattern, ext);
+						const sourceFile = program.getSourceFile(parentPath);
+						if (sourceFile) {
+							return validationModule.compileModule(parentPath, sourceFile, program);
+						}
+					}
+				}
+			},
 		}) as any as Plugin,
+		rollupCommonJS({
+			include: ["node_modules/**", packageRelative("node_modules/**")],
+		}) as Plugin,
 		rollupBabel({
 			babelrc: false,
 			presets: isClient ? [env.default(null, { targets: { browsers: ["ie 6"] }, modules: false })] : [],
@@ -386,7 +424,9 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 
 	const bundle = await rollup({
 		input: isClient ? [mainPath] : mainPath,
-		external: profile === "client" ? [] : ["mobius", "_broadcast"],
+		external: (id: string, parentId: string, isResolved: boolean) => {
+			return profile === "server" && (id == "mobius" || id == "_broadcast" || /\!validators$/.test(id));
+		},
 		plugins,
 		acorn: {
 			allowReturnOutsideFunction: true,

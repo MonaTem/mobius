@@ -1,5 +1,6 @@
 import { defaultEventProperties } from "_dom";
 import { registeredListeners } from "_dom";
+import _domValidators from "_dom!validators";
 import { restoreDefaults, stripDefaults } from "_internal";
 import { createClientChannel } from "mobius";
 import { Channel } from "mobius-types";
@@ -42,7 +43,10 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 				}, (send) => {
 					sender = send;
 				}, undefined, name == "input", true);
-				tuple = c[name] = [registeredListeners[channel.channelId] = (event: any) => sender(stripDefaults(event, defaultEventProperties)), listener, channel];
+				tuple = c[name] = [registeredListeners[channel.channelId] = (event: any) => {
+					_domValidators.EventArgs(event);
+					sender(stripDefaults(event, defaultEventProperties));
+				}, listener, channel];
 			}
 			listeners[name] = tuple[0];
 		} else if (Object.hasOwnProperty.call(c, name)) {
