@@ -1,6 +1,10 @@
 import * as Ajv from "ajv";
 import * as ts from "typescript";
 import { getDefaultArgs, JsonSchemaGenerator } from "typescript-json-schema";
+import * as babylon from "babylon";
+import * as babel from "babel-core";
+import { NodePath } from "babel-traverse";
+import { AssignmentExpression, IfStatement, Identifier, VariableDeclaration } from "babel-types";
 import { VirtualModule } from "./virtual-module";
 
 function buildSchemas(sourceFile: ts.SourceFile, program: ts.Program) {
@@ -40,14 +44,44 @@ function buildSchemas(sourceFile: ts.SourceFile, program: ts.Program) {
 }
 
 // Ajv configured to support draft-04 JSON schemas
-const ajvConfig: Ajv.Options = {
+const ajv = new Ajv({
 	meta: false,
 	extendRefs: true,
-	unknownFormats: "ignore",
+	unknownFormats: "ignore"
+});
+ajv.addMetaSchema(require("ajv/lib/refs/json-schema-draft-04.json"));
+
+// Unsafe, but successfully strips out the assignment of validate.errors
+const rewriteAjv = {
+	visitor: {
+		VariableDeclaration(path: NodePath<VariableDeclaration>) {
+			if (path.node.declarations.length === 1) {
+				const identifier = path.node.declarations[0].id as Identifier;
+				if (identifier.name === "err" || identifier.name === "vErrors") {
+					path.remove();
+				}
+			}
+		},
+		IfStatement(path: NodePath<IfStatement>) {
+			const test = path.get("test");
+			if (test.isBinaryExpression()) {
+				const left = test.get("left");
+				if (left.isIdentifier() && (left.node as Identifier).name === "vErrors") {
+					path.remove();
+				}
+			}
+		},
+		AssignmentExpression(path: NodePath<AssignmentExpression>) {
+			const left = path.get("left");
+			if (left.isMemberExpression()) {
+				const object = left.get("object");
+				if (object.isIdentifier() && (object.node as Identifier).name === "validate") {
+					path.remove();
+				}
+			}
+		},
+	},
 };
-const ajv = new Ajv(ajvConfig);
-const draft04Path = "ajv/lib/refs/json-schema-draft-04.json";
-ajv.addMetaSchema(require(draft04Path));
 
 export const validationModule: VirtualModule = {
 	suffix: "validators",
@@ -58,19 +92,12 @@ export const validationModule: VirtualModule = {
 	compileModule(parentPath: string, parentSource: ts.SourceFile, program: ts.Program) {
 		const entries: string[] = [];
 		for (const { name, schema } of buildSchemas(parentSource, program)) {
-			entries.push(` ${JSON.stringify(name)}: validatorForSchema(${JSON.stringify(schema)})`);
+			entries.push(` ${JSON.stringify(name)}: ${ajv.compile(schema).toString()}`);
 		}
-		return `import * as Ajv from "ajv";\n` +
-			`const ajv = new Ajv(${JSON.stringify(ajvConfig)});\n` +
-			`ajv.addMetaSchema(${JSON.stringify(require(draft04Path))});\n` +
-			`function validatorForSchema(schema) {\n` +
-				`\tconst compiled = ajv.compile(schema);\n` +
-				`\treturn function(value) {\n` +
-					`\t\treturn !!compiled(value);\n` +
-				`\t}\n` +
-			`}\n` +
-			`export const validators = {${entries.join(",")} };\n` +
+		const original = `export const validators = {${entries.join(",")} };\n` +
 			`export default validators;\n`;
+		const ast = babylon.parse(original, { sourceType: "module" });
+		return babel.transformFromAst(ast, original, { plugins: [[rewriteAjv, {}]], compact: true }).code!;
 	},
 	instantiateModule(parentPath: string, parentSource: ts.SourceFile, program: ts.Program) {
 		const validators: { [symbol: string]: (value: any) => boolean } = {};

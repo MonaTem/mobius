@@ -7,7 +7,6 @@ import { Chunk, Finaliser, getExportBlock, OutputOptions, Plugin, rollup, Source
 import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
-//import _rollupCommonJS from "rollup-plugin-commonjs";
 import { pureBabylon as pure } from "side-effects-safe";
 import { RawSourceMap } from "source-map";
 import * as ts from "typescript";
@@ -187,7 +186,6 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
-	const rollupCommonJS = require("rollup-plugin-commonjs");// as typeof _rollupCommonJS;
 	const optimizeClosuresInRender = require("babel-plugin-optimize-closures-in-render");
 	const transformAsyncToPromises = require("babel-plugin-transform-async-to-promises");
 	const externalHelpers = require("babel-plugin-external-helpers");
@@ -286,9 +284,6 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				}
 			},
 		}) as any as Plugin,
-		rollupCommonJS({
-			include: ["node_modules/**", packageRelative("node_modules/**")],
-		}) as Plugin,
 		rollupBabel({
 			babelrc: false,
 			presets: isClient ? [env.default(null, { targets: { browsers: ["ie 6"] }, modules: false })] : [],
