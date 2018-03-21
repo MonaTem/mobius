@@ -84,13 +84,13 @@ export function host(content: JSX.Element): void {
 }
 
 export function title(newTitle: string): void {
-	const head = (require("head") as HTMLHeadElement);
+	const head = require("head") as HTMLHeadElement;
 	let element = head.querySelector("title");
 	if (!element) {
 		element = (require("document") as Document).createElement("title");
 		head.appendChild(element);
 	}
-	element.innerText = newTitle;
+	element.textContent = newTitle;
 }
 
 const requestedStyles: { [href: string]: Promise<void> } = {};
