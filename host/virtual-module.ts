@@ -1,9 +1,15 @@
 import * as ts from "typescript";
 import { ServerModuleGlobal } from "./server-compiler";
+import validationModule from "./validation-module";
+
+export type VirtualModuleConstructor = (path: string) => VirtualModule | void;
 
 export interface VirtualModule {
-	readonly suffix: string;
-	generateTypeDeclaration: (parentPath: string) => string;
-	compileModule: (parentPath: string, parentSource: ts.SourceFile, program: ts.Program) => string;
-	instantiateModule: (parentPath: string, parentSource: ts.SourceFile, program: ts.Program) => (global: ServerModuleGlobal) => void;
+	generateTypeDeclaration: () => string;
+	generateModule: (program: ts.Program) => string;
+	instantiateModule: (program: ts.Program) => (global: ServerModuleGlobal) => void;	
+}
+
+export default function(path: string): VirtualModule | void {
+	return validationModule(path);
 }

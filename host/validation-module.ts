@@ -7,7 +7,24 @@ import { NodePath } from "babel-traverse";
 import { AssignmentExpression, IfStatement, Identifier, VariableDeclaration } from "babel-types";
 import { VirtualModule } from "./virtual-module";
 
-function buildSchemas(sourceFile: ts.SourceFile, program: ts.Program) {
+const validatorsPathPattern = /\!validators$/;
+const typescriptExtensions = [".ts", ".tsx", ".d.ts"];
+
+function existingPathForValidatorPath(path: string) {
+	const strippedPath = path.replace(validatorsPathPattern, "");
+	for (const ext of typescriptExtensions) {
+		const newPath = strippedPath + ext;
+		if (ts.sys.fileExists(newPath)) {
+			return newPath;
+		}
+	}
+}
+
+function buildSchemas(path: string, program: ts.Program) {
+	const sourceFile = program.getSourceFile(path);
+	if (!sourceFile) {
+		throw new Error("Could not find types for " + path);
+	}
 	const localNames: string[] = [];
 	const tc = program.getTypeChecker();
 	const allSymbols: { [name: string]: ts.Type } = {};
@@ -83,31 +100,39 @@ const rewriteAjv = {
 	},
 };
 
-export const validationModule: VirtualModule = {
-	suffix: "validators",
-	generateTypeDeclaration() {
-		return `declare const validators: { [symbol: string]: (value: any) => boolean };\n` +
-			`export default validators;\n`;
-	},
-	compileModule(parentPath: string, parentSource: ts.SourceFile, program: ts.Program) {
-		const entries: string[] = [];
-		for (const { name, schema } of buildSchemas(parentSource, program)) {
-			entries.push(` ${JSON.stringify(name)}: ${ajv.compile(schema).toString()}`);
+export default function(path: string) : VirtualModule | void {
+	if (!validatorsPathPattern.test(path)) {
+		return;
+	}
+	const modulePath = existingPathForValidatorPath(path);
+	if (typeof modulePath === "undefined") {
+		return;
+	}
+	return {
+		generateTypeDeclaration() {
+			return `declare const validators: { [symbol: string]: (value: any) => boolean };\n` +
+				`export default validators;\n`;
+		},
+		generateModule(program: ts.Program) {
+			const entries: string[] = [];
+			for (const { name, schema } of buildSchemas(modulePath, program)) {
+				entries.push(` ${JSON.stringify(name)}: ${ajv.compile(schema).toString()}`);
+			}
+			const original = `export const validators = {${entries.join(",")} };\n` +
+				`export default validators;\n`;
+			const ast = babylon.parse(original, { sourceType: "module" });
+			return babel.transformFromAst(ast, original, { plugins: [[rewriteAjv, {}]], compact: true }).code!;
+		},
+		instantiateModule(program: ts.Program) {
+			const validators: { [symbol: string]: (value: any) => boolean } = {};
+			for (const { name, schema } of buildSchemas(modulePath, program)) {
+				const compiled = ajv.compile(schema);
+				validators[name] = (value: any) => !!compiled(value);
+			}
+			return (global) => {
+				global.exports.__esModule = true;
+				global.exports.default = global.exports.validators = validators;
+			};
 		}
-		const original = `export const validators = {${entries.join(",")} };\n` +
-			`export default validators;\n`;
-		const ast = babylon.parse(original, { sourceType: "module" });
-		return babel.transformFromAst(ast, original, { plugins: [[rewriteAjv, {}]], compact: true }).code!;
-	},
-	instantiateModule(parentPath: string, parentSource: ts.SourceFile, program: ts.Program) {
-		const validators: { [symbol: string]: (value: any) => boolean } = {};
-		for (const { name, schema } of buildSchemas(parentSource, program)) {
-			const compiled = ajv.compile(schema);
-			validators[name] = (value: any) => !!compiled(value);
-		}
-		return (global) => {
-			global.exports.__esModule = true;
-			global.exports.default = global.exports.validators = validators;
-		};
-	},
+	};
 };

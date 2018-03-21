@@ -16,7 +16,7 @@ import importBindingForCall from "./importBindingForCall";
 import noImpureGetters from "./noImpureGetters";
 import rewriteForInStatements from "./rewriteForInStatements";
 import { staticFileRoute, StaticFileRoute } from "./static-file-route";
-import { validationModule } from "./validation-module";
+import virtualModule from "./virtual-module";
 import verifyStylePaths from "./verify-style-paths";
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
@@ -173,14 +173,13 @@ function stripUnusedArgumentCopies() {
 	};
 }
 
-const validatorsPathPattern = /\!validators\.d\.ts$/;
-const validatorsJSPathPattern = /\!validators\.js$/;
-const typescriptExtensions = [".ts", ".tsx", ".d.ts"];
-
 export interface CompilerOutput {
 	route: StaticFileRoute;
 	map: RawSourceMap;
 }
+
+const declarationPattern = /\.d\.ts$/;
+const declarationOrJavaScriptPattern = /\.(d\.ts|js)$/;
 
 export default async function(profile: "client" | "server", fileRead: (path: string) => void, input: string, basePath: string, publicPath: string, minify?: boolean): Promise<{ [path: string]: CompilerOutput }> {
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
@@ -260,25 +259,24 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				program = newProgram;
 			},
 			fileExistsHook(path: string) {
-				if (validatorsPathPattern.test(path) || validatorsJSPathPattern.test(path)) {
-					for (const ext of typescriptExtensions) {
-						if (ts.sys.fileExists(path.replace(validatorsPathPattern, ext).replace(validatorsJSPathPattern, ext))) {
-							return true;
-						}
+				if (declarationOrJavaScriptPattern.test(path)) {
+					const module = virtualModule(path.replace(declarationOrJavaScriptPattern, ""));
+					if (module) {
+						return true;
 					}
 				}
 				return false;
 			},
 			readFileHook(path: string) {
-				if (validatorsPathPattern.test(path)) {
-					return validationModule.generateTypeDeclaration(path);
-				}
-				if (program && validatorsJSPathPattern.test(path)) {
-					for (const ext of typescriptExtensions) {
-						const parentPath = path.replace(validatorsJSPathPattern, ext);
-						const sourceFile = program.getSourceFile(parentPath);
-						if (sourceFile) {
-							return validationModule.compileModule(parentPath, sourceFile, program);
+				if (declarationOrJavaScriptPattern.test(path)) {
+					const module = virtualModule(path.replace(declarationOrJavaScriptPattern, ""));
+					if (module) {
+						if (declarationPattern.test(path)) {
+							return module.generateTypeDeclaration();
+						} else {
+							if (program) {
+								return module.generateModule(program);
+							}
 						}
 					}
 				}

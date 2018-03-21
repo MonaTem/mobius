@@ -9,7 +9,7 @@ import memoize from "./memoize";
 import noImpureGetters from "./noImpureGetters";
 import rewriteDynamicImport from "./rewriteDynamicImport";
 import rewriteForInStatements from "./rewriteForInStatements";
-import { validationModule } from "./validation-module";
+import virtualModule from "./virtual-module";
 import verifyStylePaths from "./verify-style-paths";
 
 let convertToCommonJS: any;
@@ -68,8 +68,7 @@ const diagnosticsHost = {
 
 type ModuleInitializer = (global: any) => void;
 
-const validatorsPathPattern = /\!validators\.d\.ts$/;
-const typescriptExtensions = [".ts", ".tsx", ".d.ts"];
+const declarationPattern = /\.d\.ts$/;
 
 export class ServerCompiler {
 	private initializerForCode = memoize(sandbox);
@@ -86,12 +85,15 @@ export class ServerCompiler {
 		this.fileRead = fileRead = memoize(fileRead);
 		this.publicPath = publicPath;
 		const fileNames = [/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), mainFile];
-		function readFile(fileName: string, encoding?: string) {
-			if (validatorsPathPattern.test(fileName)) {
-				return validationModule.generateTypeDeclaration(fileName);
+		function readFile(path: string, encoding?: string) {
+			if (declarationPattern.test(path)) {
+				const module = virtualModule(path.replace(declarationPattern, ""));
+				if (module) {
+					return module.generateTypeDeclaration();
+				}
 			}
-			fileRead(fileName);
-			return ts.sys.readFile(fileName, encoding);
+			fileRead(path);
+			return ts.sys.readFile(path, encoding);
 		}
 		this.host = {
 			getScriptFileNames() {
@@ -117,17 +119,13 @@ export class ServerCompiler {
 				return ts.getDefaultLibFilePath(options);
 			},
 			readFile,
-			fileExists(fileName: string) {
-				const result = ts.sys.fileExists(fileName);
+			fileExists(path: string) {
+				const result = ts.sys.fileExists(path);
 				if (result) {
 					return result;
 				}
-				if (validatorsPathPattern.test(fileName)) {
-					for (const ext of typescriptExtensions) {
-						if (ts.sys.fileExists(fileName.replace(validatorsPathPattern, ext))) {
-							return true;
-						}
-					}
+				if (declarationPattern.test(path) && virtualModule(path.replace(declarationPattern, ""))) {
+					return true;
 				}
 				return false;
 			},
@@ -176,15 +174,12 @@ export class ServerCompiler {
 		if (this.initializersForPaths.has(path)) {
 			return this.initializersForPaths.get(path);
 		}
-		if (validatorsPathPattern.test(path)) {
-			for (const ext of typescriptExtensions) {
-				const parentModulePath = path.replace(validatorsPathPattern, ext);
-				const parentSourceFile = this.program.getSourceFile(parentModulePath);
-				if (parentSourceFile) {
-					const validatorResult = validationModule.instantiateModule(parentModulePath, parentSourceFile, this.program);
-					this.initializersForPaths.set(path, validatorResult);
-					return validatorResult;
-				}
+		if (declarationPattern.test(path)) {
+			const module = virtualModule(path.replace(declarationPattern, ""));
+			if (module) {
+				const instantiate = module.instantiateModule(this.program);
+				this.initializersForPaths.set(path, instantiate);
+				return instantiate;
 			}
 		}
 		let scriptContents: string | undefined;
