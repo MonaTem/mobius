@@ -56,7 +56,7 @@
     "chokidar": "^2.0.2",
     "command-line-args": "^4.0.7",
     "command-line-usage": "^4.1.0",
-    "css": "^2.2.1",
+    "css": "github:rpetrich/css#4beb7420a09620a23b37b0229590239ef67c46d8",
     "diff-match-patch-node": "^0.9.1",
     "etag": "^1.8.1",
     "express": "^4.16.3",
