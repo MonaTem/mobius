@@ -1,6 +1,5 @@
 import { defaultEventProperties } from "_dom";
 import { registeredListeners } from "_dom";
-import _domValidators from "_dom!validators";
 import { restoreDefaults, stripDefaults } from "_internal";
 import { createClientChannel } from "mobius";
 import { Channel } from "mobius-types";
