@@ -23,7 +23,7 @@ export default async function init(basePath: string) {
 		const result = await promisify(require("init-package-json"))(basePath, path.resolve(process.env.HOME || "~", ".npm-init"));
 		const mainPath = path.resolve(basePath, result.main);
 		if (!await exists(mainPath)) {
-			await writeFile(mainPath, `import * as dom from "dom";\n//import { query } from "sql";\n//import { send, receive } from "broadcast";\n\ndom.host(<div>Hello World!</div>);\ndom.style("style.css");\n`);
+			await writeFile(mainPath, `import * as dom from "dom";\nimport { content } from "./style.css";\n//import { query } from "sql";\n//import { send, receive } from "broadcast";\n\ndom.host(<div class={content}>Hello World!</div>);\n`);
 		}
 		const gitIgnorePath = path.resolve(basePath, ".gitignore");
 		if (!await exists(gitIgnorePath)) {
@@ -33,9 +33,9 @@ export default async function init(basePath: string) {
 		if (!await exists(publicPath)) {
 			await mkdir(publicPath);
 		}
-		const stylePath = path.resolve(publicPath, "style.css");
+		const stylePath = path.resolve(basePath, "style.css");
 		if (!await exists(stylePath)) {
-			await writeFile(stylePath, `/* Insert styles here */\n`);
+			await writeFile(stylePath, `.content {\n}\n`);
 		}
 	} catch (e) {
 		if (e instanceof Error && e.message === "canceled") {
