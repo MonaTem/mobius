@@ -8,6 +8,7 @@ import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
 import { pureBabylon as pure } from "side-effects-safe";
+import { parse as parseCSS, stringify as stringifyCSS } from "css";
 import { RawSourceMap } from "source-map";
 import * as ts from "typescript";
 import addSubresourceIntegrity from "./addSubresourceIntegrity";
@@ -371,6 +372,9 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			}
 			let cssRoute: StaticFileRoute | undefined;
 			if (css) {
+				if (minify) {
+					css = stringifyCSS(parseCSS(css), { compress: true });
+				}
 				cssRoute = staticFileRoute(cssModuleName.substr(1), css);
 				if (!isMain) {
 					routeIndexes.push(cssModuleName);
