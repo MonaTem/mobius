@@ -163,7 +163,7 @@ export class PageRenderer {
 		}
 		this.clientScript.src = clientURL;
 		this.clientScript.setAttribute("integrity", clientIntegrity);
-		this.fallbackScript.textContent = `window._mobius||document.write('<script integrity="${fallbackIntegrity}" src="${fallbackURL}"><\\/script>')`;
+		this.fallbackScript.textContent = `window._mobius||(function(s){s.src=${JSON.stringify(fallbackURL)};s.setAttribute("integrity",${JSON.stringify(fallbackIntegrity)});document.head.appendChild(s)})(document.createElement("script"))`;
 		if (noScriptURL) {
 			this.metaRedirect.setAttribute("content", "0; url=" + noScriptURL);
 			this.head.appendChild(this.noscript);
