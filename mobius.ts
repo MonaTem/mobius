@@ -395,7 +395,11 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 					// Render the DOM into HTML source with bootstrap data applied
 					const html = await session.render({
 						mode: PageRenderMode.IncludeForm,
-						client,
+						client: {
+							clientID: client.clientID,
+							incomingMessageId: client.incomingMessageId,
+							queuedLocalEvents: client.queuedLocalEvents,
+						},
 						clientURL: mainRoute.foreverPath,
 						clientIntegrity: mainRoute.integrity,
 						fallbackURL: fallbackRoute.foreverPath,
