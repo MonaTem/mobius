@@ -27,13 +27,10 @@ import { Channel, JsonValue } from "mobius-types";
  * SOFTWARE.
  */
 if (top != self) {
-	document.documentElement.innerHTML = "";
-	throw new Error("Not allowed to load as an iframe!");
-}
-
-if (/\bMSIE [1-8]\b/.test(navigator.userAgent) || !window.addEventListener || typeof JSON == "undefined") {
+	document.open();
+	document.close();
 insufficient_browser_throw:
-	throw new Error("Insufficient browser support. Falling back to server-side rendering...");
+	throw new Error("Not allowed to load as an iframe!");
 }
 
 if (history.replaceState) {
@@ -1164,33 +1161,58 @@ const modules: { [name: string]: any } = {};
 const moduleResolve: { [name: string]: [(value: any) => void, boolean] } = {};
 
 const moduleMappings: { [name: string]: [string, string] } = _import as any;
-_import = (moduleName: string | Promise<any>) => {
-	if (typeof moduleName == "object") {
+_import = (moduleNameOrPromise: string | Promise<any>) => {
+	if (typeof moduleNameOrPromise == "object") {
 		loadingModules++;
 		function finished() {
 			loadingModules--;
 		}
-		return moduleName.then(finished, finished);
+		return moduleNameOrPromise.then(finished, finished);
 	}
+	const moduleName = moduleNameOrPromise;
 	if (Object.hasOwnProperty.call(modules, moduleName)) {
 		return Promise.resolve(modules[moduleName]);
 	}
 	return modules[moduleName] = new Promise((resolve, reject) => {
-		const element = document.createElement("script");
-		element.onerror = () => {
+		function onError() {
 			delete moduleResolve[moduleName];
 			disconnect();
 			reject(new Error("Unable to load bundle!"));
-		};
+		}
 		const mapping = moduleMappings[moduleName];
+		let integrity: string | undefined;
+		let src = moduleName;
 		if (mapping) {
-			element.src = mapping[0];
-			element.setAttribute("integrity", mapping[1]);
+			src = mapping[0];
+			integrity = mapping[1];
+		}
+		let element;
+		if (/\.css$/.test(src)) {
+			element = document.createElement("link");
+			element.rel = "stylesheet";
+			element.href = src;
+			if ("onload" in element) {
+				const wasInsideCallback = insideCallback;
+				element.onload = () => {
+					if (wasInsideCallback) {
+						willEnterCallback();
+						loadingModules--;
+					}
+					resolve();
+				};
+			} else {
+				resolve();
+			}
 		} else {
-			element.src = moduleName;
+			element = document.createElement("script");
+			element.src = src;
+			moduleResolve[moduleName] = [resolve, insideCallback];
+		}
+		element.onerror = onError;
+		if (integrity) {
+			element.setAttribute("integrity", mapping[1]);
 		}
 		document.head.appendChild(element);
-		moduleResolve[moduleName] = [resolve, insideCallback];
 		if (insideCallback) {
 			loadingModules++;
 		}

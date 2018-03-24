@@ -129,9 +129,13 @@ export default function(path: string) : VirtualModule | void {
 				const compiled = ajv.compile(schema);
 				validators[name] = (value: any) => !!compiled(value);
 			}
+			const exports = {
+				__esModule: true,
+				default: validators,
+				validators,
+			};
 			return (global) => {
-				global.exports.__esModule = true;
-				global.exports.default = global.exports.validators = validators;
+				global.exports = exports;
 			};
 		}
 	};

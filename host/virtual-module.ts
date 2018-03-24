@@ -1,15 +1,19 @@
 import * as ts from "typescript";
 import { ServerModuleGlobal } from "./server-compiler";
 import validationModule from "./validation-module";
+import cssModule from "./css-module";
+
+export type ModuleMap = { [modulePath: string]: string };
+export type StaticAssets = { [path: string]: { contents: string; integrity: string; } };
 
 export type VirtualModuleConstructor = (path: string) => VirtualModule | void;
 
 export interface VirtualModule {
 	generateTypeDeclaration: () => string;
 	generateModule: (program: ts.Program) => string;
-	instantiateModule: (program: ts.Program) => (global: ServerModuleGlobal) => void;	
+	instantiateModule: (program: ts.Program, moduleMap: ModuleMap, staticAssets: StaticAssets) => (global: ServerModuleGlobal) => void;
 }
 
 export default function(path: string): VirtualModule | void {
-	return validationModule(path);
+	return validationModule(path) || cssModule(path);
 }

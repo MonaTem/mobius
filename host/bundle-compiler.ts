@@ -16,8 +16,7 @@ import importBindingForCall from "./importBindingForCall";
 import noImpureGetters from "./noImpureGetters";
 import rewriteForInStatements from "./rewriteForInStatements";
 import { staticFileRoute, StaticFileRoute } from "./static-file-route";
-import virtualModule from "./virtual-module";
-import verifyStylePaths from "./verify-style-paths";
+import virtualModule, { ModuleMap } from "./virtual-module";
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
 interface RedactedExportData { [exportName: string]: Array<boolean | undefined>; }
@@ -173,15 +172,20 @@ function stripUnusedArgumentCopies() {
 	};
 }
 
-export interface CompilerOutput {
+export interface CompiledRoute {
 	route: StaticFileRoute;
-	map: RawSourceMap;
+	map?: RawSourceMap;
+}
+
+export interface CompilerOutput {
+	routes: { [path: string]: CompiledRoute };
+	moduleMap: ModuleMap;
 }
 
 const declarationPattern = /\.d\.ts$/;
 const declarationOrJavaScriptPattern = /\.(d\.ts|js)$/;
 
-export default async function(profile: "client" | "server", fileRead: (path: string) => void, input: string, basePath: string, publicPath: string, minify?: boolean): Promise<{ [path: string]: CompilerOutput }> {
+export default async function(profile: "client" | "server", fileRead: (path: string) => void, input: string, basePath: string, publicPath: string, minify?: boolean): Promise<CompilerOutput> {
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
@@ -211,8 +215,8 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 		rollupTypeScript({
 			cacheRoot: resolve(basePath, ".cache"),
 			include: [
-				resolve(basePath, "**/*.+(ts|tsx|js|jsx)"),
-				packageRelative("**/*.+(ts|tsx|js|jsx)"),
+				resolve(basePath, "**/*.+(ts|tsx|js|jsx|css)"),
+				packageRelative("**/*.+(ts|tsx|js|jsx|css)"),
 			] as any,
 			exclude: [
 				resolve(basePath, "node_modules/babel-plugin-transform-async-to-promises/*"),
@@ -259,24 +263,20 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				program = newProgram;
 			},
 			fileExistsHook(path: string) {
-				if (declarationOrJavaScriptPattern.test(path)) {
-					const module = virtualModule(path.replace(declarationOrJavaScriptPattern, ""));
-					if (module) {
-						return true;
-					}
+				const module = virtualModule(path.replace(declarationOrJavaScriptPattern, ""));
+				if (module) {
+					return true;
 				}
 				return false;
 			},
 			readFileHook(path: string) {
-				if (declarationOrJavaScriptPattern.test(path)) {
-					const module = virtualModule(path.replace(declarationOrJavaScriptPattern, ""));
-					if (module) {
-						if (declarationPattern.test(path)) {
-							return module.generateTypeDeclaration();
-						} else {
-							if (program) {
-								return module.generateModule(program);
-							}
+				const module = virtualModule(path.replace(declarationOrJavaScriptPattern, ""));
+				if (module) {
+					if (declarationPattern.test(path)) {
+						return module.generateTypeDeclaration();
+					} else {
+						if (program) {
+							return module.generateModule(program);
 						}
 					}
 				}
@@ -292,7 +292,6 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				optimizeClosuresInRender(babel),
 				addSubresourceIntegrity(publicPath, fileRead),
 				stripRedact(),
-				verifyStylePaths(publicPath),
 				rewriteForInStatements(),
 				fixTypeScriptExtendsWarning(),
 				noImpureGetters(),
@@ -304,7 +303,6 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				[transformAsyncToPromises(babel), { externalHelpers: true }],
 				optimizeClosuresInRender(babel),
 				addSubresourceIntegrity(publicPath, fileRead),
-				verifyStylePaths(publicPath),
 				rewriteForInStatements(),
 				noImpureGetters(),
 			],
@@ -320,17 +318,18 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	}
 
 	const mainChunkId = "./main.js";
-	const output: { [path: string]: CompilerOutput } = {};
+	const routes: { [path: string]: CompiledRoute } = {};
+	const moduleMap: ModuleMap = {};
 	const routeIndexes: string[] = [];
 	plugins.push({
-		name: "mobius-hash-collector",
+		name: "mobius-output-collector",
 		transform(code, id) {
 			fileRead(id.toString());
 			return Promise.resolve();
 		},
 		ongenerate(options: OutputOptions, source: SourceDescription) {
 			const path = ((options as any).bundle.name as string);
-			output[path.substr(1)] = {
+			routes[path.substr(1)] = {
 				route: staticFileRoute(minify && path != mainChunkId ? "/" + routeIndexes.indexOf(path).toString(36) + ".js" : path.substr(1), source.code),
 				map: source.map!,
 			};
@@ -358,6 +357,32 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			options: OutputOptions,
 		) {
 			const isMain = chunk.id === mainChunkId;
+
+			// CSS
+			const original = magicString.toString();
+			const cssModuleName = chunk.id.replace(/(\.js)?$/, ".css");
+			const cssSourcePattern = /\/\*css\-start\:(.*)\n([\s\S]*?)\:css\-end\*\//g;
+			let exec: RegExpExecArray | null;
+			let css = "";
+			const bundledCssModulePaths: string[] = [];
+			while (exec = cssSourcePattern.exec(original)) {
+				bundledCssModulePaths.push(exec[1]);
+				css += exec[2];
+			}
+			let cssRoute: StaticFileRoute | undefined;
+			if (css) {
+				cssRoute = staticFileRoute(cssModuleName.substr(1), css);
+				if (!isMain) {
+					routeIndexes.push(cssModuleName);
+				}
+				for (const bundledModuleName of bundledCssModulePaths) {
+					moduleMap[bundledModuleName] = cssRoute.foreverPath;
+				}
+				routes[cssModuleName.substr(1)] = {
+					route: cssRoute,
+				};
+			}
+
 			const { dependencies, exports } = chunk.getModuleDeclarations();
 
 			const mainIndex = dependencies.findIndex((m) => m.id === mainChunkId);
@@ -366,13 +391,18 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				mainIdentifier = dependencies[mainIndex].name;
 				dependencies.splice(mainIndex, 1);
 			}
-			const deps = dependencies.map((m) => minify ? routeIndexes.indexOf(m.id).toString() : JSON.stringify(getPath(m.id)));
+			const deps = dependencies.map((m) => m.id).concat(cssRoute ? [cssModuleName] : []).map((id) => minify ? routeIndexes.indexOf(id).toString() : JSON.stringify(getPath(id)));
 			const args = dependencies.map((m) => m.name);
 			if (args.length || mainIndex !== -1) {
 				args.unshift(mainIdentifier);
 			}
 			args.unshift("_import");
 			args.unshift("exports");
+
+			const compatibilityCheck = `if (!window.addEventListener || !Object.keys || typeof JSON == "undefined") return;`
+			if (isMain && !cssRoute) {
+				magicString.prepend(compatibilityCheck);
+			}
 
 			const exportBlock = getExportBlock(exports, dependencies, exportMode);
 			magicString.prepend(`function(${args.join(", ")}) {\n`);
@@ -382,12 +412,28 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			magicString.append("\n}", {});
 
 			if (isMain) {
-				magicString.prepend("(");
-				let imports: any;
+				if (cssRoute) {
+					magicString.prepend(
+						`(function(link,main,exports,imports){` +
+							compatibilityCheck +
+							`link.rel="stylesheet";` +
+							`link.href=${JSON.stringify(cssRoute.foreverPath)};` +
+							`link.setAttribute("integrity",${JSON.stringify(cssRoute.integrity)});` +
+							`if("onload" in link)` +
+								`link.onload=function(){main(exports,imports)};` +
+							`else ` +
+								`main(exports,imports);` +
+							`document.head.appendChild(link);` +
+							`_mobius=1` +
+						`})(document.createElement("link"), `);
+				} else {
+					magicString.prepend(`(`);
+				}
 				function loadDataForModuleWithName(name: string): [string, string] {
-					const route = output[name.substr(1)].route;
+					const route = routes[name.substr(1)].route;
 					return [route.foreverPath, route.integrity];
 				}
+				let imports: any;
 				if (minify) {
 					const importsArray = routeIndexes.map(loadDataForModuleWithName);
 					imports = importsArray;
@@ -396,7 +442,12 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 					routeIndexes.forEach((path) => importsObject[path] = loadDataForModuleWithName(path));
 					imports = importsObject;
 				}
-				magicString.append(`)({}, ${JSON.stringify(imports)})`, {});
+				if (cssRoute) {
+					magicString.append(`, `, {});
+				} else {
+					magicString.append(`)(`, {});
+				}
+				magicString.append(`{}, ${JSON.stringify(imports)})`, {});
 			} else {
 				magicString.prepend("_mobius(");
 				magicString.append(["", minify ? routeIndexes.indexOf(chunk.id).toString() : JSON.stringify(chunk.id)].concat(deps).join(", ") + ")", {});
@@ -446,5 +497,8 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	});
 	// Cleanup some of the mess we made
 	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;
-	return output;
+	return {
+		routes,
+		moduleMap
+	};
 }

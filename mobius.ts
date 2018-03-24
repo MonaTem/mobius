@@ -21,7 +21,7 @@ import { exists, mkdir, packageRelative, readFile, readJSON, rimraf, stat, symli
 import { Host } from "./host/host";
 import { PageRenderMode } from "./host/page-renderer";
 import { Session } from "./host/session";
-import { brotlied, gzipped, StaticFileRoute, staticFileRoute } from "./host/static-file-route";
+import { stringFromRoute, brotliedBufferFromRoute, gzippedBufferFromRoute, StaticFileRoute, staticFileRoute } from "./host/static-file-route";
 
 import { ClientMessage, deserializeMessageFromText, serializeMessageAsText } from "./common/_internal";
 
@@ -53,10 +53,10 @@ function sendCompressed(request: express.Request, response: express.Response, ro
 	const encodings = accepts(request).encodings();
 	if (encodings.indexOf("br") !== -1) {
 		response.set("Content-Encoding", "br");
-		response.send(brotlied(route));
+		response.send(brotliedBufferFromRoute(route));
 	} else if (encodings.indexOf("gzip") !== -1) {
 		response.set("Content-Encoding", "gzip");
-		response.send(gzipped(route));
+		response.send(gzippedBufferFromRoute(route));
 	} else {
 		response.send(route.buffer);
 	}
@@ -125,7 +125,7 @@ async function validateSessionsAndPrepareGracefulExit(sessionsPath: string) {
 	} catch (e) {
 		/* tslint:disable no-empty */
 	}
-	// if (lastGraceful < (await stat(serverJSPath)).mtimeMs) {
+	// if (lastGraceful < (await stat(mainPath)).mtimeMs) {
 	if (lastGraceful < 1) {
 		await rimraf(sessionsPath);
 		await mkdir(sessionsPath);
@@ -160,7 +160,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	let host: Host;
 	let mainRoute: StaticFileRoute;
 	let defaultRenderedRoute: StaticFileRoute;
-	let clientScripts: { [path: string]: CompilerOutput };
+	let compilerOutput: CompilerOutput;
 	const servers: express.Express[] = [];
 	if (watch) {
 		const watcher = (require("chokidar") as typeof chokidar).watch([]);
@@ -214,13 +214,40 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 			// Start compiling client
 			console.log("Compiling client bundle...");
 			const secretsAsync: Promise<{ [key: string]: any }> = readJSON(secretsPath).catch(() => {});
-			const serverJSPath = await loadMainPath();
-			const clientScriptsAsync = suppressUnhandledRejection(compileBundle("client", watchFile, serverJSPath, sourcePath, publicPath, minify));
+			const mainPath = await loadMainPath();
+			const newCompilerOutput = await compileBundle("client", watchFile, mainPath, sourcePath, publicPath, minify);
+			const mainScript = newCompilerOutput.routes["/main.js"];
+			if (!mainScript) {
+				throw new Error("Could not find main.js in compiled output!");
+			}
+			const staticAssets: { [path: string]: { contents: string; integrity: string; } } = {};
+			for (const assetPath of Object.keys(newCompilerOutput.routes)) {
+				const route = newCompilerOutput.routes[assetPath].route;
+				staticAssets[route.foreverPath] = {
+					contents: stringFromRoute(route),
+					integrity: route.integrity,
+				};
+			}
 
 			// Start compiling server
 			console.log("Compiling server bundle...");
-			const bundledSource = bundled ? (await compileBundle("server", watchFile, serverJSPath, sourcePath, publicPath))["/main.js"].route.buffer.toString() : undefined;
-			const newHost = new Host(serverJSPath, bundledSource, watchFile, watch, serverModulePaths, modulePaths, sessionsPath, publicPath, await htmlContents, await secretsAsync, allowMultipleClientsPerSession, workers, hostname);
+			const newHost = new Host({
+				mainPath,
+				bakedSource: bundled ? (await compileBundle("server", watchFile, mainPath, sourcePath, publicPath)).routes["/main.js"].route.buffer.toString() : undefined,
+				fileRead: watchFile,
+				watch,
+				serverModulePaths,
+				modulePaths,
+				sessionsPath,
+				publicPath,
+				htmlSource: await htmlContents,
+				secrets: await secretsAsync,
+				allowMultipleClientsPerSession,
+				workerCount: workers,
+				hostname,
+				moduleMap: newCompilerOutput.moduleMap,
+				staticAssets,
+			});
 
 			// Start initial page render
 			console.log("Rendering initial page...");
@@ -229,12 +256,6 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 			initialPageSession.updateOpenServerChannelStatus(true);
 			await initialPageSession.prerenderContent();
 
-			// Finish compiling client
-			const newClientScripts = await clientScriptsAsync;
-			const mainScript = newClientScripts["/main.js"];
-			if (!mainScript) {
-				throw new Error("Could not find main.js in compiled output!");
-			}
 			const newMainRoute = mainScript.route;
 			const fallback = await fallbackRouteAsync;
 			const newDefaultRenderedRoute = staticFileRoute("/", await initialPageSession.render({
@@ -245,7 +266,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				fallbackURL: fallback.foreverPath,
 				fallbackIntegrity: fallback.integrity,
 				noScriptURL: "/?js=no",
-				cssBasePath: publicPath,
+				inlineCSS: true,
 				bootstrap: watch ? true : undefined,
 			}));
 			await initialPageSession.destroy();
@@ -254,7 +275,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 			host = newHost;
 			mainRoute = newMainRoute;
 			defaultRenderedRoute = newDefaultRenderedRoute;
-			clientScripts = newClientScripts;
+			compilerOutput = newCompilerOutput;
 			for (const server of servers) {
 				registerScriptRoutes(server);
 			}
@@ -303,13 +324,15 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	}
 
 	function registerScriptRoutes(server: express.Express) {
-		for (const fullPath of Object.keys(clientScripts)) {
-			const script = clientScripts[fullPath];
+		for (const fullPath of Object.keys(compilerOutput.routes)) {
+			const script = compilerOutput.routes[fullPath];
 			const scriptRoute = script.route;
-			if (sourceMaps) {
-				const mapRoute = staticFileRoute(fullPath + ".map", JSON.stringify(script.map));
+			const contentType = /\.css$/.test(fullPath) ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8";
+			const map = script.map;
+			if (map && sourceMaps) {
+				const mapRoute = staticFileRoute(fullPath + ".map", JSON.stringify(map));
 				registerStatic(server, scriptRoute, (response) => {
-					response.set("Content-Type", "text/javascript; charset=utf-8");
+					response.set("Content-Type", contentType);
 					response.set("X-Content-Type-Options", "nosniff");
 					response.set("SourceMap", mapRoute.foreverPath);
 				});
@@ -318,7 +341,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				});
 			} else {
 				registerStatic(server, scriptRoute, (response) => {
-					response.set("Content-Type", "text/javascript; charset=utf-8");
+					response.set("Content-Type", contentType);
 					response.set("X-Content-Type-Options", "nosniff");
 				});
 			}
@@ -377,7 +400,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						fallbackURL: fallbackRoute.foreverPath,
 						fallbackIntegrity: fallbackRoute.integrity,
 						bootstrap: true,
-						cssBasePath: publicPath,
+						inlineCSS: true,
 					});
 					client.incomingMessageId++;
 					client.applyCookies(response);

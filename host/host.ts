@@ -2,6 +2,7 @@ import { escape } from "./event-loop";
 import { exists } from "./fileUtils";
 import { createSessionGroup, Session } from "./session";
 import { archivePathForSessionId, HostSandboxOptions } from "./session-sandbox";
+import { ModuleMap, StaticAssets } from "./virtual-module";
 
 import { ClientMessage } from "../common/_internal";
 
@@ -11,13 +12,47 @@ import { Request } from "express";
 
 import * as uuid from "uuid/v4";
 
+interface HostConfig {
+	mainPath: string;
+	bakedSource: string | undefined;
+	fileRead: (path: string) => void;
+	watch: boolean;
+	serverModulePaths: string[];
+	modulePaths: string[];
+	sessionsPath: string;
+	publicPath: string;
+	htmlSource: string;
+	secrets: JsonValue;
+	allowMultipleClientsPerSession: boolean;
+	workerCount: number;
+	hostname: string | undefined;
+	moduleMap: ModuleMap;
+	staticAssets: StaticAssets;
+}
+
 export class Host {
 	public sessions = new Map<string, Session>();
 	public destroying: boolean = false;
 	public options: HostSandboxOptions;
 	public staleSessionTimeout: any;
 	public constructSession: (sessionID: string, request?: Request) => Session;
-	constructor(mainPath: string, bakedSource: string | undefined, fileRead: (path: string) => void, watch: boolean, serverModulePaths: string[], modulePaths: string[], sessionsPath: string, publicPath: string, htmlSource: string, secrets: JsonValue, allowMultipleClientsPerSession: boolean, workerCount: number, hostname?: string) {
+	constructor({
+		mainPath,
+		bakedSource,
+		fileRead,
+		watch,
+		serverModulePaths,
+		modulePaths,
+		sessionsPath,
+		publicPath,
+		htmlSource,
+		secrets,
+		allowMultipleClientsPerSession,
+		workerCount,
+		hostname,
+		moduleMap,
+		staticAssets,
+	}: HostConfig) {
 		this.destroying = false;
 		this.constructSession = createSessionGroup(this.options = {
 			htmlSource,
@@ -31,6 +66,8 @@ export class Host {
 			watch,
 			hostname,
 			source : typeof bakedSource !== "undefined" ? { from: "string", code: bakedSource, path: mainPath } : { from: "file", path: mainPath },
+			moduleMap,
+			staticAssets,
 		}, fileRead, this.sessions, workerCount);
 		// Session timeout
 		this.staleSessionTimeout = setInterval(() => {

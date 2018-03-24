@@ -92,19 +92,3 @@ export function title(newTitle: string): void {
 	}
 	element.textContent = newTitle;
 }
-
-const requestedStyles: { [href: string]: Promise<void> } = {};
-
-export function style(href: string, subresourceIntegrity?: string): Promise<void> {
-	return requestedStyles[href] || (requestedStyles[href] = new Promise<void>((resolve) => {
-		const link = (require("document") as Document).createElement("link");
-		link.rel = "stylesheet";
-		link.href = href;
-		if (subresourceIntegrity) {
-			link.setAttribute("integrity", subresourceIntegrity);
-		}
-		const body = (require("body") as HTMLBodyElement);
-		body.insertBefore(link, body.lastElementChild && body.lastElementChild.previousElementSibling);
-		resolve();
-	}));
-}

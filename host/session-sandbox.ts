@@ -2,6 +2,8 @@ import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
 import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
 import { ModuleSource, ServerCompiler, ServerModule } from "./server-compiler";
+import { ModuleMap } from "./virtual-module";
+import memoize from "./memoize";
 
 import * as mobiusModule from "mobius";
 import { Channel, JsonValue } from "mobius-types";
@@ -13,8 +15,10 @@ import { FakedGlobals, interceptGlobals } from "../common/determinism";
 import { JSDOM } from "jsdom";
 import patchJSDOM from "./jsdom-patch";
 
+import { parse as parseCSS, Rule } from "css";
+
 import { createWriteStream } from "fs";
-import { join as pathJoin } from "path";
+import { join as pathJoin, resolve as pathResolve } from "path";
 
 export interface HostSandboxOptions {
 	htmlSource: string;
@@ -28,6 +32,8 @@ export interface HostSandboxOptions {
 	sessionsPath: string;
 	watch: boolean;
 	hostname?: string;
+	moduleMap: ModuleMap;
+	staticAssets: { [path: string]: { contents: string; integrity: string; } };
 }
 
 export function archivePathForSessionId(sessionsPath: string, sessionID: string) {
@@ -40,9 +46,9 @@ export class HostSandbox {
 	public document: Document;
 	public noscript: Element;
 	public metaRedirect: Element;
-	public broadcastModule: typeof BroadcastModule;
 	public serverCompiler: ServerCompiler;
-	constructor(options: HostSandboxOptions, fileRead: (path: string) => void, broadcastModule: typeof BroadcastModule) {
+	public rulesForCSSAtPath: (path: string) => Promise<Rule[]>;
+	constructor(options: HostSandboxOptions, fileRead: (path: string) => void, public broadcastModule: typeof BroadcastModule) {
 		this.options = options;
 		this.dom = new (require("jsdom").JSDOM)(options.htmlSource) as JSDOM;
 		this.document = (this.dom.window as Window).document as Document;
@@ -51,8 +57,13 @@ export class HostSandbox {
 		this.metaRedirect = this.document.createElement("meta");
 		this.metaRedirect.setAttribute("http-equiv", "refresh");
 		this.noscript.appendChild(this.metaRedirect);
-		this.serverCompiler = new ServerCompiler(options.mainPath, options.publicPath, fileRead);
+		this.serverCompiler = new ServerCompiler(options.mainPath, options.publicPath, options.moduleMap, options.staticAssets, fileRead);
 		this.broadcastModule = broadcastModule;
+		this.rulesForCSSAtPath = memoize(async (path: string): Promise<Rule[]> => {
+			const cssText = path in options.staticAssets ? options.staticAssets[path].contents : (await readFile(pathResolve(options.publicPath, path.replace(/^\/+/, "")))).toString();
+			const css = parseCSS(cssText);
+			return (css.stylesheet!.rules as Rule[] | undefined) || [];
+		});
 	}
 }
 
@@ -123,8 +134,8 @@ export interface RenderOptions {
 	fallbackIntegrity: string;
 	noScriptURL?: string;
 	bootstrap?: true;
-	cssBasePath?: string;
 	connect?: true;
+	inlineCSS?: true;
 }
 
 export interface SessionSandbox {
@@ -180,7 +191,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		this.host = host;
 		this.client = client;
 		this.sessionID = sessionID;
-		this.pageRenderer = new PageRenderer(host.dom, host.noscript, host.metaRedirect);
+		this.pageRenderer = new PageRenderer(host.dom, host.noscript, host.metaRedirect, host.rulesForCSSAtPath);
 		// Server-side version of the API
 		this.mobius = {
 			disconnect: () => this.destroy().catch(escape),
@@ -894,7 +905,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		return result;
 	}
 
-	public async render({ mode, client, clientURL, clientIntegrity, fallbackURL, fallbackIntegrity, noScriptURL, bootstrap, cssBasePath}: RenderOptions): Promise<string> {
+	public async render({ mode, client, clientURL, clientIntegrity, fallbackURL, fallbackIntegrity, noScriptURL, bootstrap, inlineCSS}: RenderOptions): Promise<string> {
 		return this.pageRenderer.render({
 			mode,
 			clientState: client,
@@ -905,7 +916,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			fallbackIntegrity,
 			noScriptURL,
 			bootstrapData: bootstrap ? await this.generateBootstrapData(client) : undefined,
-			cssBasePath,
+			inlineCSS
 		});
 	}
 

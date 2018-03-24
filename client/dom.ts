@@ -63,37 +63,6 @@ export function title(newTitle: string): void {
 	document.title = newTitle;
 }
 
-const requestedStyles: { [href: string]: Promise<void> } = {};
-
-export function style(href: string, subresourceIntegrity?: string): Promise<void> {
-	return requestedStyles[href] || (requestedStyles[href] = _import(new Promise<void>((resolve, reject) => {
-		let link: HTMLLinkElement | undefined;
-		const existingStyles = document.getElementsByTagName("link");
-		for (let i = 0; i < existingStyles.length; i++) {
-			if (existingStyles[i].getAttribute("href") === href && "sheet" in existingStyles[i]) {
-				if (existingStyles[i].sheet) {
-					return resolve();
-				}
-				link = existingStyles[i];
-			}
-		}
-		if (!link) {
-			link = self.document.createElement("link");
-			link.rel = "stylesheet";
-			link.href = href;
-			if (subresourceIntegrity) {
-				link.setAttribute("integrity", subresourceIntegrity);
-			}
-			document.body.appendChild(link);
-		}
-		link.addEventListener("load", () => resolve(), false);
-		link.addEventListener("error", () => {
-			document.body.removeChild(link!);
-			reject(new Error("Failed to load styles from " + href + "!"));
-		}, false);
-	})));
-}
-
 export function ref<T, V>(component: preact.Component<T, V>): Element | null {
 	return (component as any).base as Element | null;
 }

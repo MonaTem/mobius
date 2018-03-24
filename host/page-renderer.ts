@@ -1,9 +1,6 @@
 import { BootstrapData } from "_internal";
-import { parse as parseCSS, Rule, stringify as stringifyCSS } from "css";
+import { Rule, stringify as stringifyCSS } from "css";
 import { JSDOM } from "jsdom";
-import { resolve as resolvePath } from "path";
-import { readFile } from "./fileUtils";
-import memoize from "./memoize";
 
 function compatibleStringify(value: any): string {
 	return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\/script/g, "<\\/script");
@@ -42,22 +39,13 @@ export interface RenderOptions {
 	fallbackURL: string;
 	noScriptURL?: string;
 	bootstrapData?: BootstrapData;
-	cssBasePath?: string;
+	inlineCSS?: true;
 }
 
-const rulesForCSSAtPath = memoize(async (path: string): Promise<Rule[]> => {
-	const cssText = (await readFile(path)).toString();
-	const css = parseCSS(cssText);
-	return (css.stylesheet!.rules as Rule[] | undefined) || [];
-});
-
 export class PageRenderer {
-	private dom: JSDOM;
 	private document: Document;
 	public body: Element;
 	public head: Element;
-	private noscript: Element;
-	private metaRedirect: Element;
 	private clientScript: HTMLScriptElement;
 	private fallbackScript: HTMLScriptElement;
 	private inlineStyles?: HTMLStyleElement;
@@ -68,8 +56,7 @@ export class PageRenderer {
 	private clientIdInput?: HTMLInputElement;
 	private messageIdInput?: HTMLInputElement;
 	private hasServerChannelsInput?: HTMLInputElement;
-	constructor(dom: JSDOM, noscript: Element, metaRedirect: Element) {
-		this.dom = dom;
+	constructor(private dom: JSDOM, private noscript: Element, private metaRedirect: Element, private rulesForCSSAtPath: (path: string) => Promise<Rule[]>) {
 		this.document = (dom.window as Window).document;
 		this.body = this.document.body.cloneNode(true) as Element;
 		this.head = this.document.head.cloneNode(true) as Element;
@@ -80,7 +67,7 @@ export class PageRenderer {
 		const fallbackScript = this.fallbackScript = this.document.createElement("script");
 		this.body.appendChild(fallbackScript);
 	}
-	public async render({ mode, clientState, sessionState, clientURL, clientIntegrity, fallbackIntegrity, fallbackURL, noScriptURL, bootstrapData, cssBasePath }: RenderOptions): Promise<string> {
+	public async render({ mode, clientState, sessionState, clientURL, clientIntegrity, fallbackIntegrity, fallbackURL, noScriptURL, bootstrapData, inlineCSS }: RenderOptions): Promise<string> {
 		const document = this.document;
 		let bootstrapScript: HTMLScriptElement | undefined;
 		let textNode: Node | undefined;
@@ -93,12 +80,12 @@ export class PageRenderer {
 		let siblingNode: Node | null = null;
 		let cssRules: Rule[] | undefined;
 		// CSS Inlining
-		if (cssBasePath) {
+		if (inlineCSS) {
 			const linkTags = this.body.getElementsByTagName("link");
 			for (let i = 0; i < linkTags.length; i++) {
 				const href = linkTags[i].href;
 				if (href && !/^\w+:/.test(href)) {
-					const rules = await rulesForCSSAtPath(resolvePath(cssBasePath, href.replace(/^\/+/, "")));
+					const rules = await this.rulesForCSSAtPath(href);
 					if (rules.length) {
 						cssRules = cssRules ? cssRules.concat(rules) : rules;
 					}

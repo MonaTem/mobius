@@ -9,8 +9,7 @@ import memoize from "./memoize";
 import noImpureGetters from "./noImpureGetters";
 import rewriteDynamicImport from "./rewriteDynamicImport";
 import rewriteForInStatements from "./rewriteForInStatements";
-import virtualModule from "./virtual-module";
-import verifyStylePaths from "./verify-style-paths";
+import virtualModule, { ModuleMap, StaticAssets } from "./virtual-module";
 
 let convertToCommonJS: any;
 let optimizeClosuresInRender: any;
@@ -74,16 +73,14 @@ export class ServerCompiler {
 	private initializerForCode = memoize(sandbox);
 	private initializersForPaths = new Map<string, ModuleInitializer | undefined>();
 	private languageService: ts.LanguageService;
-	private publicPath: string;
 	private host: ts.LanguageServiceHost & ts.ModuleResolutionHost;
 	private program: ts.Program;
 	private resolutionCache: ts.ModuleResolutionCache;
 
 	public fileRead: (path: string) => void;
 
-	constructor(mainFile: string, publicPath: string, fileRead: (path: string) => void) {
+	constructor(mainFile: string, private publicPath: string, private moduleMap: ModuleMap, private staticAssets: StaticAssets, fileRead: (path: string) => void) {
 		this.fileRead = fileRead = memoize(fileRead);
-		this.publicPath = publicPath;
 		const fileNames = [/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), mainFile];
 		function readFile(path: string, encoding?: string) {
 			if (declarationPattern.test(path)) {
@@ -177,7 +174,7 @@ export class ServerCompiler {
 		if (declarationPattern.test(path)) {
 			const module = virtualModule(path.replace(declarationPattern, ""));
 			if (module) {
-				const instantiate = module.instantiateModule(this.program);
+				const instantiate = module.instantiateModule(this.program, this.moduleMap, this.staticAssets);
 				this.initializersForPaths.set(path, instantiate);
 				return instantiate;
 			}
@@ -212,7 +209,6 @@ export class ServerCompiler {
 				convertToCommonJS,
 				optimizeClosuresInRender,
 				addSubresourceIntegrity(this.publicPath, this.fileRead),
-				verifyStylePaths(this.publicPath),
 				rewriteForInStatements(),
 				noImpureGetters(),
 			],
