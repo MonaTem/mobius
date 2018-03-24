@@ -247,6 +247,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				hostname,
 				moduleMap: newCompilerOutput.moduleMap,
 				staticAssets,
+				minify,
 			});
 
 			// Start initial page render

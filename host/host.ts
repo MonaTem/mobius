@@ -28,6 +28,7 @@ interface HostConfig {
 	hostname: string | undefined;
 	moduleMap: ModuleMap;
 	staticAssets: StaticAssets;
+	minify: boolean;
 }
 
 export class Host {
@@ -52,6 +53,7 @@ export class Host {
 		hostname,
 		moduleMap,
 		staticAssets,
+		minify,
 	}: HostConfig) {
 		this.destroying = false;
 		this.constructSession = createSessionGroup(this.options = {
@@ -68,6 +70,7 @@ export class Host {
 			source : typeof bakedSource !== "undefined" ? { from: "string", code: bakedSource, path: mainPath } : { from: "file", path: mainPath },
 			moduleMap,
 			staticAssets,
+			minify,
 		}, fileRead, this.sessions, workerCount);
 		// Session timeout
 		this.staleSessionTimeout = setInterval(() => {

@@ -79,12 +79,12 @@ export class ServerCompiler {
 
 	public fileRead: (path: string) => void;
 
-	constructor(mainFile: string, private publicPath: string, private moduleMap: ModuleMap, private staticAssets: StaticAssets, fileRead: (path: string) => void) {
+	constructor(mainFile: string, private publicPath: string, private moduleMap: ModuleMap, private staticAssets: StaticAssets, public minify: boolean, fileRead: (path: string) => void) {
 		this.fileRead = fileRead = memoize(fileRead);
 		const fileNames = [/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), mainFile];
 		function readFile(path: string, encoding?: string) {
 			if (declarationPattern.test(path)) {
-				const module = virtualModule(path.replace(declarationPattern, ""));
+				const module = virtualModule(path.replace(declarationPattern, ""), minify);
 				if (module) {
 					return module.generateTypeDeclaration();
 				}
@@ -121,7 +121,7 @@ export class ServerCompiler {
 				if (result) {
 					return result;
 				}
-				if (declarationPattern.test(path) && virtualModule(path.replace(declarationPattern, ""))) {
+				if (declarationPattern.test(path) && virtualModule(path.replace(declarationPattern, ""), minify)) {
 					return true;
 				}
 				return false;
@@ -172,7 +172,7 @@ export class ServerCompiler {
 			return this.initializersForPaths.get(path);
 		}
 		if (declarationPattern.test(path)) {
-			const module = virtualModule(path.replace(declarationPattern, ""));
+			const module = virtualModule(path.replace(declarationPattern, ""), this.minify);
 			if (module) {
 				const instantiate = module.instantiateModule(this.program, this.moduleMap, this.staticAssets);
 				this.initializersForPaths.set(path, instantiate);

@@ -264,14 +264,14 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				program = newProgram;
 			},
 			fileExistsHook(path: string) {
-				const module = virtualModule(path.replace(declarationOrJavaScriptPattern, ""));
+				const module = virtualModule(path.replace(declarationOrJavaScriptPattern, ""), !!minify);
 				if (module) {
 					return true;
 				}
 				return false;
 			},
 			readFileHook(path: string) {
-				const module = virtualModule(path.replace(declarationOrJavaScriptPattern, ""));
+				const module = virtualModule(path.replace(declarationOrJavaScriptPattern, ""), !!minify);
 				if (module) {
 					if (declarationPattern.test(path)) {
 						return module.generateTypeDeclaration();

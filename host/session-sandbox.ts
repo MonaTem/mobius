@@ -34,6 +34,7 @@ export interface HostSandboxOptions {
 	hostname?: string;
 	moduleMap: ModuleMap;
 	staticAssets: { [path: string]: { contents: string; integrity: string; } };
+	minify: boolean;
 }
 
 export function archivePathForSessionId(sessionsPath: string, sessionID: string) {
@@ -57,7 +58,7 @@ export class HostSandbox {
 		this.metaRedirect = this.document.createElement("meta");
 		this.metaRedirect.setAttribute("http-equiv", "refresh");
 		this.noscript.appendChild(this.metaRedirect);
-		this.serverCompiler = new ServerCompiler(options.mainPath, options.publicPath, options.moduleMap, options.staticAssets, fileRead);
+		this.serverCompiler = new ServerCompiler(options.mainPath, options.publicPath, options.moduleMap, options.staticAssets, options.minify, fileRead);
 		this.broadcastModule = broadcastModule;
 		this.rulesForCSSAtPath = memoize(async (path: string): Promise<Rule[]> => {
 			const cssText = path in options.staticAssets ? options.staticAssets[path].contents : (await readFile(pathResolve(options.publicPath, path.replace(/^\/+/, "")))).toString();
