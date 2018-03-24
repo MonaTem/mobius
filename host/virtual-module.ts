@@ -1,10 +1,10 @@
 import * as ts from "typescript";
+import cssModule from "./css-module";
 import { ServerModuleGlobal } from "./server-compiler";
 import validationModule from "./validation-module";
-import cssModule from "./css-module";
 
-export type ModuleMap = { [modulePath: string]: string };
-export type StaticAssets = { [path: string]: { contents: string; integrity: string; } };
+export interface ModuleMap { [modulePath: string]: string; }
+export interface StaticAssets { [path: string]: { contents: string; integrity: string; }; }
 
 export type VirtualModuleConstructor = (path: string, minify: boolean) => VirtualModule | void;
 

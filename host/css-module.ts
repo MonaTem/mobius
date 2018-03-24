@@ -1,20 +1,20 @@
-import { ModuleMap, StaticAssets, VirtualModule } from "./virtual-module";
-import * as ts from "typescript";
 import { relative } from "path";
+import * as ts from "typescript";
+import { ModuleMap, StaticAssets, VirtualModule } from "./virtual-module";
 
 const cssPathPattern = /\.css$/;
 
 const Core = require("css-modules-loader-core") as any;
 const core = new Core([Core.values, Core.localByDefault, Core.extractImports, Core.scope]);
 
-export default function(path: string, minify: boolean) : VirtualModule | void {
+export default function(path: string, minify: boolean): VirtualModule | void {
 	if (cssPathPattern.test(path) && ts.sys.fileExists(path)) {
 		const relativePath = relative(ts.sys.getCurrentDirectory(), path);
 		let selectedCore = core;
 		if (minify) {
 			const names: { [name: string]: number; } = {};
 			let i: number = 0;
-			const sanitisedPath = relativePath.replace(/\.[^\.\/\\]+$/, '').replace(/[\W_]+/g, '_').replace(/^_|_$/g, '');
+			const sanitisedPath = relativePath.replace(/\.[^\.\/\\]+$/, "").replace(/[\W_]+/g, "_").replace(/^_|_$/g, "");
 			selectedCore = new Core([Core.values, Core.localByDefault, Core.extractImports, Core.scope({ generateScopedName(exportedName: string) {
 				return "_" + sanitisedPath + (names[exportedName] || (names[exportedName] = i++)).toString(36);
 			}})]);
@@ -47,4 +47,4 @@ export default function(path: string, minify: boolean) : VirtualModule | void {
 			},
 		};
 	}
-};
+}

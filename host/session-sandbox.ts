@@ -1,9 +1,9 @@
 import { defer, escape, escaping } from "./event-loop";
 import { exists, readFile } from "./fileUtils";
+import memoize from "./memoize";
 import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
 import { ModuleSource, ServerCompiler, ServerModule } from "./server-compiler";
 import { ModuleMap } from "./virtual-module";
-import memoize from "./memoize";
 
 import * as mobiusModule from "mobius";
 import { Channel, JsonValue } from "mobius-types";
@@ -917,7 +917,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			fallbackIntegrity,
 			noScriptURL,
 			bootstrapData: bootstrap ? await this.generateBootstrapData(client) : undefined,
-			inlineCSS
+			inlineCSS,
 		});
 	}
 

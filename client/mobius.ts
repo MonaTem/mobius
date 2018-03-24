@@ -29,7 +29,7 @@ import { Channel, JsonValue } from "mobius-types";
 if (top != self) {
 	document.open();
 	document.close();
-insufficient_browser_throw:
+ insufficient_browser_throw:
 	throw new Error("Not allowed to load as an iframe!");
 }
 

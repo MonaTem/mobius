@@ -21,7 +21,7 @@ import { exists, mkdir, packageRelative, readFile, readJSON, rimraf, stat, symli
 import { Host } from "./host/host";
 import { PageRenderMode } from "./host/page-renderer";
 import { Session } from "./host/session";
-import { stringFromRoute, brotliedBufferFromRoute, gzippedBufferFromRoute, StaticFileRoute, staticFileRoute } from "./host/static-file-route";
+import { brotliedBufferFromRoute, gzippedBufferFromRoute, StaticFileRoute, staticFileRoute, stringFromRoute } from "./host/static-file-route";
 
 import { ClientMessage, deserializeMessageFromText, serializeMessageAsText } from "./common/_internal";
 

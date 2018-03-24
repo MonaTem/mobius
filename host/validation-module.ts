@@ -1,10 +1,10 @@
 import * as Ajv from "ajv";
-import * as ts from "typescript";
-import { getDefaultArgs, JsonSchemaGenerator } from "typescript-json-schema";
-import * as babylon from "babylon";
 import * as babel from "babel-core";
 import { NodePath } from "babel-traverse";
-import { AssignmentExpression, IfStatement, Identifier, VariableDeclaration } from "babel-types";
+import { AssignmentExpression, Identifier, IfStatement, VariableDeclaration } from "babel-types";
+import * as babylon from "babylon";
+import * as ts from "typescript";
+import { getDefaultArgs, JsonSchemaGenerator } from "typescript-json-schema";
 import { VirtualModule } from "./virtual-module";
 
 const validatorsPathPattern = /\!validators$/;
@@ -64,7 +64,7 @@ function buildSchemas(path: string, program: ts.Program) {
 const ajv = new Ajv({
 	meta: false,
 	extendRefs: true,
-	unknownFormats: "ignore"
+	unknownFormats: "ignore",
 });
 ajv.addMetaSchema(require("ajv/lib/refs/json-schema-draft-04.json"));
 
@@ -100,7 +100,7 @@ const rewriteAjv = {
 	},
 };
 
-export default function(path: string) : VirtualModule | void {
+export default function(path: string): VirtualModule | void {
 	if (!validatorsPathPattern.test(path)) {
 		return;
 	}
@@ -137,6 +137,6 @@ export default function(path: string) : VirtualModule | void {
 			return (global) => {
 				global.exports = exports;
 			};
-		}
+		},
 	};
-};
+}

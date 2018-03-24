@@ -2,13 +2,13 @@ import * as babel from "babel-core";
 import { NodePath } from "babel-traverse";
 import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as types from "babel-types";
+import { parse as parseCSS, stringify as stringifyCSS } from "css";
 import { resolve } from "path";
 import { Chunk, Finaliser, getExportBlock, OutputOptions, Plugin, rollup, SourceDescription } from "rollup";
 import _rollupBabel from "rollup-plugin-babel";
 import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
 import { pureBabylon as pure } from "side-effects-safe";
-import { parse as parseCSS, stringify as stringifyCSS } from "css";
 import { RawSourceMap } from "source-map";
 import * as ts from "typescript";
 import addSubresourceIntegrity from "./addSubresourceIntegrity";
@@ -403,7 +403,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			args.unshift("_import");
 			args.unshift("exports");
 
-			const compatibilityCheck = `if (!window.addEventListener || !Object.keys || typeof JSON == "undefined") return;`
+			const compatibilityCheck = `if (!window.addEventListener || !Object.keys || typeof JSON == "undefined") return;`;
 			if (isMain && !cssRoute) {
 				magicString.prepend(compatibilityCheck);
 			}
@@ -503,6 +503,6 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;
 	return {
 		routes,
-		moduleMap
+		moduleMap,
 	};
 }
