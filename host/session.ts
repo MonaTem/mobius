@@ -115,25 +115,29 @@ class WorkerSandboxClient implements SessionSandboxClient {
 	public send<T = void>(method: string, args?: any[]): Promise<T> {
 		const responseId = toHostMessageId = (toHostMessageId + 1) | 0;
 		const prefix: CommandMessage = [this.sessionID, method, responseId];
-		process.send!(args && args.length ? prefix.concat(args) : prefix);
+		process.send!(args ? prefix.concat(args) : prefix);
 		return new Promise<T>((resolve, reject) => {
 			workerResolves.set(responseId, [resolve, reject]);
 		});
+	}
+	public sendOneWay(method: string, args?: any[]) {
+		const prefix: CommandMessage = [this.sessionID, method, 0];
+		process.send!(args ? prefix.concat(args) : prefix);
 	}
 	public synchronizeChannels(): Promise<void> {
 		return this.send("synchronizeChannels");
 	}
 	public scheduleSynchronize() {
-		return this.send("scheduleSynchronize");
+		return this.sendOneWay("scheduleSynchronize");
 	}
 	public sessionWasDestroyed() {
-		return this.send("sessionWasDestroyed");
+		return this.sendOneWay("sessionWasDestroyed");
 	}
 	public sendEvent(event: Event) {
 		return this.send("sendEvent", [event]);
 	}
 	public setCookie(key: string, value: string) {
-		return this.send("setCookie", [key, value]);
+		return this.sendOneWay("setCookie", [key, value]);
 	}
 	public cookieHeader() {
 		return this.send<string>("cookieHeader");
@@ -142,7 +146,7 @@ class WorkerSandboxClient implements SessionSandboxClient {
 		return this.send<string>("getBaseURL", [options]);
 	}
 	public sharingBecameEnabled() {
-		return this.send("sharingBecameEnabled");
+		return this.sendOneWay("sharingBecameEnabled");
 	}
 }
 
@@ -159,10 +163,14 @@ class OutOfProcessSession implements Session {
 	public send<T = void>(method: string, args?: any[]): Promise<T> {
 		const responseId = toWorkerMessageId = (toWorkerMessageId + 1) | 0;
 		const prefix: CommandMessage = [this.sessionID, method, responseId];
-		this.process.send(args && args.length ? prefix.concat(args) : prefix);
+		this.process.send(args ? prefix.concat(args) : prefix);
 		return new Promise<T>((resolve, reject) => {
 			workerResolves.set(responseId, [resolve, reject]);
 		});
+	}
+	public sendOneWay(method: string, args?: any[]) {
+		const prefix: CommandMessage = [this.sessionID, method, 0];
+		this.process.send!(args ? prefix.concat(args) : prefix);
 	}
 	public destroy(): Promise<void> {
 		return this.send("destroy");
@@ -183,7 +191,7 @@ class OutOfProcessSession implements Session {
 		return this.send("prerenderContent");
 	}
 	public updateOpenServerChannelStatus(newValue: boolean) {
-		return this.send("updateOpenServerChannelStatus", [newValue]);
+		return this.sendOneWay("updateOpenServerChannelStatus", [newValue]);
 	}
 	public hasLocalChannels() {
 		return this.send<boolean>("hasLocalChannels");
@@ -195,7 +203,7 @@ class OutOfProcessSession implements Session {
 		return this.send<string | undefined>("valueForFormField", [name]);
 	}
 	public becameActive() {
-		return this.send("becameActive");
+		return this.sendOneWay("becameActive");
 	}
 }
 
@@ -272,10 +280,16 @@ if (require.main === module) {
 					sessions.set(sessionID, session = new LocalSessionSandbox<WorkerSandboxClient>(host, new WorkerSandboxClient(sessionID), sessionID));
 				}
 				try {
-					const result = await (session as { [method: string]: () => Promise<any> })[message[1]].apply(session, message.slice(3));
-					process.send!(eventForValue(message[2], result));
+					const result = (session as { [method: string]: () => Promise<any> })[message[1]].apply(session, message.slice(3));
+					if (message[2]) {
+						process.send!(eventForValue(message[2], await result));
+					}
 				} catch (e) {
-					process.send!(eventForException(message[2], e));
+					if (message[2]) {
+						process.send!(eventForException(message[2], e));
+					} else {
+						escape(e);
+					}
 				}
 			} else if (isEvent(message)) {
 				// Handle promise response
@@ -322,12 +336,18 @@ export function createSessionGroup(options: HostSandboxOptions, fileRead: (path:
 				if (session) {
 					const client: any = session.client;
 					try {
-						const result = await ((client as { [method: string]: () => Promise<any> })[message[1]].apply(client, message.slice(3)));
-						worker.send(eventForValue(message[2], result));
+						const result = ((client as { [method: string]: () => Promise<any> })[message[1]].apply(client, message.slice(3)));
+						if (message[2]) {
+							worker.send(eventForValue(message[2], await result));
+						}
 					} catch (e) {
-						worker.send(eventForException(message[2], e));
+						if (message[2]) {
+							worker.send(eventForException(message[2], e));
+						} else {
+							escape(e);
+						}
 					}
-				} else {
+				} else if (message[2]) {
 					worker.send([message[2]]);
 				}
 			} else if (isEvent(message)) {

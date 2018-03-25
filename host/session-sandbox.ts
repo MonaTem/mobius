@@ -94,14 +94,14 @@ const bakedModules: { [moduleName: string]: (sandbox: LocalSessionSandbox) => an
 };
 
 export interface SessionSandboxClient {
-	synchronizeChannels(): void | Promise<void>;
-	scheduleSynchronize(): void | Promise<void>;
+	synchronizeChannels(): Promise<void>;
+	scheduleSynchronize(): void;
 	sendEvent(event: Event): void | Promise<void>;
-	setCookie(key: string, value: string): void | Promise<void>;
+	setCookie(key: string, value: string): void;
 	cookieHeader(): string | Promise<string>;
-	sessionWasDestroyed(): void | Promise<void>;
+	sessionWasDestroyed(): void;
 	getBaseURL(options: HostSandboxOptions): string | Promise<string>;
-	sharingBecameEnabled(): void | Promise<void>;
+	sharingBecameEnabled(): void;
 }
 
 interface MobiusGlobalProperties {
@@ -146,11 +146,11 @@ export interface SessionSandbox {
 	unarchiveEvents(): Promise<void>;
 	processEvents(events: Event[], noJavaScript?: boolean): Promise<void>;
 	prerenderContent(): Promise<void>;
-	updateOpenServerChannelStatus(newValue: boolean): void | Promise<void>;
-	hasLocalChannels(): boolean | Promise<boolean>;
+	updateOpenServerChannelStatus(newValue: boolean): void;
+	hasLocalChannels(): Promise<boolean>;
 	render(options: RenderOptions): Promise<string>;
 	valueForFormField(name: string): string | undefined | Promise<string | undefined>;
-	becameActive(): void | Promise<void>;
+	becameActive(): void;
 }
 
 export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandboxClient> implements SessionSandbox {
@@ -318,7 +318,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 	}
 
 	public hasLocalChannels() {
-		return this.localChannelCount !== 0;
+		return Promise.resolve(this.localChannelCount !== 0);
 	}
 	public enterLocalChannel(delayPrerender: boolean = true): number {
 		if (delayPrerender) {
