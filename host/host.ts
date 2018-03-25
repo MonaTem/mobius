@@ -96,21 +96,18 @@ export class Host {
 			if (this.options.allowMultipleClientsPerSession) {
 				session = this.constructSession(sessionID, request);
 				this.sessions.set(sessionID, session);
-				try {
+				if (await exists(archivePathForSessionId(this.options.sessionsPath, sessionID))) {
 					await session.unarchiveEvents();
-				} catch (e) {
-					if (allowNewSession) {
-						session.client.newClient(session, request);
-					} else {
-						throw e;
-					}
+					return session;
+				} else if (allowNewSession) {
+					session.client.newClient(session, request);
+					return session;
 				}
-				return session;
 			}
 			if (allowNewSession) {
 				session = this.constructSession(sessionID, request);
-				session.client.newClient(session, request);
 				this.sessions.set(sessionID, session);
+				session.client.newClient(session, request);
 				return session;
 			}
 		}
