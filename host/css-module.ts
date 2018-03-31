@@ -1,16 +1,16 @@
 import { relative } from "path";
 import * as ts from "typescript";
 import { ModuleMap, StaticAssets, VirtualModule } from "./virtual-module";
+import Core from "css-modules-loader-core";
 
 const cssPathPattern = /\.css$/;
 
-const Core = require("css-modules-loader-core") as any;
-const core = new Core([Core.values, Core.localByDefault, Core.extractImports, Core.scope]);
+const defaultCore = new Core([Core.values, Core.localByDefault, Core.extractImports, Core.scope]);
 
 export default function(path: string, minify: boolean): VirtualModule | void {
 	if (cssPathPattern.test(path) && ts.sys.fileExists(path)) {
 		const relativePath = relative(ts.sys.getCurrentDirectory(), path);
-		let selectedCore = core;
+		let selectedCore = defaultCore;
 		if (minify) {
 			const names: { [name: string]: number; } = {};
 			let i: number = 0;
@@ -19,7 +19,7 @@ export default function(path: string, minify: boolean): VirtualModule | void {
 				return "_" + sanitisedPath + (names[exportedName] || (names[exportedName] = i++)).toString(36);
 			}})]);
 		}
-		const result: any = selectedCore.load(ts.sys.readFile(path), relativePath);
+		const result: any = selectedCore.load(ts.sys.readFile(path)!, relativePath);
 		const injectableSource = result.injectableSource as string;
 		const exportTokens = result.exportTokens as { [key: string]: string };
 		return {
