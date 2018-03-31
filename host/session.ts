@@ -124,9 +124,6 @@ class WorkerSandboxClient implements SessionSandboxClient {
 		const prefix: CommandMessage = [this.sessionID, method, 0];
 		process.send!(args ? prefix.concat(args) : prefix);
 	}
-	public synchronizeChannels(): Promise<void> {
-		return this.send("synchronizeChannels");
-	}
 	public scheduleSynchronize() {
 		return this.sendOneWay("scheduleSynchronize");
 	}

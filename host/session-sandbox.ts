@@ -94,7 +94,6 @@ const bakedModules: { [moduleName: string]: (sandbox: LocalSessionSandbox) => an
 };
 
 export interface SessionSandboxClient {
-	synchronizeChannels(): Promise<void>;
 	scheduleSynchronize(): void;
 	sendEvent(event: Event): void | Promise<void>;
 	setCookie(key: string, value: string): void;
