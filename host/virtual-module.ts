@@ -1,8 +1,8 @@
+import { RawSourceMap } from "source-map";
 import * as ts from "typescript";
 import cssModule from "./css-module";
 import { ServerModuleGlobal } from "./server-compiler";
 import validationModule from "./validation-module";
-import { RawSourceMap } from "source-map";
 
 export interface ModuleMap { [modulePath: string]: string; }
 export interface StaticAssets { [path: string]: { contents: string; integrity: string; }; }

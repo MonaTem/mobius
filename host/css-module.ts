@@ -1,7 +1,7 @@
+import Core from "css-modules-loader-core";
 import { relative } from "path";
 import * as ts from "typescript";
 import { ModuleMap, StaticAssets, VirtualModule } from "./virtual-module";
-import Core from "css-modules-loader-core";
 
 const cssPathPattern = /\.css$/;
 

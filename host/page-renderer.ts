@@ -1,6 +1,6 @@
 import { BootstrapData } from "_internal";
-import { root as cssRoot, Root as CSSRoot } from "postcss";
 import { JSDOM } from "jsdom";
+import { root as cssRoot, Root as CSSRoot } from "postcss";
 
 function compatibleStringify(value: any): string {
 	return JSON.stringify(value).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029").replace(/<\/script/g, "<\\/script");

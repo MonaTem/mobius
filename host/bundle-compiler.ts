@@ -1,7 +1,8 @@
 import * as babel from "babel-core";
 import { NodePath } from "babel-traverse";
-import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as types from "babel-types";
+import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
+import Concat from "concat-with-sourcemaps";
 import { resolve } from "path";
 import { Chunk, Finaliser, getExportBlock, OutputOptions, Plugin, rollup, SourceDescription } from "rollup";
 import _rollupBabel from "rollup-plugin-babel";
@@ -9,16 +10,15 @@ import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
 import { pureBabylon as pure } from "side-effects-safe";
 import { RawSourceMap } from "source-map";
-import Concat from "concat-with-sourcemaps";
 import * as ts from "typescript";
 import addSubresourceIntegrity from "./addSubresourceIntegrity";
 import { packageRelative } from "./fileUtils";
 import importBindingForCall from "./importBindingForCall";
+import memoize from "./memoize";
 import noImpureGetters from "./noImpureGetters";
 import rewriteForInStatements from "./rewriteForInStatements";
 import { staticFileRoute, StaticFileRoute } from "./static-file-route";
 import virtualModule, { ModuleMap } from "./virtual-module";
-import memoize from "./memoize";
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
 interface RedactedExportData { [exportName: string]: Array<boolean | undefined>; }
@@ -366,17 +366,17 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			const css = new Concat(true, cssModuleName, minify ? "" : "\n\n");
 			const bundledCssModulePaths: string[] = [];
 			for (const module of chunk.getJsonModules()) {
-				const virtualModule = memoizedVirtualModule(module.id, !!minify);
-				if (virtualModule && virtualModule.generateStyles) {
+				const implementation = memoizedVirtualModule(module.id, !!minify);
+				if (implementation && implementation.generateStyles) {
 					bundledCssModulePaths.push(module.id);
-					const styles = virtualModule.generateStyles();
+					const styles = implementation.generateStyles();
 					if (styles.css) {
 						css.add(module.id, styles.css, styles.map);
 					}
 				}
 			}
 			let cssRoute: StaticFileRoute | undefined;
-			let cssString = css.content.toString();
+			const cssString = css.content.toString();
 			if (cssString) {
 				const mapString = css.sourceMap;
 				const cssMap = mapString ? JSON.parse(mapString) : undefined;
