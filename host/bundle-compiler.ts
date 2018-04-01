@@ -18,6 +18,7 @@ import noImpureGetters from "./noImpureGetters";
 import rewriteForInStatements from "./rewriteForInStatements";
 import { staticFileRoute, StaticFileRoute } from "./static-file-route";
 import virtualModule, { ModuleMap } from "./virtual-module";
+import memoize from "./memoize";
 
 // true to error on non-pure, false to evaluate anyway, undefined to ignore
 interface RedactedExportData { [exportName: string]: Array<boolean | undefined>; }
@@ -207,6 +208,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	const isClient = profile === "client";
 	const mainPath = packageRelative("client/main.js");
 	let program: ts.Program | undefined;
+	const memoizedVirtualModule = memoize(virtualModule);
 	const plugins = [
 		includePaths({
 			include: {
@@ -264,14 +266,14 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				program = newProgram;
 			},
 			fileExistsHook(path: string) {
-				const module = virtualModule(path.replace(declarationOrJavaScriptPattern, ""), !!minify);
+				const module = memoizedVirtualModule(path.replace(declarationOrJavaScriptPattern, ""), !!minify);
 				if (module) {
 					return true;
 				}
 				return false;
 			},
 			readFileHook(path: string) {
-				const module = virtualModule(path.replace(declarationOrJavaScriptPattern, ""), !!minify);
+				const module = memoizedVirtualModule(path.replace(declarationOrJavaScriptPattern, ""), !!minify);
 				if (module) {
 					if (declarationPattern.test(path)) {
 						return module.generateTypeDeclaration();
@@ -360,15 +362,15 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			const isMain = chunk.id === mainChunkId;
 
 			// CSS
-			const original = magicString.toString();
 			const cssModuleName = chunk.id.replace(/(\.js)?$/, ".css");
-			const cssSourcePattern = /\/\*css\-start\:(.*)\n([\s\S]*?)\:css\-end\*\//g;
-			let exec: RegExpExecArray | null;
 			let css = "";
 			const bundledCssModulePaths: string[] = [];
-			while (exec = cssSourcePattern.exec(original)) {
-				bundledCssModulePaths.push(exec[1]);
-				css += exec[2];
+			for (const module of chunk.getJsonModules()) {
+				const virtualModule = memoizedVirtualModule(module.id, !!minify);
+				if (virtualModule && virtualModule.generateStyles) {
+					bundledCssModulePaths.push(module.id);
+					css += virtualModule.generateStyles();
+				}
 			}
 			let cssRoute: StaticFileRoute | undefined;
 			if (css) {

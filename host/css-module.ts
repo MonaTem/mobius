@@ -27,7 +27,10 @@ export default function(path: string, minify: boolean): VirtualModule | void {
 				return Object.keys(exportTokens).map((symbolName) => `export const ${symbolName}: string;`).join("\n");
 			},
 			generateModule(program: ts.Program) {
-				return Object.keys(exportTokens).map((symbolName) => `export const ${symbolName} = ${JSON.stringify(exportTokens[symbolName])};`).join("\n") + `\n/*css-start:${path}\n${injectableSource}\n:css-end*/\n`;
+				return Object.keys(exportTokens).map((symbolName) => `export const ${symbolName} = ${JSON.stringify(exportTokens[symbolName])};`).join("\n");
+			},
+			generateStyles() {
+				return injectableSource;
 			},
 			instantiateModule(program: ts.Program, moduleMap: ModuleMap, staticAssets: StaticAssets) {
 				const href = moduleMap[path];
