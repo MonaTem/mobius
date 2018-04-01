@@ -7,6 +7,11 @@ const cssPathPattern = /\.css$/;
 
 const defaultCore = new Core([Core.values, Core.localByDefault, Core.extractImports, Core.scope]);
 
+export const postcssMinifyPlugin = require("cssnano")({
+	preset: "default",
+	svgo: false,
+});
+
 export default function(path: string, minify: boolean): VirtualModule | void {
 	if (cssPathPattern.test(path) && ts.sys.fileExists(path)) {
 		const relativePath = relative(ts.sys.getCurrentDirectory(), path);
@@ -17,11 +22,12 @@ export default function(path: string, minify: boolean): VirtualModule | void {
 			const sanitisedPath = relativePath.replace(/\.[^\.\/\\]+$/, "").replace(/[\W_]+/g, "_").replace(/^_|_$/g, "");
 			selectedCore = new Core([Core.values, Core.localByDefault, Core.extractImports, Core.scope({ generateScopedName(exportedName: string) {
 				return "_" + sanitisedPath + (names[exportedName] || (names[exportedName] = i++)).toString(36);
-			}})]);
+			}}), postcssMinifyPlugin]);
 		}
 		const result: any = selectedCore.load(ts.sys.readFile(path)!, relativePath);
-		const injectableSource = result.injectableSource as string;
-		const exportTokens = result.exportTokens as { [key: string]: string };
+		const css = result.injectableSource;
+		const exportTokens = result.exportTokens;
+		const map = result.map;
 		return {
 			generateTypeDeclaration() {
 				return Object.keys(exportTokens).map((symbolName) => `export const ${symbolName}: string;`).join("\n");
@@ -30,7 +36,7 @@ export default function(path: string, minify: boolean): VirtualModule | void {
 				return Object.keys(exportTokens).map((symbolName) => `export const ${symbolName} = ${JSON.stringify(exportTokens[symbolName])};`).join("\n");
 			},
 			generateStyles() {
-				return injectableSource;
+				return { css, map };
 			},
 			instantiateModule(program: ts.Program, moduleMap: ModuleMap, staticAssets: StaticAssets) {
 				const href = moduleMap[path];

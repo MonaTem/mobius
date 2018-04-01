@@ -2,6 +2,7 @@ import * as ts from "typescript";
 import cssModule from "./css-module";
 import { ServerModuleGlobal } from "./server-compiler";
 import validationModule from "./validation-module";
+import { RawSourceMap } from "source-map";
 
 export interface ModuleMap { [modulePath: string]: string; }
 export interface StaticAssets { [path: string]: { contents: string; integrity: string; }; }
@@ -12,7 +13,7 @@ export interface VirtualModule {
 	generateTypeDeclaration: () => string;
 	generateModule: (program: ts.Program) => string;
 	instantiateModule: (program: ts.Program, moduleMap: ModuleMap, staticAssets: StaticAssets) => (global: ServerModuleGlobal) => void;
-	generateStyles?: () => string;
+	generateStyles?: () => { css: string; map?: RawSourceMap };
 }
 
 export default function(path: string, minify: boolean): VirtualModule | void {

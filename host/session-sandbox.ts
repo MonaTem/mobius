@@ -15,7 +15,9 @@ import { FakedGlobals, interceptGlobals } from "../common/determinism";
 import { JSDOM } from "jsdom";
 import patchJSDOM from "./jsdom-patch";
 
-import { parse as parseCSS, Rule } from "css";
+import * as postcss from "postcss";
+import { Root as CSSRoot } from "postcss";
+import { postcssMinifyPlugin } from "./css-module";
 
 import { createWriteStream } from "fs";
 import { join as pathJoin, resolve as pathResolve } from "path";
@@ -41,6 +43,8 @@ export function archivePathForSessionId(sessionsPath: string, sessionID: string)
 	return pathJoin(sessionsPath, encodeURIComponent(sessionID) + ".json");
 }
 
+const cssMinifier = postcss(postcssMinifyPlugin);
+
 export class HostSandbox {
 	public options: HostSandboxOptions;
 	public dom: JSDOM;
@@ -48,7 +52,7 @@ export class HostSandbox {
 	public noscript: Element;
 	public metaRedirect: Element;
 	public serverCompiler: ServerCompiler;
-	public rulesForCSSAtPath: (path: string) => Promise<Rule[]>;
+	public cssForPath: (path: string) => Promise<CSSRoot>;
 	constructor(options: HostSandboxOptions, fileRead: (path: string) => void, public broadcastModule: typeof BroadcastModule) {
 		this.options = options;
 		this.dom = new (require("jsdom").JSDOM)(options.htmlSource) as JSDOM;
@@ -60,10 +64,9 @@ export class HostSandbox {
 		this.noscript.appendChild(this.metaRedirect);
 		this.serverCompiler = new ServerCompiler(options.mainPath, options.publicPath, options.moduleMap, options.staticAssets, options.minify, fileRead);
 		this.broadcastModule = broadcastModule;
-		this.rulesForCSSAtPath = memoize(async (path: string): Promise<Rule[]> => {
-			const cssText = path in options.staticAssets ? options.staticAssets[path].contents : (await readFile(pathResolve(options.publicPath, path.replace(/^\/+/, "")))).toString();
-			const css = parseCSS(cssText);
-			return (css.stylesheet!.rules as Rule[] | undefined) || [];
+		this.cssForPath = memoize(async (path: string): Promise<CSSRoot> => {
+			const cssText = path in options.staticAssets ? options.staticAssets[path].contents : await readFile(pathResolve(options.publicPath, path.replace(/^\/+/, "")));
+			return (await cssMinifier.process(cssText, { from: path })).root!;
 		});
 	}
 }
@@ -191,7 +194,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		this.host = host;
 		this.client = client;
 		this.sessionID = sessionID;
-		this.pageRenderer = new PageRenderer(host.dom, host.noscript, host.metaRedirect, host.rulesForCSSAtPath);
+		this.pageRenderer = new PageRenderer(host.dom, host.noscript, host.metaRedirect, host.cssForPath);
 		// Server-side version of the API
 		this.mobius = {
 			disconnect: () => this.destroy().catch(escape),

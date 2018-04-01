@@ -2,7 +2,6 @@ import * as babel from "babel-core";
 import { NodePath } from "babel-traverse";
 import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
 import * as types from "babel-types";
-import { parse as parseCSS, stringify as stringifyCSS } from "css";
 import { resolve } from "path";
 import { Chunk, Finaliser, getExportBlock, OutputOptions, Plugin, rollup, SourceDescription } from "rollup";
 import _rollupBabel from "rollup-plugin-babel";
@@ -10,6 +9,7 @@ import _includePaths from "rollup-plugin-includepaths";
 import _rollupTypeScript from "rollup-plugin-typescript2";
 import { pureBabylon as pure } from "side-effects-safe";
 import { RawSourceMap } from "source-map";
+import Concat from "concat-with-sourcemaps";
 import * as ts from "typescript";
 import addSubresourceIntegrity from "./addSubresourceIntegrity";
 import { packageRelative } from "./fileUtils";
@@ -361,23 +361,26 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 		) {
 			const isMain = chunk.id === mainChunkId;
 
-			// CSS
+			// Bundle CSS
 			const cssModuleName = chunk.id.replace(/(\.js)?$/, ".css");
-			let css = "";
+			const css = new Concat(true, cssModuleName, minify ? "" : "\n\n");
 			const bundledCssModulePaths: string[] = [];
 			for (const module of chunk.getJsonModules()) {
 				const virtualModule = memoizedVirtualModule(module.id, !!minify);
 				if (virtualModule && virtualModule.generateStyles) {
 					bundledCssModulePaths.push(module.id);
-					css += virtualModule.generateStyles();
+					const styles = virtualModule.generateStyles();
+					if (styles.css) {
+						css.add(module.id, styles.css, styles.map);
+					}
 				}
 			}
 			let cssRoute: StaticFileRoute | undefined;
-			if (css) {
-				if (minify) {
-					css = stringifyCSS(parseCSS(css), { compress: true });
-				}
-				cssRoute = staticFileRoute(cssModuleName.substr(1), css);
+			let cssString = css.content.toString();
+			if (cssString) {
+				const mapString = css.sourceMap;
+				const cssMap = mapString ? JSON.parse(mapString) : undefined;
+				cssRoute = staticFileRoute(cssModuleName.substr(1), cssString);
 				if (!isMain) {
 					routeIndexes.push(cssModuleName);
 				}
@@ -386,6 +389,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				}
 				routes[cssModuleName.substr(1)] = {
 					route: cssRoute,
+					map: cssMap,
 				};
 			}
 

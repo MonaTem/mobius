@@ -1,5 +1,5 @@
 import { BootstrapData } from "_internal";
-import { Rule, stringify as stringifyCSS } from "css";
+import { root as cssRoot, Root as CSSRoot } from "postcss";
 import { JSDOM } from "jsdom";
 
 function compatibleStringify(value: any): string {
@@ -56,7 +56,7 @@ export class PageRenderer {
 	private clientIdInput?: HTMLInputElement;
 	private messageIdInput?: HTMLInputElement;
 	private hasServerChannelsInput?: HTMLInputElement;
-	constructor(private dom: JSDOM, private noscript: Element, private metaRedirect: Element, private rulesForCSSAtPath: (path: string) => Promise<Rule[]>) {
+	constructor(private dom: JSDOM, private noscript: Element, private metaRedirect: Element, private cssForPath: (path: string) => Promise<CSSRoot>) {
 		this.document = (dom.window as Window).document;
 		this.body = this.document.body.cloneNode(true) as Element;
 		this.head = this.document.head.cloneNode(true) as Element;
@@ -78,16 +78,20 @@ export class PageRenderer {
 		let messageIdInput: HTMLInputElement | undefined;
 		let hasServerChannelsInput: HTMLInputElement | undefined;
 		let siblingNode: Node | null = null;
-		let cssRules: Rule[] | undefined;
+		let cssRoots: CSSRoot[] | undefined;
 		// CSS Inlining
 		if (inlineCSS) {
 			const linkTags = this.body.getElementsByTagName("link");
 			for (let i = 0; i < linkTags.length; i++) {
-				const href = linkTags[i].href;
-				if (href && !/^\w+:/.test(href)) {
-					const rules = await this.rulesForCSSAtPath(href);
-					if (rules.length) {
-						cssRules = cssRules ? cssRules.concat(rules) : rules;
+				if (linkTags[i].rel === "stylesheet") {
+					const href = linkTags[i].href;
+					if (href && !/^\w+:/.test(href)) {
+						const root = await this.cssForPath(href);
+						if (cssRoots) {
+							cssRoots.push(root);
+						} else {
+							cssRoots = [root];
+						}
 					}
 				}
 			}
@@ -176,18 +180,27 @@ export class PageRenderer {
 			const bodyParent = realBody.parentElement!;
 			bodyParent.replaceChild(this.body, realBody);
 			try {
-				if (cssRules) {
-					const newRules = cssRules.filter((rule: Rule) => {
-						try {
-							return rule.type === "rule" && rule.selectors && rule.selectors.some((selector) => document.querySelector(selector) !== null);
-						} catch (e) {
-							// Skip rules that JSDOM doesn't support
-							return false;
+				if (cssRoots) {
+					const newRoot = cssRoot();
+					for (const root of cssRoots) {
+						if (root.nodes) {
+							for (const node of root.nodes) {
+								if (node.type === "rule") {
+									try {
+										if (document.querySelector(node.selector) === null) {
+											continue;
+										}
+									} catch (e) {
+										continue;
+									}
+									newRoot.append(node.clone());
+								}
+							}
 						}
-					});
-					if (newRules.length) {
+					}
+					if (newRoot.nodes && newRoot.nodes.length) {
 						const inlineStyles = this.inlineStyles || (this.inlineStyles = this.head.appendChild(document.createElement("style")));
-						inlineStyles.textContent = stringifyCSS({ type: "stylesheet", stylesheet: { rules: newRules } }, { compress: true });
+						inlineStyles.textContent = newRoot.toResult().css;
 					}
 				}
 				return this.dom.serialize();
