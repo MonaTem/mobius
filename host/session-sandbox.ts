@@ -3,7 +3,7 @@ import { exists, readFile } from "./fileUtils";
 import memoize from "./memoize";
 import { ClientState, PageRenderer, PageRenderMode } from "./page-renderer";
 import { ModuleSource, ServerCompiler, ServerModule } from "./server-compiler";
-import { ModuleMap } from "./virtual-module";
+import virtualModule, { ModuleMap } from "./virtual-module";
 
 import * as mobiusModule from "mobius";
 import { Channel, JsonValue } from "mobius-types";
@@ -62,7 +62,7 @@ export class HostSandbox {
 		this.metaRedirect = this.document.createElement("meta");
 		this.metaRedirect.setAttribute("http-equiv", "refresh");
 		this.noscript.appendChild(this.metaRedirect);
-		this.serverCompiler = new ServerCompiler(options.mainPath, options.publicPath, options.moduleMap, options.staticAssets, options.minify, fileRead);
+		this.serverCompiler = new ServerCompiler(options.mainPath, options.publicPath, options.moduleMap, options.staticAssets, memoize((path: string) => virtualModule(path, options.minify)), fileRead);
 		this.broadcastModule = broadcastModule;
 		this.cssForPath = memoize(async (path: string): Promise<CSSRoot> => {
 			const cssText = path in options.staticAssets ? options.staticAssets[path].contents : await readFile(pathResolve(options.publicPath, path.replace(/^\/+/, "")));
