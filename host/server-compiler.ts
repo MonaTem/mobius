@@ -13,6 +13,7 @@ import { ModuleMap, StaticAssets, VirtualModule } from "./virtual-module";
 let convertToCommonJS: any;
 let optimizeClosuresInRender: any;
 let dynamicImport: any;
+let transformAsyncToPromises: any;
 
 export interface ServerModule {
 	exports: any;
@@ -77,6 +78,7 @@ export class ServerCompiler {
 	private resolutionCache: ts.ModuleResolutionCache;
 
 	constructor(mainFile: string, private moduleMap: ModuleMap, private staticAssets: StaticAssets, public virtualModule: (path: string) => VirtualModule | void, fileRead: (path: string) => void) {
+		// Hijack TypeScript's file access so that we can instrument when it reads files for watching and to inject virtual modules
 		fileRead = memoize(fileRead);
 		const fileNames = [/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), mainFile];
 		function readFile(path: string, encoding?: string) {
@@ -146,6 +148,7 @@ export class ServerCompiler {
 	}
 
 	public loadModule(source: ModuleSource, module: ServerModule, globalProperties: any, require: (name: string) => any) {
+		// Create a sandbox with exports for the provided module
 		const initializer = this.initializerForSource(source);
 		if (!initializer) {
 			throw new Error("Unable to find module: " + source.path);
@@ -168,6 +171,7 @@ export class ServerCompiler {
 		if (this.initializersForPaths.has(path)) {
 			return this.initializersForPaths.get(path);
 		}
+		// Check for declarations
 		if (declarationPattern.test(path)) {
 			const module = this.virtualModule(path.replace(declarationPattern, ""));
 			if (module) {
@@ -176,12 +180,14 @@ export class ServerCompiler {
 				return instantiate;
 			}
 		}
-		let scriptContents: string | undefined;
-		let scriptMap: string | undefined;
+		// Verify that TypeScript knows about this path
 		if (!this.program.getSourceFile(path)) {
 			this.initializersForPaths.set(path, undefined);
 			return undefined;
 		}
+		// Extract compiled output and source map from TypeScript
+		let scriptContents: string | undefined;
+		let scriptMap: string | undefined;
 		for (const { name, text } of this.languageService.getEmitOutput(path).outputFiles) {
 			if (/\.js$/.test(name)) {
 				scriptContents = text;
@@ -189,6 +195,7 @@ export class ServerCompiler {
 				scriptMap = text;
 			}
 		}
+		// Apply babel transformation passes
 		if (!convertToCommonJS) {
 			convertToCommonJS = require("babel-plugin-transform-es2015-modules-commonjs")();
 		}
@@ -198,18 +205,23 @@ export class ServerCompiler {
 		if (!dynamicImport) {
 			dynamicImport = require("babel-plugin-syntax-dynamic-import")();
 		}
+		if (!transformAsyncToPromises) {
+			transformAsyncToPromises = require("babel-plugin-transform-async-to-promises");
+		}
 		const transformed = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(path.replace(/\.d\.ts$/, ".js")).toString(), {
 			babelrc: false,
 			plugins: [
 				dynamicImport,
 				rewriteDynamicImport,
 				convertToCommonJS,
+				[transformAsyncToPromises(babel), { externalHelpers: false }],
 				optimizeClosuresInRender,
 				rewriteForInStatements(),
 				noImpureGetters(),
 			],
 			inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
 		});
+		// Wrap in the sandbox JavaScript
 		const result = sandbox(transformed.code!, path);
 		this.initializersForPaths.set(path, result);
 		return result;
