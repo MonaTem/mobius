@@ -416,36 +416,34 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			args.unshift("_import");
 			args.unshift("exports");
 
-			const compatibilityCheck = `if (!window.addEventListener || !Object.keys || typeof JSON == "undefined") return;`;
-			if (isMain && !cssRoute) {
-				magicString.prepend(compatibilityCheck);
-			}
-
 			const exportBlock = getExportBlock(exports, dependencies, exportMode);
-			magicString.prepend(`function(${args.join(", ")}) {\n`);
 			if (exportBlock) {
 				magicString.append("\n\n" + exportBlock, {});
 			}
 			magicString.append("\n}", {});
 
 			if (isMain) {
+				args.push("document");
 				if (cssRoute) {
 					magicString.prepend(
-						`(function(link,main,exports,imports){` +
-							compatibilityCheck +
-							`link.rel="stylesheet";` +
-							`link.href=${JSON.stringify(cssRoute.foreverPath)};` +
-							`link.setAttribute("integrity",${JSON.stringify(cssRoute.integrity)});` +
-							`if("onload" in link)` +
-								`link.onload=function(){main(exports,imports)};` +
-							`else ` +
-								`main(exports,imports);` +
-							`document.head.appendChild(link);` +
-							`_mobius=1` +
-						`})(document.createElement("link"), `);
+						`var i=0,` +
+						`stylesheets=document.querySelectorAll("link"),` +
+						`link=document.createElement("link");` +
+						`link.href=${JSON.stringify(cssRoute.foreverPath)};` +
+						`if("onload" in link){` +
+							`for(_mobius=link.onload=main;i<stylesheets.length;i++)` +
+								`if(stylesheets[i].href==link.href)` +
+									`return stylesheets[i].sheet ? main() : stylesheets[i].onload=main;` +
+						`}else ` +
+							`main();` +
+						`link.rel="stylesheet";` +
+						`link.setAttribute("integrity",${JSON.stringify(cssRoute.integrity)});` +
+						`document.head.appendChild(link);` +
+						`function main() {\n`);
 				} else {
-					magicString.prepend(`(`);
+					magicString.prepend(`\n`);
 				}
+				magicString.prepend(`(function(${args.join(", ")}) { if (!window.addEventListener || !Object.keys || typeof JSON == "undefined") return;`);
 				function loadDataForModuleWithName(name: string): [string, string] {
 					const route = routes[name.substr(1)].route;
 					return [route.foreverPath, route.integrity];
@@ -460,14 +458,12 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 					imports = importsObject;
 				}
 				if (cssRoute) {
-					magicString.append(`, `, {});
-				} else {
-					magicString.append(`)(`, {});
+					magicString.append('}');
 				}
-				magicString.append(`{}, ${JSON.stringify(imports)})`, {});
+				magicString.append(`)({}, ${JSON.stringify(imports)}, document)`);
 			} else {
-				magicString.prepend("_mobius(");
-				magicString.append(["", minify ? routeIndexes.indexOf(chunk.id).toString() : JSON.stringify(chunk.id)].concat(deps).join(", ") + ")", {});
+				magicString.prepend(`_mobius(function(${args.join(", ")}) {\n`);
+				magicString.append(["", minify ? routeIndexes.indexOf(chunk.id).toString() : JSON.stringify(chunk.id)].concat(deps).join(", ") + ")");
 			}
 
 			return magicString;
