@@ -121,6 +121,7 @@ function flushTasks() {
 	}
 }
 
+// Dispatches a microtask
 function submitTask(queue: Task[], task: Task) {
 	queue.push(task);
 	if (microTaskQueue.length + taskQueue.length == 1) {
@@ -141,10 +142,15 @@ function defer(value?: any): Promise<any> {
 	return new Promise<any>((resolve) => submitTask(taskQueue, resolve.bind(null, value)));
 }
 
+// Dispatch error in a way that shows up in the browser's error console
 function escape(e: any) {
-	setImmediate(() => {
-		throw e;
-	});
+	if (console.error) {
+		console.error(e);
+	} else {
+		setImmediate(() => {
+			throw e;
+		});
+	}
 }
 
 function escaping(handler: () => any | Promise<any>): () => Promise<void>;
@@ -203,6 +209,7 @@ function updateInsideCallback() {
 	}
 }
 
+// Entering/exiting a "user space" callback
 function willEnterCallback() {
 	dispatchingEvent++;
 	insideCallback = true;
@@ -213,6 +220,7 @@ function didExitCallback() {
 	updateInsideCallback();
 }
 
+// Wait for event queue to become idle
 const idleCallbacks: Array<() => void> = [];
 function idle(first?: true): Promise<void> {
 	return !dispatchingEvent && (!loadingModules || dead) ? resolvedPromise : new Promise((resolve) => {
@@ -224,6 +232,7 @@ function idle(first?: true): Promise<void> {
 	});
 }
 
+// Entering a "kernal space" callback
 function runAPIImplementation<T>(block: () => T): T {
 	dispatchingAPIImplementation++;
 	insideCallback = false;
@@ -242,6 +251,7 @@ function runAPIImplementation<T>(block: () => T): T {
 // Session state
 const startupScripts = document.getElementsByTagName("script");
 const bootstrapData = (() => {
+	// Read bootstrap data
 	if (!window.performance || performance.navigation.type !== 1) {
 		const historyState = history.state;
 		if (historyState && "sessionID" in historyState) {
@@ -293,6 +303,7 @@ if (wrapperForm) {
 	wrapperForm.onsubmit = () => false;
 }
 
+// Send pending data to the server, if any
 const synchronizeChannels = escaping(() => {
 	if (loadingModules) {
 		idleCallbacks.push(synchronizeChannels);
@@ -341,6 +352,7 @@ if (bootstrapData.sessionID) {
 			}
 		}
 		document.body.removeChild(serverRenderedHostElement);
+		// Update the scroll to match what was saved in the bootstrap
 		if ("x" in bootstrapData && "y" in bootstrapData) {
 			window.scrollTo(bootstrapData.x, bootstrapData.y);
 		}
@@ -352,7 +364,7 @@ if (bootstrapData.sessionID) {
 }
 
 afterHydration.then(() => {
-	// Dispatch DOM events that occurred as the page was loading
+	// Dispatch DOM events that occurred as the page was loading (via calls to _dispatch generated from a server side render)
 	const racedEvents = (window as any)._mobiusEvents as ReadonlyArray<[number, any]>;
 	if (racedEvents) {
 		delete (window as any)._mobiusEvents;
@@ -361,6 +373,7 @@ afterHydration.then(() => {
 	}
 });
 
+// Extract queued events into a message to send to the server
 function produceMessage(): Partial<ClientMessage> {
 	const result: Partial<ClientMessage> = { messageID: outgoingMessageId++ };
 	if (queuedLocalEvents.length) {
@@ -373,6 +386,7 @@ function produceMessage(): Partial<ClientMessage> {
 	return result;
 }
 
+// Kill the existing heartbeat timer
 function cancelHeartbeat() {
 	if (heartbeatTimeout) {
 		clearTimeout(heartbeatTimeout);
@@ -380,11 +394,13 @@ function cancelHeartbeat() {
 	}
 }
 
+// Reschedule the heartbeat timer
 function restartHeartbeat() {
 	cancelHeartbeat();
 	heartbeatTimeout = setTimeout(sendMessages, sessionHeartbeatInterval);
 }
 
+// Tear down any communication with the server and enter the dead state
 export function disconnect() {
 	if (!dead) {
 		dead = true;
@@ -435,6 +451,7 @@ export function disconnect() {
 
 window.addEventListener("unload", disconnect, false);
 
+// Dispatch an event from the server (potentially either a server-side event, or a fenced/peer client-side event)
 function dispatchEvent(event: Event): Promise<void> | void {
 	let channelId = event[0];
 	let channel: ((event: Event) => void) | undefined;
@@ -468,6 +485,7 @@ function dispatchEvent(event: Event): Promise<void> | void {
 }
 const escapingDispatchEvent = escaping(dispatchEvent);
 
+// Send an event to a channel, respecting batching
 function callChannelWithEvent(channel: ((event: Event) => void) | undefined, event: Event) {
 	if (channel) {
 		if (totalBatched) {
@@ -478,6 +496,7 @@ function callChannelWithEvent(channel: ((event: Event) => void) | undefined, eve
 	}
 }
 
+// Process events from the server
 function processEvents(events: Array<Event | boolean>) {
 	return idle().then(() => {
 		hadOpenServerChannel = pendingChannelCount != 0;
@@ -499,6 +518,7 @@ function processEvents(events: Array<Event | boolean>) {
 }
 
 let serverDisconnectCount = 0;
+// Process message from the server
 function processMessage(message: ServerMessage): Promise<void> {
 	if (message.reload) {
 		disconnect();
@@ -538,10 +558,12 @@ function processMessage(message: ServerMessage): Promise<void> {
 	return promise.then(synchronizeChannels);
 }
 
+// URI-encode allowing common URL characters to go through without percent escapes
 function cheesyEncodeURIComponent(text: string) {
 	return encodeURIComponent(text).replace(/%5B/g, "[").replace(/%5D/g, "]").replace(/%2C/g, ",").replace(/%20/g, "+");
 }
 
+// Create a query string out of a client-to-server message
 function serializeMessageAsQueryString(message: Partial<ClientMessage>): string {
 	let result = "sessionID=" + sessionID;
 	if (clientID) {
@@ -559,6 +581,7 @@ function serializeMessageAsQueryString(message: Partial<ClientMessage>): string 
 	return result;
 }
 
+// Send a POST request containing a client-to-server message and process any response
 function sendFormMessage(message: Partial<ClientMessage>) {
 	// Form post over XMLHttpRequest is used when WebSockets are unavailable or fail
 	activeConnectionCount++;
@@ -580,6 +603,7 @@ function sendFormMessage(message: Partial<ClientMessage>) {
 
 let lastWebSocketMessageId = 0;
 
+// Send pending messages using whichever protocol is deemed best
 function sendMessages(attemptWebSockets?: boolean) {
 	if (dead) {
 		return;
@@ -659,6 +683,7 @@ function sendMessages(attemptWebSockets?: boolean) {
 	}
 }
 
+// Create a server channel
 function createRawServerChannel(callback: (event?: Event) => void): Channel {
 	if (!insideCallback) {
 		throw new Error("Unable to create server channel in this context!");
@@ -687,6 +712,7 @@ function createRawServerChannel(callback: (event?: Event) => void): Channel {
 	};
 }
 
+// Send a client-side event
 function sendEvent(event: Event, batched?: boolean, skipsFencing?: boolean) {
 	const channelId = event[0];
 	if (pendingChannelCount && !skipsFencing && !dead) {
@@ -711,6 +737,7 @@ function sendEvent(event: Event, batched?: boolean, skipsFencing?: boolean) {
 	}
 }
 
+// Synchronize events to the server, even if they would normally be queued
 export function flush(): Promise<void> {
 	if (dead) {
 		return Promise.reject(disconnectedError());
@@ -722,6 +749,7 @@ export function flush(): Promise<void> {
 	return resolvedPromise;
 }
 
+// Receive a value asynchronously from the server over a channel expected to receive only one message
 export const createServerPromise: <T extends JsonValue | void>(fallback?: () => Promise<T> | T) => Promise<T> = <T extends JsonValue | void>(fallback?: () => Promise<T> | T) => new Promise<T>((resolve, reject) => {
 	if (dead) {
 		if (fallback) {
@@ -749,6 +777,7 @@ export const createServerPromise: <T extends JsonValue | void>(fallback?: () => 
 
 export const synchronize = () => createServerPromise<void>();
 
+// Create a server channel that can receive multiple messages and must be closed by user-space
 export function createServerChannel<T extends Function>(callback: T, onAbort?: () => void): Channel {
 	if (!("call" in callback)) {
 		throw new TypeError("callback is not a function!");
@@ -769,6 +798,7 @@ export function createServerChannel<T extends Function>(callback: T, onAbort?: (
 	return channel;
 }
 
+// Receive a value asynchronously from on the client and rebroadcast to the server over a channel
 export function createClientPromise<T extends JsonValue | void>(ask: () => (Promise<T> | T), batched?: boolean): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
 		if (!insideCallback) {
@@ -802,6 +832,7 @@ export function createClientPromise<T extends JsonValue | void>(ask: () => (Prom
 	});
 }
 
+// Create a client channel that can broadcast multiple messages and must be closed by user-space
 export function createClientChannel<T extends Function, U = void>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, batched?: boolean, shouldFlushMicroTasks?: true): Channel {
 	if (!("call" in callback)) {
 		throw new TypeError("callback is not a function!");
@@ -884,6 +915,7 @@ export function createClientChannel<T extends Function, U = void>(callback: T, o
 	};
 }
 
+// Coordinate a value from a non-deterministic API that can potentially be implemented on either client or server
 export function coordinateValue<T extends JsonValue>(generator: () => T): T {
 	if (!dispatchingEvent || dead) {
 		return generator();
@@ -961,6 +993,7 @@ export function coordinateValue<T extends JsonValue>(generator: () => T): T {
 	}
 }
 
+// Make the session become shareable and receive the URL on which the session can be joined
 export async function shareSession(): Promise<string> {
 	const value = await createServerPromise<string>();
 	// Dummy channel that stays open
@@ -968,8 +1001,8 @@ export async function shareSession(): Promise<string> {
 	return value;
 }
 
+// Promise implementation that properly schedules as a micro-task, for use when the browser doesn't have promises or has a non-compliant implementation
 function bundledPromiseImplementation() {
-	// Promise implementation that properly schedules as a micro-task
 
 	const enum PromiseState {
 		Pending = 0,
@@ -1145,6 +1178,7 @@ interceptGlobals(window, () => insideCallback && !dead, coordinateValue, <T exte
 	};
 });
 
+// ES2017-compliant module loader with support for dynamic imports and CSS modules
 type ImportFunction = (moduleName: string | Promise<any>) => Promise<any>;
 declare global {
 	let _import: ImportFunction;
@@ -1238,4 +1272,5 @@ _import = (moduleNameOrPromise: string | Promise<any>) => {
 	}
 };
 
+// Update body class so that page can be styled appropriately
 document.body.className = "notranslate mobius-active mobius-full";

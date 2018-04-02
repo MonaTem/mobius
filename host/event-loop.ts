@@ -5,9 +5,14 @@ export function defer(value?: any): Promise<any> {
 }
 
 export function escape(e: any) {
-	setImmediate(() => {
-		throw e;
-	});
+	if (console.error) {
+		console.error(e);
+		process.exit(1);
+	} else {
+		setImmediate(() => {
+			throw e;
+		});
+	}
 }
 
 export function escaping(handler: () => any | Promise<any>): () => Promise<void>;
