@@ -138,8 +138,6 @@ async function validateSessionsAndPrepareGracefulExit(sessionsPath: string) {
 }
 
 const htmlContents = suppressUnhandledRejection(readFile(packageRelative("public/index.html")).then((contents) => contents.toString()));
-const fallbackPath = packageRelative("dist/fallback.js");
-const fallbackRouteAsync = suppressUnhandledRejection(readFile(fallbackPath).then((contents) => staticFileRoute("/fallback.js", contents)));
 
 function suppressUnhandledRejection<T>(promise: Promise<T>) {
 	promise.catch(emptyFunction);
@@ -147,7 +145,9 @@ function suppressUnhandledRejection<T>(promise: Promise<T>) {
 }
 
 export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0, bundled = false, generate = false, watch = false }: Config) {
-	const fallbackMapContentsAsync = sourceMaps ? readFile(fallbackPath + ".map") : "";
+	const fallbackPath = packageRelative(minify ? "dist/fallback.min.js" : "dist/fallback.js");
+	const fallbackRouteAsync = suppressUnhandledRejection(readFile(fallbackPath).then((contents) => staticFileRoute("/fallback.js", contents)));
+	const fallbackMapContentsAsync = sourceMaps ? suppressUnhandledRejection(readFile(fallbackPath + ".map")) : undefined;
 	const secretsPath = resolvePath(sourcePath, "secrets.json");
 	const gracefulExitAsync = suppressUnhandledRejection(validateSessionsAndPrepareGracefulExit(sessionsPath));
 	const serverModulePaths = [packageRelative("server"), resolvePath(sourcePath, "server")];
@@ -354,7 +354,11 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	compiling = false;
 
 	// Await remaining assets
-	const fallbackMapContents = await fallbackMapContentsAsync;
+	let fallbackMapContents: Buffer | undefined;
+	try {
+		fallbackMapContents = await fallbackMapContentsAsync;
+	} catch (e) {
+	}
 	const gracefulExit = await gracefulExitAsync;
 	const fallbackRoute = await fallbackRouteAsync;
 	return {
@@ -591,7 +595,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 			registerScriptRoutes(server);
 
-			if (sourceMaps) {
+			if (fallbackMapContents) {
 				const fallbackMap = staticFileRoute("/fallback.js.map", fallbackMapContents);
 				registerStatic(server, fallbackRoute, (response) => {
 					response.set("Content-Type", "text/javascript; charset=utf-8");

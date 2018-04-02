@@ -55,3 +55,5 @@ dist/diff-match-patch.js: dist/
 dist/fallback.js: mobius-fallback.ts dist/diff-match-patch.js types/*.d.ts tsconfig-fallback.json dist/
 	node_modules/.bin/tsc -p tsconfig-fallback.json
 
+dist/fallback.min.js: dist/fallback.js
+	node_modules/.bin/google-closure-compiler-js --languageOut ES3 --jsCode $< > $@
