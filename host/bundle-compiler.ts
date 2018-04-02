@@ -458,7 +458,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 					imports = importsObject;
 				}
 				if (cssRoute) {
-					magicString.append('}');
+					magicString.append("}");
 				}
 				magicString.append(`)({}, ${JSON.stringify(imports)}, document)`);
 			} else {
