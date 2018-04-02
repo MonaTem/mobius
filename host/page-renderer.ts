@@ -167,7 +167,7 @@ export class PageRenderer {
 		}
 		this.clientScript.src = clientURL;
 		this.clientScript.setAttribute("integrity", clientIntegrity);
-		this.fallbackScript.textContent = `window._mobius||(function(s){s.src=${JSON.stringify(fallbackURL)};s.setAttribute("integrity",${JSON.stringify(fallbackIntegrity)});document.head.appendChild(s)})(document.createElement("script"))`;
+		this.fallbackScript.textContent = `window._mobius||(function(s){s.src=${JSON.stringify(fallbackURL)};s.setAttribute("integrity",${JSON.stringify(fallbackIntegrity)})})(document.head.appendChild(document.createElement("script")))`;
 		if (noScriptURL) {
 			this.metaRedirect.setAttribute("content", "0; url=" + noScriptURL);
 			this.head.appendChild(this.noscript);
@@ -199,7 +199,13 @@ export class PageRenderer {
 						}
 					}
 					if (newRoot.nodes && newRoot.nodes.length) {
-						const inlineStyles = this.inlineStyles || (this.inlineStyles = this.head.appendChild(document.createElement("style")));
+						let inlineStyles = this.inlineStyles;
+						if (!inlineStyles) {
+							inlineStyles = document.createElement("style");
+							inlineStyles.setAttribute("id", "mobius-inlined");
+							this.head.appendChild(inlineStyles);
+							this.inlineStyles = inlineStyles;
+						}
 						inlineStyles.textContent = newRoot.toResult().css;
 					}
 				}

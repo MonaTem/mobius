@@ -431,14 +431,19 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 						`link=document.createElement("link");` +
 						`link.href=${JSON.stringify(cssRoute.foreverPath)};` +
 						`if("onload" in link){` +
-							`for(_mobius=link.onload=main;i<stylesheets.length;i++)` +
+							`for(_mobius=link.onload=loaded;i<stylesheets.length;i++)` +
 								`if(stylesheets[i].href==link.href)` +
-									`return stylesheets[i].sheet ? main() : stylesheets[i].onload=main;` +
+									`return stylesheets[i].sheet ? loaded() : stylesheets[i].onload=loaded;` +
 						`}else ` +
 							`main();` +
 						`link.rel="stylesheet";` +
 						`link.setAttribute("integrity",${JSON.stringify(cssRoute.integrity)});` +
 						`document.head.appendChild(link);` +
+						`function loaded(){` +
+							`main();` +
+							`if(link=document.querySelector("style#mobius-inlined"))` +
+								`link.parentNode.removeChild(link)` +
+						`}` +
 						`function main() {\n`);
 				} else {
 					magicString.prepend(`\n`);
