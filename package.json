@@ -68,7 +68,7 @@
     "opn": "^5.3.0",
     "postcss": "^6.0.21",
     "rimraf": "^2.6.2",
-    "rollup": "github:rpetrich/rollup#286f87f328ecd9dd1f2fba33fb23e3ead4ca314a",
+    "rollup": "github:rpetrich/rollup#1bd9c3fcd1a2f1bda0d315813d133a23bd7ae28a",
     "rollup-plugin-babel": "^3.0.3",
     "rollup-plugin-closure-compiler-js": "^1.0.6",
     "rollup-plugin-includepaths": "^0.2.2",

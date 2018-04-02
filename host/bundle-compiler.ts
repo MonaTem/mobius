@@ -365,11 +365,18 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			const cssModuleName = chunk.id.replace(/(\.js)?$/, ".css");
 			const css = new Concat(true, cssModuleName, minify ? "" : "\n\n");
 			const bundledCssModulePaths: string[] = [];
-			for (const module of chunk.getJsonModules()) {
+			for (const module of chunk.orderedModules) {
 				const implementation = memoizedVirtualModule(module.id, !!minify);
 				if (implementation && implementation.generateStyles) {
 					bundledCssModulePaths.push(module.id);
-					const styles = implementation.generateStyles();
+					const variables = module.scope.variables;
+					const usedVariables: string[] = [];
+					for (const key of Object.keys(variables)) {
+						if (variables[key].included) {
+							usedVariables.push(variables[key].name);
+						}
+					}
+					const styles = implementation.generateStyles(variables.this.included ? undefined : usedVariables);
 					if (styles.css) {
 						css.add(module.id, styles.css, styles.map);
 					}

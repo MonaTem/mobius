@@ -13,7 +13,7 @@ export interface VirtualModule {
 	generateTypeDeclaration: () => string;
 	generateModule: (program: ts.Program) => string;
 	instantiateModule: (program: ts.Program, moduleMap: ModuleMap, staticAssets: StaticAssets) => (global: ServerModuleGlobal) => void;
-	generateStyles?: () => { css: string; map?: RawSourceMap };
+	generateStyles?: (usedExports?: string[]) => { css: string; map?: RawSourceMap };
 }
 
 export default function(path: string, minify: boolean): VirtualModule | void {
