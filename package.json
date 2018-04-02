@@ -100,6 +100,7 @@
     "diff-match-patch": "^1.0.0",
     "magic-string": "^0.24.0",
     "preact": "https://github.com/rpetrich/preact/tarball/ea1aad307df393aa4b97e4acbc500c63cbe90a20",
+    "set-dom": "^7.5.2",
     "tslint": "^5.9.1"
   }
 }

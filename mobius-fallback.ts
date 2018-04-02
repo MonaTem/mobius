@@ -22,6 +22,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+declare function setDOM(element: Element, source: string): void;
+
 (() => {
 	document.body.className = "notranslate mobius-active";
 
@@ -141,7 +143,7 @@
 							} else {
 								currentHTMLSource = diff.patch_apply(diff.patch_fromText(responseText), currentHTMLSource)[0];
 							}
-							(window as any).setDOM(document.documentElement, currentHTMLSource);
+							setDOM(document.documentElement, currentHTMLSource);
 							// form.innerHTML = request.responseText;
 							checkServerChannels();
 						}
