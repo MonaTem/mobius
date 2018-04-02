@@ -1,7 +1,7 @@
 import * as babel from "babel-core";
 import { NodePath } from "babel-traverse";
 import * as types from "babel-types";
-import { BlockStatement, CallExpression, ForStatement, Identifier, LabeledStatement, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
+import { BlockStatement, CallExpression, ForStatement, Identifier, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
 import Concat from "concat-with-sourcemaps";
 import { resolve } from "path";
 import { Chunk, Finaliser, getExportBlock, OutputOptions, Plugin, rollup, SourceDescription } from "rollup";
@@ -66,6 +66,7 @@ function isPureOrRedacted(path: NodePath) {
 }
 
 function stripRedact() {
+	// Remove calls to redact(...). This is critical to avoid leaking SQL queries and other secrets that shouldn't be distributed to client
 	return {
 		visitor: {
 			CallExpression: {
@@ -126,19 +127,8 @@ function fixTypeScriptExtendsWarning() {
 	};
 }
 
-function rewriteInsufficientBrowserThrow() {
-	return {
-		visitor: {
-			LabeledStatement(path: NodePath<LabeledStatement>) {
-				if (path.node.label.name === "insufficient_browser_throw" && path.get("body").isThrowStatement()) {
-					path.replaceWith(types.returnStatement());
-				}
-			},
-		},
-	};
-}
-
 function stripUnusedArgumentCopies() {
+	// Strip unnecessary desugaring of variable arguments when the variable arguments are unused (common on client for server-provided APIs and vice-versa)
 	return {
 		visitor: {
 			ForStatement(path: NodePath<ForStatement>) {
@@ -188,6 +178,7 @@ const declarationPattern = /\.d\.ts$/;
 const declarationOrJavaScriptPattern = /\.(d\.ts|js)$/;
 
 export default async function(profile: "client" | "server", fileRead: (path: string) => void, input: string, basePath: string, publicPath: string, minify?: boolean): Promise<CompilerOutput> {
+	// Dynamically load dependencies to reduce startup time
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
 	const rollupTypeScript = require("rollup-plugin-typescript2") as typeof _rollupTypeScript;
@@ -210,11 +201,13 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	let program: ts.Program | undefined;
 	const memoizedVirtualModule = memoize(virtualModule);
 	const plugins = [
+		// Include preact
 		includePaths({
 			include: {
 				preact: packageRelative("dist/common/preact"),
 			},
 		}),
+		// Transform TypeScript
 		rollupTypeScript({
 			cacheRoot: resolve(basePath, ".cache"),
 			include: [
@@ -285,6 +278,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				}
 			},
 		}) as any as Plugin,
+		// Transform the intermediary phases via babel
 		rollupBabel({
 			babelrc: false,
 			presets: isClient ? [env.default(null, { targets: { browsers: ["ie 6"] }, modules: false })] : [],
@@ -298,7 +292,6 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				rewriteForInStatements(),
 				fixTypeScriptExtendsWarning(),
 				noImpureGetters(),
-				rewriteInsufficientBrowserThrow(),
 				stripUnusedArgumentCopies(),
 			] : [
 				syntaxDynamicImport(),
@@ -311,6 +304,8 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			],
 		}),
 	];
+
+	// If minifying, use Closure Compiler
 	if (minify) {
 		plugins.push(require("rollup-plugin-closure-compiler-js")({
 			languageIn: "ES5",
@@ -327,10 +322,12 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	plugins.push({
 		name: "mobius-output-collector",
 		transform(code, id) {
+			// Track input files read so the --watch option works
 			fileRead(id.toString());
 			return Promise.resolve();
 		},
 		ongenerate(options: OutputOptions, source: SourceDescription) {
+			// Collect output into routes
 			const path = ((options as any).bundle.name as string);
 			routes[path.substr(1)] = {
 				route: staticFileRoute(minify && path != mainChunkId ? "/" + routeIndexes.indexOf(path).toString(36) + ".js" : path.substr(1), source.code),
@@ -361,7 +358,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 		) {
 			const isMain = chunk.id === mainChunkId;
 
-			// Bundle CSS
+			// Bundle any CSS provided by the modules in the chunk (only virtual modules can provide CSS)
 			const cssModuleName = chunk.id.replace(/(\.js)?$/, ".css");
 			const css = new Concat(true, cssModuleName, minify ? "" : "\n\n");
 			const bundledCssModulePaths: string[] = [];
@@ -382,6 +379,8 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 					}
 				}
 			}
+
+			// Register CSS route
 			let cssRoute: StaticFileRoute | undefined;
 			const cssString = css.content.toString();
 			if (cssString) {
@@ -402,6 +401,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 
 			const { dependencies, exports } = chunk.getModuleDeclarations();
 
+			// Generate code to ask for and receive imported modules
 			const mainIndex = dependencies.findIndex((m) => m.id === mainChunkId);
 			let mainIdentifier: string = "__main_js";
 			if (mainIndex !== -1) {
@@ -414,8 +414,9 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				args.unshift(mainIdentifier);
 			}
 			args.unshift("_import");
-			args.unshift("exports");
 
+			// Generate code to write exported symbols into the exports object
+			args.unshift("exports");
 			const exportBlock = getExportBlock(exports, dependencies, exportMode);
 			if (exportBlock) {
 				magicString.append("\n\n" + exportBlock, {});
@@ -425,6 +426,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			if (isMain) {
 				args.push("document");
 				if (cssRoute) {
+					// Coordinate load with the main.css so that we don't inadvertently mutate the DOM before it's ready
 					magicString.prepend(
 						`var i=0,` +
 						`stylesheets=document.querySelectorAll("link"),` +
@@ -448,11 +450,23 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				} else {
 					magicString.prepend(`\n`);
 				}
-				magicString.prepend(`(function(${args.join(", ")}) { if (!window.addEventListener || !Object.keys || typeof JSON == "undefined") return;`);
+				// Add sanity check for prerequisites, will early exit to fallback
+				magicString.prepend(
+					`(function(${args.join(", ")}) { ` +
+					`if (!window.addEventListener || !Object.keys || typeof JSON == "undefined") ` +
+						`return;`);
+				// Add JavaScript equivalent of frame-ancestors 'none'
+				magicString.prepend(
+					`if (top != self) {` +
+						`document.open();` +
+						`document.close();` +
+						`return;` +
+					`}`);
 				function loadDataForModuleWithName(name: string): [string, string] {
 					const route = routes[name.substr(1)].route;
 					return [route.foreverPath, route.integrity];
 				}
+				// Insert imports mapping, using an array and indexes when minified
 				let imports: any;
 				if (minify) {
 					const importsArray = routeIndexes.map(loadDataForModuleWithName);
@@ -467,6 +481,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				}
 				magicString.append(`)({}, ${JSON.stringify(imports)}, document)`);
 			} else {
+				// Generate code to inform the loader that our module's content has loaded
 				magicString.prepend(`_mobius(function(${args.join(", ")}) {\n`);
 				magicString.append(["", minify ? routeIndexes.indexOf(chunk.id).toString() : JSON.stringify(chunk.id)].concat(deps).join(", ") + ")");
 			}
@@ -474,6 +489,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			return magicString;
 		},
 		dynamicImportMechanism: {
+			// Replace import("path") with _import(moduleId)
 			left: "_import(",
 			right: ")",
 			replacer: (text: string) => {
@@ -493,12 +509,13 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 		acorn: {
 			allowReturnOutsideFunction: true,
 		},
+		// Use experimental rollup features, including the aggressive merging features our fork features
 		experimentalCodeSplitting: true,
 		experimentalDynamicImport: true,
 		aggressivelyMergeModules: true,
-		hashedChunkNames: false,
 		minifyInternalNames: minify,
 	});
+	// Extract the prepared chunks
 	if ("chunks" in bundle) {
 		const chunks = bundle.chunks;
 		for (const chunkName of Object.keys(chunks)) {
@@ -507,6 +524,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			}
 		}
 	}
+	// Generate the output, using our custom finalizer for client
 	await bundle.generate({
 		format: isClient ? customFinalizer : "cjs",
 		sourcemap: true,

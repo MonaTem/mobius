@@ -26,13 +26,6 @@ import { Channel, JsonValue } from "mobius-types";
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-if (top != self) {
-	document.open();
-	document.close();
- insufficient_browser_throw:
-	throw new Error("Not allowed to load as an iframe!");
-}
-
 if (history.replaceState) {
 	const queryComponents = location.search.substr(1).split(/\&/g);
 	let i = queryComponents.length;
