@@ -19,19 +19,23 @@ function removeRule(rule: CSSRule) {
 export default function(path: string, minify: boolean): VirtualModule | void {
 	if (cssPathPattern.test(path) && ts.sys.fileExists(path)) {
 		const fileContents = ts.sys.readFile(path)!;
+		// Generate a prefix for our local selectors
 		const relativePath = relative(ts.sys.getCurrentDirectory(), path);
 		const sanitisedPath = relativePath.replace(/\.[^\.\/\\]+$/, "").replace(/[\W_]+/g, "_").replace(/^_|_$/g, "");
 		let deadPattern: RegExp | undefined;
 		const names: { [name: string]: number; } = {};
 		let i: number = 0;
 		const pluginChain = [Core.values, Core.localByDefault, Core.extractImports, Core.scope({ generateScopedName }), (root: CSSRoot) => {
+			// Walk stylesheet and remove unused rules
 			if (typeof deadPattern !== "undefined") {
 				root.walkRules(deadPattern, removeRule);
 			}
 		}];
+		// Use cssnano to minify if necessary
 		if (minify) {
 			pluginChain.push(postcssMinifyPlugin);
 		}
+		// Compile using the plugin chain
 		const core = new Core(pluginChain);
 		let result = compile();
 		function compile() {
@@ -47,13 +51,16 @@ export default function(path: string, minify: boolean): VirtualModule | void {
 		}
 		return {
 			generateTypeDeclaration() {
+				// Generate an export declaration for each class/id name
 				return Object.keys(result.exportTokens).map((symbolName) => `export const ${symbolName}: string;`).join("\n");
 			},
 			generateModule(program: ts.Program) {
+				// Generate an export for each class/id name with the value
 				return Object.keys(result.exportTokens).map((symbolName) => `export const ${symbolName} = ${JSON.stringify(result.exportTokens[symbolName])};`).join("\n");
 			},
 			generateStyles(usedExports?: string[]) {
 				if (typeof usedExports !== "undefined" && typeof deadPattern === "undefined") {
+					// Recompile with unused rules removed
 					const patterns = Object.keys(result.exportTokens).filter((name) => usedExports.indexOf(name) === -1).map((name) => result.exportTokens[name].replace(/([.?*+^$[\]\\(){}|-])/g, "\\$1"));
 					if (patterns.length) {
 						deadPattern = new RegExp("[#.](" + patterns.join("|") + ")\\b");
@@ -66,8 +73,10 @@ export default function(path: string, minify: boolean): VirtualModule | void {
 				const href = moduleMap[path];
 				const integrity = staticAssets[href] ? staticAssets[href].integrity : undefined;
 				return (global) => {
+					// Copy exported names into the instantiated module's exports
 					Object.defineProperty(global.exports, "__esModule", { value: true });
 					Object.assign(global.exports, result.exportTokens);
+					// Inject a CSS link into the DOM so that the client will get the CSS when server-side rendering
 					const link = (global.require("document") as Document).createElement("link");
 					link.rel = "stylesheet";
 					link.href = href;

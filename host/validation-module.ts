@@ -110,10 +110,13 @@ export default function(path: string): VirtualModule | void {
 	}
 	return {
 		generateTypeDeclaration() {
+			// Generate a basic declaration for the validators
+			// Unfortunately we don't have type information so we can't provide only valid keys :(
 			return `declare const validators: { [symbol: string]: (value: any) => boolean };\n` +
 				`export default validators;\n`;
 		},
 		generateModule(program: ts.Program) {
+			// Compile and optimize validators for each of the types in the parent module
 			const entries: string[] = [];
 			for (const { name, schema } of buildSchemas(modulePath, program)) {
 				entries.push(` ${JSON.stringify(name)}: ${ajv.compile(schema).toString()}`);
@@ -124,6 +127,7 @@ export default function(path: string): VirtualModule | void {
 			return babel.transformFromAst(ast, original, { plugins: [[rewriteAjv, {}]], compact: true }).code!;
 		},
 		instantiateModule(program: ts.Program) {
+			// Compile validators for each of the types in the parent module
 			const validators: { [symbol: string]: (value: any) => boolean } = {};
 			for (const { name, schema } of buildSchemas(modulePath, program)) {
 				const compiled = ajv.compile(schema);
