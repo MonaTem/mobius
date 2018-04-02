@@ -56,7 +56,9 @@ export class PageRenderer {
 	private clientIdInput?: HTMLInputElement;
 	private messageIdInput?: HTMLInputElement;
 	private hasServerChannelsInput?: HTMLInputElement;
+
 	constructor(private dom: JSDOM, private noscript: Element, private metaRedirect: Element, private cssForPath: (path: string) => Promise<CSSRoot>) {
+		// Reuse a single document to avoid unnecessary memory usage associated with all the global JSDOM objects
 		this.document = (dom.window as Window).document;
 		this.body = this.document.body.cloneNode(true) as Element;
 		this.head = this.document.head.cloneNode(true) as Element;
@@ -67,6 +69,8 @@ export class PageRenderer {
 		const fallbackScript = this.fallbackScript = this.document.createElement("script");
 		this.body.appendChild(fallbackScript);
 	}
+
+	// Render document state into an HTML document containing the appropriate bootstrap data and configuration
 	public async render({ mode, clientState, sessionState, clientURL, clientIntegrity, fallbackIntegrity, fallbackURL, noScriptURL, bootstrapData, inlineCSS }: RenderOptions): Promise<string> {
 		const document = this.document;
 		let bootstrapScript: HTMLScriptElement | undefined;
@@ -215,6 +219,7 @@ export class PageRenderer {
 				headParent.replaceChild(realHead, this.head);
 			}
 		} finally {
+			// Put Humpty Dumpty back together again
 			if (mode >= PageRenderMode.IncludeForm && formNode) {
 				if (postbackInput) {
 					formNode.removeChild(postbackInput);

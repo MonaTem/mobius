@@ -2,6 +2,7 @@ import { NodePath } from "babel-traverse";
 import { CallExpression } from "babel-types";
 import * as types from "babel-types";
 
+// Convert import(...) to Promise.resolve(...).then(require) to simulate ES2017 dynamic imports in CommonJS
 export default {
 	visitor: {
 		Import(path: NodePath) {

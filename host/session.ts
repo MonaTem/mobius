@@ -26,6 +26,7 @@ export interface SessionClients extends SessionSandboxClient {
 	get(clientID: number): Client | undefined;
 }
 
+// Actual client implementation that allows enqueuing/dequeueing events from multiple clients
 class InProcessClients implements SessionClients {
 	private sessionID: string;
 	private sessions: Map<string, Session>;
@@ -107,6 +108,7 @@ const workerResolves = new Map<number, [(value: any) => void, (value: any) => vo
 
 type CommandMessage = [string, string, number];
 
+// Send messages from worker process to parent
 class WorkerSandboxClient implements SessionSandboxClient {
 	public sessionID: string;
 	constructor(sessionID: string) {
@@ -147,6 +149,7 @@ class WorkerSandboxClient implements SessionSandboxClient {
 	}
 }
 
+// Send messages from parent process to worker
 class OutOfProcessSession implements Session {
 	private sessionID: string;
 	private process: ChildProcess;
@@ -252,6 +255,7 @@ function constructBroadcastModule() {
 }
 
 if (require.main === module) {
+	// Handle messages from parent inside worker
 	process.addListener("message", function bootstrap(options: HostSandboxOptions) {
 		const basicBroadcast = constructBroadcastModule();
 		const host = new HostSandbox(options, (path: string) => {
@@ -307,11 +311,13 @@ let currentDebugPort = (process as any).debugPort as number;
 
 export function createSessionGroup(options: HostSandboxOptions, fileRead: (path: string) => void, sessions: Map<string, Session>, workerCount: number) {
 	if (workerCount <= 0) {
+		// Dispatch messages in-process instead of creating workers
 		const host = new HostSandbox(options, fileRead, constructBroadcastModule());
 		return (sessionID: string, request?: Request) => new InProcessSession(host, new InProcessClients(sessionID, sessions, request), sessionID);
 	}
 	const workers: ChildProcess[] = [];
 	for (let i = 0; i < workerCount; i++) {
+		// Fork a worker to run sessions with node debug command line arguments rewritten
 		const worker = workers[i] = fork(require.resolve("./session"), [], {
 			env: process.env,
 			cwd: process.cwd(),
@@ -369,6 +375,7 @@ export function createSessionGroup(options: HostSandboxOptions, fileRead: (path:
 	let currentWorker = 0;
 	return (sessionID: string, request?: Request) => {
 		const result = new OutOfProcessSession(new InProcessClients(sessionID, sessions, request), sessionID, workers[currentWorker]);
+		// Rotate through workers
 		if ((++currentWorker) === workerCount) {
 			currentWorker = 0;
 		}

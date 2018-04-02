@@ -1,3 +1,4 @@
+// Memoize function calls based on the first argument
 export default function memoize<T extends Function>(func: T): T {
 	const values = new Map<any, any>();
 	return function(this: any, input: any) {

@@ -3,6 +3,7 @@ import { promisify } from "util";
 
 import { exists, mkdir, packageRelative, readJSON, unlink, writeFile } from "./fileUtils";
 
+// Create an empty project after prompting for configuration
 export default async function init(basePath: string) {
 	const packagePath = path.resolve(basePath, "package.json");
 	const newPackageFile = !await exists(packagePath);
