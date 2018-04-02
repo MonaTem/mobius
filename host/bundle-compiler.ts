@@ -11,7 +11,6 @@ import _rollupTypeScript from "rollup-plugin-typescript2";
 import { pureBabylon as pure } from "side-effects-safe";
 import { RawSourceMap } from "source-map";
 import * as ts from "typescript";
-import addSubresourceIntegrity from "./addSubresourceIntegrity";
 import { packageRelative } from "./fileUtils";
 import importBindingForCall from "./importBindingForCall";
 import memoize from "./memoize";
@@ -287,7 +286,6 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				externalHelpers(babel),
 				[transformAsyncToPromises(babel), { externalHelpers: true }],
 				optimizeClosuresInRender(babel),
-				addSubresourceIntegrity(publicPath, fileRead),
 				stripRedact(),
 				rewriteForInStatements(),
 				fixTypeScriptExtendsWarning(),
@@ -298,7 +296,6 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				externalHelpers(babel),
 				[transformAsyncToPromises(babel), { externalHelpers: true }],
 				optimizeClosuresInRender(babel),
-				addSubresourceIntegrity(publicPath, fileRead),
 				rewriteForInStatements(),
 				noImpureGetters(),
 			],

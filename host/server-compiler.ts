@@ -3,7 +3,6 @@ import { readFileSync } from "fs";
 import { cwd } from "process";
 import * as ts from "typescript";
 import * as vm from "vm";
-import addSubresourceIntegrity from "./addSubresourceIntegrity";
 import { packageRelative } from "./fileUtils";
 import memoize from "./memoize";
 import noImpureGetters from "./noImpureGetters";
@@ -77,10 +76,8 @@ export class ServerCompiler {
 	private program: ts.Program;
 	private resolutionCache: ts.ModuleResolutionCache;
 
-	public fileRead: (path: string) => void;
-
-	constructor(mainFile: string, private publicPath: string, private moduleMap: ModuleMap, private staticAssets: StaticAssets, public virtualModule: (path: string) => VirtualModule | void, fileRead: (path: string) => void) {
-		this.fileRead = fileRead = memoize(fileRead);
+	constructor(mainFile: string, private moduleMap: ModuleMap, private staticAssets: StaticAssets, public virtualModule: (path: string) => VirtualModule | void, fileRead: (path: string) => void) {
+		fileRead = memoize(fileRead);
 		const fileNames = [/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), mainFile];
 		function readFile(path: string, encoding?: string) {
 			if (declarationPattern.test(path)) {
@@ -208,7 +205,6 @@ export class ServerCompiler {
 				rewriteDynamicImport,
 				convertToCommonJS,
 				optimizeClosuresInRender,
-				addSubresourceIntegrity(this.publicPath, this.fileRead),
 				rewriteForInStatements(),
 				noImpureGetters(),
 			],
