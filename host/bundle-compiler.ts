@@ -447,11 +447,6 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				} else {
 					magicString.prepend(`\n`);
 				}
-				// Add sanity check for prerequisites, will early exit to fallback
-				magicString.prepend(
-					`(function(${args.join(", ")}) { ` +
-					`if (!window.addEventListener || !Object.keys || typeof JSON == "undefined") ` +
-						`return;`);
 				// Add JavaScript equivalent of frame-ancestors 'none'
 				magicString.prepend(
 					`if (top != self) {` +
@@ -459,6 +454,11 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 						`document.close();` +
 						`return;` +
 					`}`);
+				// Add sanity check for prerequisites, will early exit to fallback
+				magicString.prepend(
+					`(function(${args.join(", ")}) { ` +
+					`if (!window.addEventListener || !Object.keys || typeof JSON == "undefined") ` +
+						`return;`);
 				function loadDataForModuleWithName(name: string): [string, string] {
 					const route = routes[name.substr(1)].route;
 					return [route.foreverPath, route.integrity];
