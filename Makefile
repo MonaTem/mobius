@@ -44,7 +44,7 @@ dist/mobius.js: $(call scripts, host) $(call scripts, common) mobius.ts types/*.
 	chmod +x dist/mobius.js
 
 
-fallback: dist/fallback.js
+fallback: dist/fallback.min.js
 
 dist/:
 	mkdir -p dist/
