@@ -253,7 +253,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 			// Start initial page render
 			console.log("Rendering initial page...");
 			const initialPageSession = newHost.constructSession("");
-			newHost.sessions.set("initial-render", initialPageSession);
+			newHost.sessions.set("", initialPageSession);
 			initialPageSession.updateOpenServerChannelStatus(true);
 			await initialPageSession.prerenderContent();
 
