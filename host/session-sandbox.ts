@@ -223,8 +223,8 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		}
 	}
 
-	public loadModule(source: ModuleSource, newModule: ServerModule, allowNodeModules: boolean) {
-		this.host.serverCompiler.loadModule(source, newModule, this.globalProperties, (name: string) => {
+	public loadModule(source: ModuleSource, newModule: ServerModule, allowNodeModules: boolean): any {
+		return this.host.serverCompiler.loadModule(source, newModule, this.globalProperties, (name: string) => {
 			const bakedModule = bakedModules[name];
 			if (bakedModule) {
 				return bakedModule(this);
@@ -240,8 +240,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 					paths: newModule.paths,
 				};
 				this.modules.set(modulePath, subModule);
-				this.loadModule({ from: "file", path: modulePath }, subModule, !!Module._findPath(name, this.host.options.serverModulePaths));
-				return subModule.exports;
+				return this.loadModule({ from: "file", path: modulePath }, subModule, !!Module._findPath(name, this.host.options.serverModulePaths)).exports;
 			}
 			const result = require(name);
 			if (!allowNodeModules) {
@@ -251,7 +250,6 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			}
 			return result;
 		});
-		return newModule;
 	}
 
 	// Async so that errors inside user code startup will log to console as unhandled promise rejection, but app will proceed

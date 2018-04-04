@@ -40,7 +40,7 @@ declare global {
 
 export type ModuleSource = { from: "file", path: string } | { from: "string", code: string, path: string };
 
-const compilerOptions = (() => {
+export const compilerOptions = (() => {
 	const fileName = "tsconfig-server.json";
 	const configFile = ts.readJsonConfigFile(packageRelative(fileName), (path: string) => readFileSync(path).toString());
 	const configObject = ts.convertToObject(configFile, []);
@@ -81,7 +81,7 @@ export class ServerCompiler {
 		// Hijack TypeScript's file access so that we can instrument when it reads files for watching and to inject virtual modules
 		fileRead = memoize(fileRead);
 		const fileNames = [/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), mainFile];
-		function readFile(path: string, encoding?: string) {
+		const readFile = (path: string, encoding?: string) => {
 			if (declarationPattern.test(path)) {
 				const module = virtualModule(path.replace(declarationPattern, ""));
 				if (module) {
@@ -161,6 +161,7 @@ export class ServerCompiler {
 		moduleGlobal.module = module;
 		moduleGlobal.exports = module.exports;
 		initializer(moduleGlobal);
+		return moduleGlobal;
 	}
 
 	public initializerForSource(source: ModuleSource) {
@@ -175,7 +176,7 @@ export class ServerCompiler {
 		if (declarationPattern.test(path)) {
 			const module = this.virtualModule(path.replace(declarationPattern, ""));
 			if (module) {
-				const instantiate = module.instantiateModule(this.program, this.moduleMap, this.staticAssets);
+				const instantiate = module.instantiateModule(this.moduleMap, this.staticAssets);
 				this.initializersForPaths.set(path, instantiate);
 				return instantiate;
 			}

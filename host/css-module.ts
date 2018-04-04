@@ -54,7 +54,7 @@ export default function(path: string, minify: boolean): VirtualModule | void {
 				// Generate an export declaration for each class/id name
 				return Object.keys(result.exportTokens).map((symbolName) => `export const ${symbolName}: string;`).join("\n");
 			},
-			generateModule(program: ts.Program) {
+			generateModule() {
 				// Generate an export for each class/id name with the value
 				return Object.keys(result.exportTokens).map((symbolName) => `export const ${symbolName} = ${JSON.stringify(result.exportTokens[symbolName])};`).join("\n");
 			},
@@ -69,13 +69,15 @@ export default function(path: string, minify: boolean): VirtualModule | void {
 				}
 				return { css: result.css, map: result.map };
 			},
-			instantiateModule(program: ts.Program, moduleMap: ModuleMap, staticAssets: StaticAssets) {
+			instantiateModule(moduleMap: ModuleMap, staticAssets: StaticAssets) {
 				const href = moduleMap[path];
 				const integrity = staticAssets[href] ? staticAssets[href].integrity : undefined;
+				const exports = {};
+				Object.defineProperty(exports, "__esModule", { value: true });
+				Object.assign(exports, result.exportTokens);
 				return (global) => {
+					global.exports = exports;
 					// Copy exported names into the instantiated module's exports
-					Object.defineProperty(global.exports, "__esModule", { value: true });
-					Object.assign(global.exports, result.exportTokens);
 					// Inject a CSS link into the DOM so that the client will get the CSS when server-side rendering
 					const link = (global.require("document") as Document).createElement("link");
 					link.rel = "stylesheet";

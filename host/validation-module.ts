@@ -6,6 +6,7 @@ import * as babylon from "babylon";
 import * as ts from "typescript";
 import { getDefaultArgs, JsonSchemaGenerator } from "typescript-json-schema";
 import { VirtualModule } from "./virtual-module";
+import { compilerOptions } from "./server-compiler";
 
 const validatorsPathPattern = /\!validators$/;
 const typescriptExtensions = [".ts", ".tsx", ".d.ts"];
@@ -20,7 +21,8 @@ function existingPathForValidatorPath(path: string) {
 	}
 }
 
-function buildSchemas(path: string, program: ts.Program) {
+function buildSchemas(path: string) {
+	const program = ts.createProgram([path], compilerOptions);
 	const sourceFile = program.getSourceFile(path);
 	if (!sourceFile) {
 		throw new Error("Could not find types for " + path);
@@ -108,38 +110,35 @@ export default function(path: string): VirtualModule | void {
 	if (typeof modulePath === "undefined") {
 		return;
 	}
+	const schemas = buildSchemas(modulePath);
 	return {
 		generateTypeDeclaration() {
-			// Generate a basic declaration for the validators
-			// Unfortunately we don't have type information so we can't provide only valid keys :(
-			return `declare const validators: { [symbol: string]: (value: any) => boolean };\n` +
-				`export default validators;\n`;
+			const entries: string[] = [];
+			for (const { name } of schemas) {
+				entries.push(`import { ${name} as ${name}Type } from ${JSON.stringify(modulePath.replace(/(\.d)?\.ts$/, ""))};`);
+				entries.push(`export function ${name}(value: any): value is ${name}Type;`);
+			}
+			return entries.join("\n");
 		},
-		generateModule(program: ts.Program) {
+		generateModule() {
 			// Compile and optimize validators for each of the types in the parent module
 			const entries: string[] = [];
-			for (const { name, schema } of buildSchemas(modulePath, program)) {
-				entries.push(` ${JSON.stringify(name)}: ${ajv.compile(schema).toString()}`);
+			for (const { name, schema } of schemas) {
+				entries.push(`export const ${name} = ${ajv.compile(schema).toString()};`);
 			}
-			const original = `export const validators = {${entries.join(",")} };\n` +
-				`export default validators;\n`;
+			const original = entries.join("\n");
 			const ast = babylon.parse(original, { sourceType: "module" });
 			return babel.transformFromAst(ast, original, { plugins: [[rewriteAjv, {}]], compact: true }).code!;
 		},
-		instantiateModule(program: ts.Program) {
+		instantiateModule() {
 			// Compile validators for each of the types in the parent module
-			const validators: { [symbol: string]: (value: any) => boolean } = {};
-			for (const { name, schema } of buildSchemas(modulePath, program)) {
+			const validators: { [symbol: string]: ((value: any) => boolean) | true } = { __esModule: true };
+			for (const { name, schema } of schemas) {
 				const compiled = ajv.compile(schema);
 				validators[name] = (value: any) => !!compiled(value);
 			}
-			const exports = {
-				__esModule: true,
-				default: validators,
-				validators,
-			};
 			return (global) => {
-				global.exports = exports;
+				global.exports = validators;
 			};
 		},
 	};

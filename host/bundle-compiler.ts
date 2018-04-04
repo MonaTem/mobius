@@ -197,7 +197,6 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	} as any;
 	const isClient = profile === "client";
 	const mainPath = packageRelative("client/main.js");
-	let program: ts.Program | undefined;
 	const memoizedVirtualModule = memoize(virtualModule);
 	const plugins = [
 		// Include preact
@@ -254,9 +253,6 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			},
 			verbosity: 0,
 			typescript: require("typescript"),
-			programCreated(newProgram: ts.Program) {
-				program = newProgram;
-			},
 			fileExistsHook(path: string) {
 				const module = memoizedVirtualModule(path.replace(declarationOrJavaScriptPattern, ""), !!minify);
 				if (module) {
@@ -270,9 +266,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 					if (declarationPattern.test(path)) {
 						return module.generateTypeDeclaration();
 					} else {
-						if (program) {
-							return module.generateModule(program);
-						}
+						return module.generateModule();
 					}
 				}
 			},

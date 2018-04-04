@@ -1,5 +1,5 @@
 import * as _dom from "_dom";
-import _domValidators from "_dom!validators";
+import { EventArgs as isEventArgs } from "_dom!validators";
 import { restoreDefaults } from "_internal";
 import { createClientChannel } from "mobius";
 import { Channel } from "mobius-types";
@@ -42,7 +42,7 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 			} else {
 				const channel = createClientChannel((event: any) => {
 					tuple[1](restoreDefaults(event, _dom.defaultEventProperties));
-				}, _domValidators.EventArgs);
+				}, isEventArgs);
 				if (node.nodeName == "INPUT" || node.nodeName == "TEXTAREA") {
 					switch (name) {
 						case "keydown":
