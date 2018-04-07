@@ -749,8 +749,13 @@ export function flush(): Promise<void> {
 	return resolvedPromise;
 }
 
+function validationFailure(value: JsonValue): never {
+	disconnect();
+	throw new Error("Value from server did not validate to the expected schema: " + JSON.stringify(value));
+}
+
 // Receive a value asynchronously from the server over a channel expected to receive only one message
-export const createServerPromise: <T extends JsonValue | void>(fallback?: () => Promise<T> | T) => Promise<T> = <T extends JsonValue | void>(fallback?: () => Promise<T> | T) => new Promise<T>((resolve, reject) => {
+export const createServerPromise = <T extends JsonValue | void>(fallback?: () => Promise<T> | T, validator?: (value: any) => value is T) => new Promise<T>((resolve, reject) => {
 	if (dead) {
 		if (fallback) {
 			resolve(fallback());
@@ -761,7 +766,16 @@ export const createServerPromise: <T extends JsonValue | void>(fallback?: () => 
 		const channel = createRawServerChannel((event) => {
 			channel.close();
 			if (event) {
-				parseValueEvent(self, event, resolve as (value: JsonValue) => void, reject);
+				parseValueEvent(self, event, validator ? (result: JsonValue) => {
+					try {
+						if (!validator(result)) {
+							validationFailure(result);
+						}
+						return resolve(result as T);
+					} catch (e) {
+						reject(e);
+					}
+				} : resolve as (value: JsonValue) => void, reject);
 			} else if (fallback) {
 				try {
 					resolve(fallback());
@@ -778,7 +792,7 @@ export const createServerPromise: <T extends JsonValue | void>(fallback?: () => 
 export const synchronize = () => createServerPromise<void>();
 
 // Create a server channel that can receive multiple messages and must be closed by user-space
-export function createServerChannel<T extends Function>(callback: T, onAbort?: () => void): Channel {
+export function createServerChannel<T extends (...args: any[]) => void>(callback: T, onAbort?: () => void, validator?: (value: any[]) => boolean): Channel {
 	if (!("call" in callback)) {
 		throw new TypeError("callback is not a function!");
 	}
@@ -787,7 +801,11 @@ export function createServerChannel<T extends Function>(callback: T, onAbort?: (
 	}
 	const channel = createRawServerChannel((event) => {
 		if (event) {
-			callback.apply(null, event.slice(1));
+			const args = event.slice(1);
+			if (validator && !validator(event)) {
+				validationFailure(args);
+			}
+			callback.apply(null, args);
 		} else {
 			channel.close();
 			if (onAbort) {
@@ -833,7 +851,7 @@ export function createClientPromise<T extends JsonValue | void>(ask: () => (Prom
 }
 
 // Create a client channel that can broadcast multiple messages and must be closed by user-space
-export function createClientChannel<T extends Function, U = void>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, batched?: boolean, shouldFlushMicroTasks?: true): Channel {
+export function createClientChannel<T extends (...args: any[]) => void, U = void>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, batched?: boolean, shouldFlushMicroTasks?: true): Channel {
 	if (!("call" in callback)) {
 		throw new TypeError("callback is not a function!");
 	}
@@ -916,7 +934,7 @@ export function createClientChannel<T extends Function, U = void>(callback: T, o
 }
 
 // Coordinate a value from a non-deterministic API that can potentially be implemented on either client or server
-export function coordinateValue<T extends JsonValue>(generator: () => T): T {
+export function coordinateValue<T extends JsonValue | void>(generator: () => T, validator: (value: any) => value is T): T {
 	if (!dispatchingEvent || dead) {
 		return generator();
 	}
@@ -960,6 +978,9 @@ export function coordinateValue<T extends JsonValue>(generator: () => T): T {
 					return parseValueEvent(self, event, (value) => {
 						logOrdering("client", "message", channelId);
 						logOrdering("client", "close", channelId);
+						if (!validator(value)) {
+							validationFailure(value);
+						}
 						return value;
 					}, (error) => {
 						logOrdering("client", "message", channelId);
@@ -1157,7 +1178,7 @@ function bundledPromiseImplementation() {
 	return Promise;
 }
 
-interceptGlobals(window, () => insideCallback && !dead, coordinateValue, <T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender?: boolean) => {
+interceptGlobals(window, () => insideCallback && !dead, coordinateValue, <T extends (...args: any[]) => void, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender?: boolean) => {
 	let recovered: (() => void) | undefined;
 	const channel = createServerChannel(callback, () => {
 		const state = onOpen(callback);

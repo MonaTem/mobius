@@ -161,6 +161,14 @@ export function eventForException(channelId: number, error: any): Event {
 	return [channelId, serializedError, type];
 }
 
+export function passthroughValue<T>(value: T): T {
+	return value;
+}
+
+export function throwValue(value: any): never {
+	throw value;
+}
+
 export function parseValueEvent<T>(global: any, event: Event | undefined, resolve: (value: JsonValue) => T, reject: (error: Error | JsonValue) => T): T {
 	if (!event) {
 		return reject(disconnectedError());
