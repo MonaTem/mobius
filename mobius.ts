@@ -164,8 +164,10 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	const servers: express.Express[] = [];
 	if (watch) {
 		const watcher = (require("chokidar") as typeof chokidar).watch([]);
-		watchFile = (path: string) => {
-			watcher.add(path);
+		watchFile = async (path: string) => {
+			if (await exists(path)) {
+				watcher.add(path);
+			}
 		};
 		watchFile(secretsPath);
 		watcher.on("change", async (path) => {
