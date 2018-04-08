@@ -711,7 +711,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 					logOrdering("server", "message", channelId, this.sessionID);
 					logOrdering("server", "close", channelId, this.sessionID);
 					this.sendEvent(event);
-					return parseValueEvent(global, event, passthrough as (value: JSONValue) => T, throwArgument);
+					return parseValueEvent(global, event, passthrough as (value: JsonValue) => T, throwArgument);
 				}
 			}
 			try {

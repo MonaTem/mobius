@@ -1,4 +1,5 @@
 import { FetchOptions, FetchResponse } from "fetch-types";
+import { FetchResponse as isFetchResponse } from "fetch-types!validators";
 import { createClientPromise, createServerPromise } from "mobius";
 import node_fetch from "node-fetch";
 import { peek, Redacted } from "redact";
@@ -22,11 +23,11 @@ async function fetch(url: string, options?: FetchOptions) {
 export function fromClient(url: string, options?: FetchOptions): Promise<FetchResponse> {
 	return createClientPromise<FetchResponse>(() => {
 		throw new Error("Fetching from the client requires a browser that supports client-side rendering!");
-	});
+	}, isFetchResponse);
 }
 
 export function fromClientOrServer(url: string, options?: FetchOptions): Promise<FetchResponse> {
-	return createClientPromise<FetchResponse>(() => fetch(url, options));
+	return createClientPromise<FetchResponse>(() => fetch(url, options), isFetchResponse);
 }
 
 export function fromServer(url: string | Redacted<string>, options?: FetchOptions | Redacted<FetchOptions>): Promise<FetchResponse> {
