@@ -33,5 +33,3 @@ export function fromClientOrServer(url: string, options?: FetchOptions): Promise
 export function fromServer(url: string | Redacted<string>, options?: FetchOptions | Redacted<FetchOptions>): Promise<FetchResponse> {
 	return createServerPromise<FetchResponse>(() => fetch(peek(url), options ? peek(options) : undefined));
 }
-
-export default fromServer;

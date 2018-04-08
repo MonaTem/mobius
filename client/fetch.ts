@@ -2,7 +2,7 @@ import { FetchOptions, FetchResponse } from "fetch-types";
 import { createClientPromise, createServerPromise } from "mobius";
 import { Redacted } from "redact";
 
-export async function fromClient(url: string, options: FetchOptions = {}): Promise<FetchResponse> {
+export function fromClient(url: string, options: FetchOptions = {}): Promise<FetchResponse> {
 	return createClientPromise(() => new Promise<FetchResponse>((resolve, reject) => {
 		const request = new XMLHttpRequest();
 		const method = options.method;
@@ -54,10 +54,11 @@ export async function fromClient(url: string, options: FetchOptions = {}): Promi
 		}
 	}));
 }
-export const fromClientOrServer = fromClient;
 
-export function fromServer(url: string | Redacted<string>, options?: FetchOptions | Redacted<string>): Promise<FetchResponse> {
-	return createServerPromise<FetchResponse>();
+export function fromClientOrServer(url: string, options?: FetchOptions): Promise<FetchResponse> {
+	return fromClient(url, options);
 }
 
-export default fromServer;
+export function fromServer(url: string | Redacted<string>, options?: FetchOptions | Redacted<FetchOptions>): Promise<FetchResponse> {
+	return createServerPromise<FetchResponse>();
+}
