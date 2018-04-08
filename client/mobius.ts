@@ -522,7 +522,7 @@ let serverDisconnectCount = 0;
 function processMessage(message: ServerMessage): Promise<void> {
 	if (message.reload) {
 		disconnect();
-		location.reload();
+		location.reload(true);
 		return resolvedPromise;
 	}
 	// Process messages in order
