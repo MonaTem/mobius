@@ -27,16 +27,16 @@ const setPrototypeOf = (Object as any).setProtoTypeOf || ((obj: any, proto: any)
 export function interceptGlobals<T extends Partial<FakedGlobals>>(
 	globals: T,
 	insideCallback: () => boolean,
-	coordinateValue: <V extends JsonValue>(generator: () => V) => V,
-	coordinateChannel: <F extends Function, S>(callback: F, onOpen: (send: F) => S, onClose?: (state: S) => void, includedInPrerender?: boolean) => Closeable,
+	coordinateValue: <V extends JsonValue | void>(generator: () => V, validator: (value: any) => value is V) => V,
+	coordinateChannel: <F extends (...args: any[]) => void, S>(callback: F, onOpen: (send: F) => S, onClose?: (state: S) => void, includedInPrerender?: boolean) => Closeable,
 ): T & FakedGlobals {
 	// Override the Math object with one that returns a common stream of random numbers
 	const newMath = globals.Math = Object.create(Math);
-	newMath.random = coordinateValue.bind(null, Math.random.bind(Math));
+	newMath.random = coordinateValue.bind(null, Math.random.bind(Math), (value: any) => typeof value == "number" && value >= 0 && value < 1);
 	// Override the Date object with one that shows determinism errors
 	// see: https://stackoverflow.com/a/22402079/4007
 	const originalNow = Date.now.bind(Date);
-	const now = coordinateValue.bind(null, originalNow);
+	const now = coordinateValue.bind(null, originalNow, (value: any) => typeof value == "number" && value > 0);
 	const newDate = globals.Date = function(oldDate) {
 		// Copy that property!
 		ignore_nondeterminism:

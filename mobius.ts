@@ -164,8 +164,10 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	const servers: express.Express[] = [];
 	if (watch) {
 		const watcher = (require("chokidar") as typeof chokidar).watch([]);
-		watchFile = (path: string) => {
-			watcher.add(path);
+		watchFile = async (path: string) => {
+			if (await exists(path)) {
+				watcher.add(path);
+			}
 		};
 		watchFile(secretsPath);
 		watcher.on("change", async (path) => {
@@ -253,7 +255,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 			// Start initial page render
 			console.log("Rendering initial page...");
 			const initialPageSession = newHost.constructSession("");
-			newHost.sessions.set("initial-render", initialPageSession);
+			newHost.sessions.set("", initialPageSession);
 			initialPageSession.updateOpenServerChannelStatus(true);
 			await initialPageSession.prerenderContent();
 

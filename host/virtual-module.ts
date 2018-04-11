@@ -1,5 +1,4 @@
 import { RawSourceMap } from "source-map";
-import * as ts from "typescript";
 import cssModule from "./css-module";
 import { ServerModuleGlobal } from "./server-compiler";
 import validationModule from "./validation-module";
@@ -11,8 +10,8 @@ export type VirtualModuleConstructor = (path: string, minify: boolean) => Virtua
 
 export interface VirtualModule {
 	generateTypeDeclaration: () => string;
-	generateModule: (program: ts.Program) => string;
-	instantiateModule: (program: ts.Program, moduleMap: ModuleMap, staticAssets: StaticAssets) => (global: ServerModuleGlobal) => void;
+	generateModule: () => string;
+	instantiateModule: (moduleMap: ModuleMap, staticAssets: StaticAssets) => (global: ServerModuleGlobal) => void;
 	generateStyles?: (usedExports?: string[]) => { css: string; map?: RawSourceMap };
 }
 

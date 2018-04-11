@@ -45,6 +45,14 @@ export function archivePathForSessionId(sessionsPath: string, sessionID: string)
 
 const cssMinifier = postcss(postcssMinifyPlugin);
 
+function passthrough<T>(value: T) : T {
+	return value;
+}
+
+function throwArgument(arg: any) : never {
+	throw arg;
+}
+
 export class HostSandbox {
 	public options: HostSandboxOptions;
 	public dom: JSDOM;
@@ -223,8 +231,8 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		}
 	}
 
-	public loadModule(source: ModuleSource, newModule: ServerModule, allowNodeModules: boolean) {
-		this.host.serverCompiler.loadModule(source, newModule, this.globalProperties, (name: string) => {
+	public loadModule(source: ModuleSource, newModule: ServerModule, allowNodeModules: boolean): any {
+		return this.host.serverCompiler.loadModule(source, newModule, this.globalProperties, (name: string) => {
 			const bakedModule = bakedModules[name];
 			if (bakedModule) {
 				return bakedModule(this);
@@ -240,8 +248,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 					paths: newModule.paths,
 				};
 				this.modules.set(modulePath, subModule);
-				this.loadModule({ from: "file", path: modulePath }, subModule, !!Module._findPath(name, this.host.options.serverModulePaths));
-				return subModule.exports;
+				return this.loadModule({ from: "file", path: modulePath }, subModule, !!Module._findPath(name, this.host.options.serverModulePaths)).exports;
 			}
 			const result = require(name);
 			if (!allowNodeModules) {
@@ -251,7 +258,6 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			}
 			return result;
 		});
-		return newModule;
 	}
 
 	// Async so that errors inside user code startup will log to console as unhandled promise rejection, but app will proceed
@@ -446,7 +452,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			});
 		});
 	}
-	public createServerChannel = <T extends Function, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender: boolean = true) => {
+	public createServerChannel = <T extends (...args: any[]) => void, U>(callback: T, onOpen: (send: T) => U, onClose?: (state: U) => void, includedInPrerender: boolean = true) => {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
@@ -577,6 +583,12 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			},
 		};
 	}
+
+	public validationFailure(value: JsonValue) : never {
+		this.destroy();
+		throw new Error("Value from client did not validate to the expected schema: " + JSON.stringify(value));
+	}
+
 	public createClientPromise = <T extends JsonValue | void>(fallback?: () => Promise<T> | T, validator?: (value: any) => boolean) => {
 		return new Promise<T>((resolve, reject) => {
 			if (!this.insideCallback) {
@@ -597,8 +609,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 							if (validator(value)) {
 								resolve(value as T);
 							} else {
-								escape(new Error("Value from client did not validate to the expected schema: " + JSON.stringify(value)));
-								this.destroy();
+								this.validationFailure(value);
 							}
 						}, reject);
 					} else {
@@ -627,7 +638,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			}
 		});
 	}
-	public createClientChannel = <T extends Function>(callback: T, argumentValidator?: (args: any[]) => boolean) => {
+	public createClientChannel = <T extends (...args: any[]) => void>(callback: T, validator?: (args: any[]) => boolean) => {
 		if (!("call" in callback)) {
 			throw new TypeError("callback is not a function!");
 		}
@@ -638,11 +649,10 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			if (event) {
 				event.shift();
 				this.enteringCallback();
-				if (!argumentValidator || argumentValidator(event)) {
+				if (!validator || validator(event)) {
 					resolvedPromise.then(() => callback.apply(null, event));
 				} else {
-					this.destroy();
-					throw new Error("Arguments from client did not validate to the expected schema: " + JSON.stringify(event));
+					this.validationFailure(event);
 				}
 			} else {
 				channel.close();
@@ -667,7 +677,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		}
 	}
 
-	public coordinateValue = <T extends JsonValue>(generator: () => T) => {
+	public coordinateValue = <T extends JsonValue | void>(generator: () => T, validator: (value: any) => value is T): T => {
 		if (!this.insideCallback || this.dead) {
 			return generator();
 		}
@@ -679,9 +689,12 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			if (event) {
 				logOrdering("client", "message", channelId, this.sessionID);
 				logOrdering("client", "close", channelId, this.sessionID);
-				return parseValueEvent(global, event, (value) => value, (error) => {
-					throw error;
-				}) as T;
+				return parseValueEvent(global, event, validator ? (value) => {
+					if (!validator(value)) {
+						this.validationFailure(value);
+					}
+					return value as T;
+				} : passthrough as (value: JsonValue) => T, throwArgument);
 			} else {
 				console.log("Expected a value from the client, but didn't receive one which may result in split-brain!\nCall stack is " + (new Error() as any).stack.split(/\n\s*/g).slice(2).join("\n\t"));
 				const value = generator();
@@ -698,9 +711,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 					logOrdering("server", "message", channelId, this.sessionID);
 					logOrdering("server", "close", channelId, this.sessionID);
 					this.sendEvent(event);
-					return parseValueEvent(global, event, (value) => value, (error) => {
-						throw error;
-					}) as T;
+					return parseValueEvent(global, event, passthrough as (value: JsonValue) => T, throwArgument);
 				}
 			}
 			try {
