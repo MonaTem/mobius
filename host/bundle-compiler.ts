@@ -278,7 +278,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			plugins: isClient ? [
 				syntaxDynamicImport(),
 				externalHelpers(babel),
-				[transformAsyncToPromises(babel), { externalHelpers: true }],
+				[transformAsyncToPromises(babel), { externalHelpers: true, hoist: true }],
 				optimizeClosuresInRender(babel),
 				stripRedact(),
 				rewriteForInStatements(),
@@ -288,7 +288,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 			] : [
 				syntaxDynamicImport(),
 				externalHelpers(babel),
-				[transformAsyncToPromises(babel), { externalHelpers: true }],
+				[transformAsyncToPromises(babel), { externalHelpers: true, hoist: true }],
 				optimizeClosuresInRender(babel),
 				rewriteForInStatements(),
 				noImpureGetters(),

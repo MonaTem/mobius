@@ -40,20 +40,16 @@ declare global {
 
 export type ModuleSource = { path: string, sandbox: boolean } & ({ from: "file" } | { from: "string", code: string });
 
+function wrapSource(code: string) {
+	return `(function(self){return(function(self,global,require,document,exports,Math,Date,setInterval,clearInterval,setTimeout,clearTimeout){${code}\n})(self,self.global,self.require,self.document,self.exports,self.Math,self.Date,self.setInterval,self.clearInterval,self.setTimeout,self.clearTimeout)})`;
+}
+
 export const compilerOptions = (() => {
 	const fileName = "tsconfig-server.json";
 	const configFile = ts.readJsonConfigFile(packageRelative(fileName), (path: string) => readFileSync(path).toString());
 	const configObject = ts.convertToObject(configFile, []);
 	return ts.convertCompilerOptionsFromJson(configObject.compilerOptions, packageRelative("./"), fileName).options;
 })();
-
-function sandbox(code: string, filename: string): (global: any) => void {
-	return vm.runInThisContext(`(function(self){return(function(self,global,require,document,exports,Math,Date,setInterval,clearInterval,setTimeout,clearTimeout){${code}\n})(self,self.global,self.require,self.document,self.exports,self.Math,self.Date,self.setInterval,self.clearInterval,self.setTimeout,self.clearTimeout)})`, {
-		filename,
-		lineOffset: 0,
-		displayErrors: true,
-	}) as (global: any) => void;
-}
 
 const diagnosticsHost = {
 	getCurrentDirectory: cwd,
@@ -151,7 +147,11 @@ export class ServerCompiler {
 		const path = source.path;
 		let result = this.loadersForPath.get(path)
 		if (!result) {
-			const initializer = source.from === "file" ? this.initializerForPath(path) : sandbox(source.code, path);
+			const initializer = source.from === "file" ? this.initializerForPath(path, require) : vm.runInThisContext(wrapSource(source.code), {
+				filename: path,
+				lineOffset: 0,
+				displayErrors: true,
+			}) as (global: any) => void;
 			if (initializer) {
 				var constructModule = function(currentModule: ServerModule, currentGlobalProperties: any, currentRequire: (name: string) => any) {
 					const moduleGlobal: ServerModuleGlobal & any = Object.create(global);
@@ -180,7 +180,7 @@ export class ServerCompiler {
 		return result(module, globalProperties, require)
 	}
 
-	private initializerForPath(path: string): ((global: any) => void) | undefined {
+	private initializerForPath(path: string, staticRequire: (name: string) => any): ((global: any) => void) | undefined {
 		// Check for declarations
 		if (declarationPattern.test(path)) {
 			const module = this.virtualModule(path.replace(declarationPattern, ""));
@@ -214,20 +214,30 @@ export class ServerCompiler {
 		if (!transformAsyncToPromises) {
 			transformAsyncToPromises = require("babel-plugin-transform-async-to-promises");
 		}
-		const transformed = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(path.replace(/\.d\.ts$/, ".js")).toString(), {
+		const firstPass = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(path.replace(/\.d\.ts$/, ".js")).toString(), {
 			babelrc: false,
 			plugins: [
 				dynamicImport,
 				rewriteDynamicImport,
 				convertToCommonJS,
-				[transformAsyncToPromises(babel), { externalHelpers: true }],
-				optimizeClosuresInRender,
-				rewriteForInStatements(),
 				noImpureGetters(),
 			],
 			inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
 		});
+		const secondPass = babel.transform("self = " + wrapSource(firstPass.code!), {
+			babelrc: false,
+			plugins: [
+				convertToCommonJS,
+				[transformAsyncToPromises(babel), { externalHelpers: true, hoist: true }],
+				optimizeClosuresInRender,
+				rewriteForInStatements(),
+			],
+		});
 		// Wrap in the sandbox JavaScript
-		return sandbox(transformed.code!, path);
+		return vm.runInThisContext(`(function(require,self){${secondPass.code!}\nreturn self})`, {
+			filename: path,
+			lineOffset: 0,
+			displayErrors: true,
+		})(staticRequire) as (global: any) => void;
 	}
 }
