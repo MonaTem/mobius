@@ -237,26 +237,29 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 			if (bakedModule) {
 				return bakedModule(this);
 			}
-			const modulePath = this.host.serverCompiler.resolveModule(name, source.path);
+			const resolvedPath = this.host.serverCompiler.resolveModule(name, source.path);
+			const modulePath = resolvedPath || (name === "babel-plugin-transform-async-to-promises/helpers" && require.resolve(name));
 			if (modulePath) {
 				const existingModule = this.modules.get(modulePath);
 				if (existingModule) {
 					return existingModule.exports;
 				}
-				const subModule: ServerModule = {
+				// Temporarily assign a dummy module so that cyclic module dependencies work (at least as well as they do in node)
+				const temporaryModule: ServerModule = {
 					exports: {},
 					paths: newModule.paths,
 				};
+				this.modules.set(modulePath, temporaryModule);
+				const subModule = this.loadModule({ from: "file", path: modulePath, sandbox: typeof resolvedPath === "string" }, temporaryModule, !!Module._findPath(name, this.host.options.serverModulePaths));
 				this.modules.set(modulePath, subModule);
-				return this.loadModule({ from: "file", path: modulePath }, subModule, !!Module._findPath(name, this.host.options.serverModulePaths)).exports;
+				return subModule.exports;
 			}
-			const result = require(name);
 			if (!allowNodeModules) {
 				const e = new Error(`Cannot access module '${name}' in this context`);
 				(e as any).code = "MODULE_NOT_FOUND";
 				throw e;
 			}
-			return result;
+			return require(name);
 		});
 	}
 

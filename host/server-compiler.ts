@@ -38,7 +38,7 @@ declare global {
 	}
 }
 
-export type ModuleSource = { from: "file", path: string } | { from: "string", code: string, path: string };
+export type ModuleSource = { path: string, sandbox: boolean } & ({ from: "file" } | { from: "string", code: string });
 
 export const compilerOptions = (() => {
 	const fileName = "tsconfig-server.json";
@@ -65,13 +65,12 @@ const diagnosticsHost = {
 	},
 };
 
-type ModuleInitializer = (global: any) => void;
+type ModuleLoader = (module: ServerModule, globalProperties: any, require: (name: string) => any) => void;
 
 const declarationPattern = /\.d\.ts$/;
 
 export class ServerCompiler {
-	private initializerForCode = memoize(sandbox);
-	private initializersForPaths = new Map<string, ModuleInitializer | undefined>();
+	private loadersForPath = new Map<string, ModuleLoader>();
 	private languageService: ts.LanguageService;
 	private host: ts.LanguageServiceHost & ts.ModuleResolutionHost;
 	private program: ts.Program;
@@ -149,51 +148,57 @@ export class ServerCompiler {
 
 	public loadModule(source: ModuleSource, module: ServerModule, globalProperties: any, require: (name: string) => any) {
 		// Create a sandbox with exports for the provided module
-		const initializer = this.initializerForSource(source);
-		if (!initializer) {
-			throw new Error("Unable to find module: " + source.path);
+		const path = source.path;
+		let result = this.loadersForPath.get(path)
+		if (!result) {
+			const initializer = source.from === "file" ? this.initializerForPath(path) : sandbox(source.code, path);
+			if (initializer) {
+				var constructModule = function(currentModule: ServerModule, currentGlobalProperties: any, currentRequire: (name: string) => any) {
+					const moduleGlobal: ServerModuleGlobal & any = Object.create(global);
+					Object.assign(moduleGlobal, currentGlobalProperties);
+					moduleGlobal.self = moduleGlobal;
+					moduleGlobal.global = global;
+					moduleGlobal.require = currentRequire;
+					moduleGlobal.module = currentModule;
+					moduleGlobal.exports = currentModule.exports;
+					initializer(moduleGlobal);
+					return moduleGlobal;
+				};
+				if (source.sandbox) {
+					result = constructModule;
+				} else {
+					const staticModule = constructModule(module, globalProperties, require);
+					result = () => staticModule;
+				}
+			} else {
+				result = () => {
+					throw new Error("Unable to find module: " + path);
+				}
+			}
+			this.loadersForPath.set(path, result);
 		}
-		const moduleGlobal: ServerModuleGlobal & any = Object.create(global);
-		Object.assign(moduleGlobal, globalProperties);
-		moduleGlobal.self = moduleGlobal;
-		moduleGlobal.global = global;
-		moduleGlobal.require = require;
-		moduleGlobal.module = module;
-		moduleGlobal.exports = module.exports;
-		initializer(moduleGlobal);
-		return moduleGlobal;
+		return result(module, globalProperties, require)
 	}
 
-	public initializerForSource(source: ModuleSource) {
-		return source.from === "file" ? this.initializerForPath(source.path) : this.initializerForCode(source.code, "__bundle.js");
-	}
-
-	public initializerForPath(path: string): ModuleInitializer | undefined {
-		if (this.initializersForPaths.has(path)) {
-			return this.initializersForPaths.get(path);
-		}
+	private initializerForPath(path: string): ((global: any) => void) | undefined {
 		// Check for declarations
 		if (declarationPattern.test(path)) {
 			const module = this.virtualModule(path.replace(declarationPattern, ""));
 			if (module) {
 				const instantiate = module.instantiateModule(this.moduleMap, this.staticAssets);
-				this.initializersForPaths.set(path, instantiate);
 				return instantiate;
 			}
-		}
-		// Verify that TypeScript knows about this path
-		if (!this.program.getSourceFile(path)) {
-			this.initializersForPaths.set(path, undefined);
-			return undefined;
 		}
 		// Extract compiled output and source map from TypeScript
 		let scriptContents: string | undefined;
 		let scriptMap: string | undefined;
-		for (const { name, text } of this.languageService.getEmitOutput(path).outputFiles) {
-			if (/\.js$/.test(name)) {
-				scriptContents = text;
-			} else if (/\.js\.map$/.test(name)) {
-				scriptMap = text;
+		if (this.program.getSourceFile(path)) {
+			for (const { name, text } of this.languageService.getEmitOutput(path).outputFiles) {
+				if (/\.js$/.test(name)) {
+					scriptContents = text;
+				} else if (/\.js\.map$/.test(name)) {
+					scriptMap = text;
+				}
 			}
 		}
 		// Apply babel transformation passes
@@ -215,7 +220,7 @@ export class ServerCompiler {
 				dynamicImport,
 				rewriteDynamicImport,
 				convertToCommonJS,
-				[transformAsyncToPromises(babel), { externalHelpers: false }],
+				[transformAsyncToPromises(babel), { externalHelpers: true }],
 				optimizeClosuresInRender,
 				rewriteForInStatements(),
 				noImpureGetters(),
@@ -223,8 +228,6 @@ export class ServerCompiler {
 			inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
 		});
 		// Wrap in the sandbox JavaScript
-		const result = sandbox(transformed.code!, path);
-		this.initializersForPaths.set(path, result);
-		return result;
+		return sandbox(transformed.code!, path);
 	}
 }

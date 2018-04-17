@@ -67,7 +67,7 @@ export class Host {
 			sessionsPath,
 			watch,
 			hostname,
-			source : typeof bakedSource !== "undefined" ? { from: "string", code: bakedSource, path: mainPath } : { from: "file", path: mainPath },
+			source : typeof bakedSource !== "undefined" ? { from: "string", code: bakedSource, path: mainPath, sandbox: true } : { from: "file", path: mainPath, sandbox: true },
 			moduleMap,
 			staticAssets,
 			minify,
