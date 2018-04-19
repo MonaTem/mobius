@@ -45,11 +45,11 @@ export function archivePathForSessionId(sessionsPath: string, sessionID: string)
 
 const cssMinifier = postcss(postcssMinifyPlugin);
 
-function passthrough<T>(value: T) : T {
+function passthrough<T>(value: T): T {
 	return value;
 }
 
-function throwArgument(arg: any) : never {
+function throwArgument(arg: any): never {
 	throw arg;
 }
 
@@ -587,7 +587,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 		};
 	}
 
-	public validationFailure(value: JsonValue) : never {
+	public validationFailure(value: JsonValue): never {
 		this.destroy();
 		throw new Error("Value from client did not validate to the expected schema: " + JSON.stringify(value));
 	}

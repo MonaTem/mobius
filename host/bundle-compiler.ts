@@ -181,9 +181,9 @@ function simplifyVoidInitializedVariables() {
 						init.remove();
 					}
 				}
-			}
-		}
-	}
+			},
+		},
+	};
 }
 
 export interface CompiledRoute {

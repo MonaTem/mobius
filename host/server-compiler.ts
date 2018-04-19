@@ -85,7 +85,7 @@ export class ServerCompiler {
 			}
 			fileRead(path);
 			return ts.sys.readFile(path, encoding);
-		}
+		};
 		this.host = {
 			getScriptFileNames() {
 				return fileNames;
@@ -145,7 +145,7 @@ export class ServerCompiler {
 	public loadModule(source: ModuleSource, module: ServerModule, globalProperties: any, require: (name: string) => any) {
 		// Create a sandbox with exports for the provided module
 		const path = source.path;
-		let result = this.loadersForPath.get(path)
+		let result = this.loadersForPath.get(path);
 		if (!result) {
 			const initializer = source.from === "file" ? this.initializerForPath(path, require) : vm.runInThisContext(wrapSource(source.code), {
 				filename: path,
@@ -153,7 +153,7 @@ export class ServerCompiler {
 				displayErrors: true,
 			}) as (global: any) => void;
 			if (initializer) {
-				var constructModule = function(currentModule: ServerModule, currentGlobalProperties: any, currentRequire: (name: string) => any) {
+				const constructModule = function(currentModule: ServerModule, currentGlobalProperties: any, currentRequire: (name: string) => any) {
 					const moduleGlobal: ServerModuleGlobal & any = Object.create(global);
 					Object.assign(moduleGlobal, currentGlobalProperties);
 					moduleGlobal.self = moduleGlobal;
@@ -173,11 +173,11 @@ export class ServerCompiler {
 			} else {
 				result = () => {
 					throw new Error("Unable to find module: " + path);
-				}
+				};
 			}
 			this.loadersForPath.set(path, result);
 		}
-		return result(module, globalProperties, require)
+		return result(module, globalProperties, require);
 	}
 
 	private initializerForPath(path: string, staticRequire: (name: string) => any): ((global: any) => void) | undefined {
