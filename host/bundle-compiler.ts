@@ -1,7 +1,7 @@
 import * as babel from "babel-core";
 import { NodePath } from "babel-traverse";
 import * as types from "babel-types";
-import { BlockStatement, CallExpression, ForStatement, Identifier, LogicalExpression, Node, UpdateExpression, VariableDeclaration } from "babel-types";
+import { BlockStatement, CallExpression, ForStatement, Identifier, LogicalExpression, Node, UnaryExpression, UpdateExpression, VariableDeclaration } from "babel-types";
 import Concat from "concat-with-sourcemaps";
 import { resolve } from "path";
 import { Chunk, Finaliser, getExportBlock, OutputOptions, Plugin, rollup, SourceDescription } from "rollup";
@@ -163,6 +163,22 @@ function stripUnusedArgumentCopies() {
 	};
 }
 
+function simplifyVoidInitializedVariables() {
+	return {
+		visitor: {
+			VariableDeclarator(path: NodePath<VariableDeclaration>) {
+				const init = path.get("init");
+				if (init.node && init.isUnaryExpression()) {
+					const unary = init.node as UnaryExpression;
+					if (unary.operator === "void" && types.isLiteral(unary.argument)) {
+						init.remove();
+					}
+				}
+			}
+		}
+	}
+}
+
 export interface CompiledRoute {
 	route: StaticFileRoute;
 	map?: RawSourceMap;
@@ -284,6 +300,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				rewriteForInStatements(),
 				fixTypeScriptExtendsWarning(),
 				noImpureGetters(),
+				simplifyVoidInitializedVariables(),
 				stripUnusedArgumentCopies(),
 			] : [
 				syntaxDynamicImport(),
