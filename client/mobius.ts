@@ -1153,9 +1153,12 @@ function bundledPromiseImplementation() {
 		}
 		public static all<T>(values: ReadonlyArray<Promise<T> | T>): Promise<T[]> {
 			let remaining = values.length;
+			if (!remaining) {
+				return Promise.resolve([]);
+			}
 			const result = new Array(remaining);
 			return new Promise<T[]>((resolve, reject) => {
-				for (let i = 0; i < values.length; i++) {
+				for (let i = 0; i < remaining; i++) {
 					const value = values[i];
 					if (isPromiseLike(value)) {
 						value.then((resolvedValue) => {
