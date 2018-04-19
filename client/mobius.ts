@@ -1261,7 +1261,7 @@ _import = (moduleNameOrPromise: string | Promise<any>) => {
 		}
 		element.onerror = onError;
 		if (integrity) {
-			element.setAttribute("integrity", mapping[1]);
+			element.setAttribute("integrity", integrity);
 		}
 		document.head.appendChild(element);
 		if (insideCallback) {
