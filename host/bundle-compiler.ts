@@ -48,7 +48,7 @@ function isUndefined(node: Node) {
 }
 
 function isPure(node: Node) {
-	return pure(node, { pureMembers: /./ });
+	return pure(node, { pureMembers: /./, pureCallees: /^Array$/ });
 }
 
 function isPureOrRedacted(path: NodePath) {
@@ -137,7 +137,7 @@ function stripUnusedArgumentCopies() {
 				const body = path.get("body");
 				if (init.isVariableDeclaration() && (init.node as VariableDeclaration).declarations.every((declarator) => declarator.id.type == "Identifier" && (!declarator.init || isPure(declarator.init))) &&
 					isPure(test.node) &&
-					update.isUpdateExpression() && update.get("argument").isIdentifier() && ((update.node as UpdateExpression).argument as Identifier).name === ((init.node as VariableDeclaration).declarations[0].id as Identifier).name &&
+					update.isUpdateExpression() && update.get("argument").isIdentifier() &&
 					body.isBlockStatement() && (body.node as BlockStatement).body.length == 1
 				) {
 					const bodyStatement = body.get("body.0");
@@ -146,13 +146,20 @@ function stripUnusedArgumentCopies() {
 						if (expression.isAssignmentExpression()) {
 							const left = expression.get("left");
 							const right = expression.get("right");
-							if (left.isMemberExpression() && isPure(left.node) && left.get("object").isIdentifier() &&
-								right.isMemberExpression() && isPure(right.node) && right.get("object").isIdentifier() && (right.get("object").node as Identifier).name == "arguments"
+							const declarations = (init.node as VariableDeclaration).declarations;
+							const updateName = ((update.node as UpdateExpression).argument as Identifier).name;
+							if (updateName == (declarations[0].id as Identifier).name || // TypeScript's copy loop
+								(declarations.length == 3 && updateName == (declarations[2].id as Identifier).name) // Babel's copy loop
 							) {
-								const binding = left.scope.getBinding((left.get("object").node as Identifier).name);
-								if (binding && binding.constant && binding.referencePaths.length == 1) {
-									// Since the only reference is to the assignment variable is the compiler-generated copy loop, we can remove it entirely
-									path.remove();
+								// TypeScripts trailing arguments copy loop
+								if (left.isMemberExpression() && isPure(left.node) && left.get("object").isIdentifier() &&
+									right.isMemberExpression() && isPure(right.node) && right.get("object").isIdentifier() && (right.get("object").node as Identifier).name == "arguments"
+								) {
+									const binding = left.scope.getBinding((left.get("object").node as Identifier).name);
+									if (binding && binding.constant && binding.referencePaths.length == 1) {
+										// Since the only reference is to the assignment variable is the compiler-generated copy loop, we can remove it entirely
+										path.remove();
+									}
 								}
 							}
 						}
