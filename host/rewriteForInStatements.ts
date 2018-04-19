@@ -1,5 +1,5 @@
 import { NodePath } from "babel-traverse";
-import { CallExpression, ForInStatement, Identifier, LabeledStatement, VariableDeclarator } from "babel-types";
+import { CallExpression, ForInStatement, FunctionDeclaration, Identifier, LabeledStatement, VariableDeclarator } from "babel-types";
 import * as types from "babel-types";
 
 const helpers = {
@@ -49,6 +49,10 @@ export default function() {
 						if (ancestor.isVariableDeclarator() && ancestor.get("id").isIdentifier() && ((ancestor.node as VariableDeclarator).id as Identifier).name == "__extends") {
 							return;
 						}
+					}
+					const functionParent = path.getFunctionParent();
+					if (functionParent && (functionParent.node as FunctionDeclaration).id && (functionParent.node as FunctionDeclaration).id.name == "_interopRequireWildcard") {
+						return;
 					}
 					const node = path.node;
 					const keysIdentifier = path.scope.generateUidIdentifier("keys");
