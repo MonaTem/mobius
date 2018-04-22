@@ -225,7 +225,7 @@ export class ServerCompiler {
 			],
 			inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
 		});
-		const secondPass = babel.transform("self = " + wrapSource(firstPass.code!), {
+		const secondPass = babel.transform("return " + wrapSource(firstPass.code!), {
 			babelrc: false,
 			compact: false,
 			plugins: [
@@ -234,9 +234,12 @@ export class ServerCompiler {
 				optimizeClosuresInRender,
 				rewriteForInStatements(),
 			],
+			parserOpts: {
+				allowReturnOutsideFunction: true,
+			},
 		});
 		// Wrap in the sandbox JavaScript
-		return vm.runInThisContext(`(function(require,self){${secondPass.code!}\nreturn self})`, {
+		return vm.runInThisContext(`(function(require){${secondPass.code!}\n})`, {
 			filename: path,
 			lineOffset: 0,
 			displayErrors: true,
