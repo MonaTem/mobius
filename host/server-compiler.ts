@@ -216,6 +216,7 @@ export class ServerCompiler {
 		}
 		const firstPass = babel.transform(typeof scriptContents === "string" ? scriptContents : readFileSync(path.replace(/\.d\.ts$/, ".js")).toString(), {
 			babelrc: false,
+			compact: false,
 			plugins: [
 				dynamicImport,
 				rewriteDynamicImport,
@@ -226,6 +227,7 @@ export class ServerCompiler {
 		});
 		const secondPass = babel.transform("self = " + wrapSource(firstPass.code!), {
 			babelrc: false,
+			compact: false,
 			plugins: [
 				convertToCommonJS,
 				[transformAsyncToPromises(babel), { externalHelpers: true, hoist: true }],
