@@ -1,4 +1,3 @@
-import * as mobius from "mobius";
-import * as app from "app";
-mobius;
-app;
+import { _host } from "dom";
+import app from "app";
+_host(app);

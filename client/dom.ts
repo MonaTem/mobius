@@ -54,7 +54,7 @@ preactOptions.listenerUpdated = (node: PreactNode, name: string) => {
 	}
 };
 
-export function host(content: JSX.Element): void {
+export function _host(content: JSX.Element): void {
 	const element = document.body.children[0];
 	preact.render(content, element, element.children[0]);
 }
