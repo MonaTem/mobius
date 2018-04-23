@@ -219,7 +219,7 @@ export default async function(fileRead: (path: string) => void, input: string, b
 		return result;
 	} as any;
 	const mainPath = packageRelative("common/main.js");
-	const memoizedVirtualModule = memoize(virtualModule);
+	const memoizedVirtualModule = memoize((path: string) => virtualModule(path, !!minify));
 	const plugins = [
 		// Include preact
 		includePaths({
@@ -276,14 +276,14 @@ export default async function(fileRead: (path: string) => void, input: string, b
 			verbosity: 0,
 			typescript: require("typescript"),
 			fileExistsHook(path: string) {
-				const module = memoizedVirtualModule(path.replace(declarationOrJavaScriptPattern, ""), !!minify);
+				const module = memoizedVirtualModule(path.replace(declarationOrJavaScriptPattern, ""));
 				if (module) {
 					return true;
 				}
 				return false;
 			},
 			readFileHook(path: string) {
-				const module = memoizedVirtualModule(path.replace(declarationOrJavaScriptPattern, ""), !!minify);
+				const module = memoizedVirtualModule(path.replace(declarationOrJavaScriptPattern, ""));
 				if (module) {
 					if (declarationPattern.test(path)) {
 						return module.generateTypeDeclaration();
@@ -370,7 +370,7 @@ export default async function(fileRead: (path: string) => void, input: string, b
 			const css = new Concat(true, cssModuleName, minify ? "" : "\n\n");
 			const bundledCssModulePaths: string[] = [];
 			for (const module of chunk.orderedModules) {
-				const implementation = memoizedVirtualModule(module.id, !!minify);
+				const implementation = memoizedVirtualModule(module.id);
 				if (implementation && implementation.generateStyles) {
 					bundledCssModulePaths.push(module.id);
 					const variables = module.scope.variables;
