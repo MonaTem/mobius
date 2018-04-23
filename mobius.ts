@@ -107,7 +107,6 @@ interface Config {
 	hostname?: string;
 	workers?: number;
 	simulatedLatency?: number;
-	bundled?: boolean;
 	generate?: boolean;
 	watch?: boolean;
 }
@@ -144,7 +143,7 @@ function suppressUnhandledRejection<T>(promise: Promise<T>) {
 	return promise;
 }
 
-export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0, bundled = false, generate = false, watch = false }: Config) {
+export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0, generate = false, watch = false }: Config) {
 	const fallbackPath = packageRelative(minify ? "dist/fallback.min.js" : "dist/fallback.js");
 	const fallbackRouteAsync = suppressUnhandledRejection(readFile(fallbackPath).then((contents) => staticFileRoute("/fallback.js", contents)));
 	const fallbackMapContentsAsync = sourceMaps ? suppressUnhandledRejection(readFile(fallbackPath + ".map")) : undefined;
@@ -217,7 +216,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 			console.log("Compiling client bundle...");
 			const secretsAsync: Promise<{ [key: string]: any }> = readJSON(secretsPath).catch(() => {});
 			const mainPath = await loadMainPath();
-			const newCompilerOutput = await compileBundle("client", watchFile, mainPath, sourcePath, publicPath, minify);
+			const newCompilerOutput = await compileBundle(watchFile, mainPath, sourcePath, publicPath, minify);
 			const mainScript = newCompilerOutput.routes["/main.js"];
 			if (!mainScript) {
 				throw new Error("Could not find main.js in compiled output!");
@@ -235,7 +234,6 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 			console.log("Compiling server bundle...");
 			const newHost = new Host({
 				mainPath,
-				bakedSource: bundled ? (await compileBundle("server", watchFile, mainPath, sourcePath, publicPath)).routes["/main.js"].route.buffer.toString() : undefined,
 				fileRead: watchFile,
 				watch,
 				serverModulePaths,
@@ -631,7 +629,6 @@ export default function main() {
 			{ name: "minify", type: Boolean, defaultValue: false },
 			{ name: "source-map", type: Boolean, defaultValue: false },
 			{ name: "workers", type: Number, defaultValue: cpuCount },
-			{ name: "bundled", type: Boolean, defaultValue: false },
 			{ name: "generate", type: Boolean, defaultValue: false },
 			{ name: "watch", type: Boolean, defaultValue: false },
 			{ name: "hostname", type: String },
@@ -686,10 +683,6 @@ export default function main() {
 							description: `Number or workers to use (defaults to number of CPUs: ${cpuCount})`,
 						},
 						{
-							name: "bundled",
-							description: "Bundle code on the server as well as on the client",
-						},
-						{
 							name: "launch",
 							description: "Open the default browser once server is ready for requests",
 						},
@@ -729,7 +722,6 @@ export default function main() {
 			hostname: args.hostname as string | undefined,
 			workers: args.workers as number,
 			simulatedLatency: args["simulated-latency"] as number,
-			bundled: args.bundled as boolean,
 			generate: args.generate as boolean,
 			watch: args.watch as boolean,
 		});

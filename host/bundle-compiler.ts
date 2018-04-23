@@ -199,7 +199,7 @@ export interface CompilerOutput {
 const declarationPattern = /\.d\.ts$/;
 const declarationOrJavaScriptPattern = /\.(d\.ts|js)$/;
 
-export default async function(profile: "client" | "server", fileRead: (path: string) => void, input: string, basePath: string, publicPath: string, minify?: boolean): Promise<CompilerOutput> {
+export default async function(fileRead: (path: string) => void, input: string, basePath: string, publicPath: string, minify?: boolean): Promise<CompilerOutput> {
 	// Dynamically load dependencies to reduce startup time
 	const includePaths = require("rollup-plugin-includepaths") as typeof _includePaths;
 	const rollupBabel = require("rollup-plugin-babel") as typeof _rollupBabel;
@@ -218,7 +218,6 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 		result.fileNames = result.fileNames.concat(augmentedResult.fileNames);
 		return result;
 	} as any;
-	const isClient = profile === "client";
 	const mainPath = packageRelative("common/main.js");
 	const memoizedVirtualModule = memoize(virtualModule);
 	const plugins = [
@@ -239,7 +238,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				resolve(basePath, "node_modules/babel-plugin-transform-async-to-promises/*"),
 				packageRelative("node_modules/babel-plugin-transform-async-to-promises/*"),
 			] as any,
-			tsconfig: packageRelative(`tsconfig-${profile}.json`),
+			tsconfig: packageRelative(`tsconfig-client.json`),
 			tsconfigOverride: {
 				include: [
 					resolve(basePath, "**/*"),
@@ -255,8 +254,8 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 							resolve(basePath, input),
 						],
 						"*": [
-							packageRelative(`${profile}/*`),
-							resolve(basePath, `${profile}/*`),
+							packageRelative(`client/*`),
+							resolve(basePath, `client/*`),
 							packageRelative("common/*"),
 							resolve(basePath, "common/*"),
 							packageRelative("types/*"),
@@ -297,8 +296,8 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 		// Transform the intermediary phases via babel
 		rollupBabel({
 			babelrc: false,
-			presets: isClient ? [env.default(null, { targets: { browsers: ["ie 6"] }, modules: false })] : [],
-			plugins: isClient ? [
+			presets: [env.default(null, { targets: { browsers: ["ie 6"] }, modules: false })],
+			plugins: [
 				syntaxDynamicImport(),
 				externalHelpers(babel),
 				[transformAsyncToPromises(babel), { externalHelpers: true, hoist: true }],
@@ -309,14 +308,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 				noImpureGetters(),
 				simplifyVoidInitializedVariables(),
 				stripUnusedArgumentCopies(),
-			] : [
-				syntaxDynamicImport(),
-				externalHelpers(babel),
-				[transformAsyncToPromises(babel), { externalHelpers: true, hoist: true }],
-				optimizeClosuresInRender(babel),
-				rewriteForInStatements(),
-				noImpureGetters(),
-			],
+			]
 		}),
 	];
 
@@ -325,7 +317,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 		plugins.push(require("rollup-plugin-closure-compiler-js")({
 			languageIn: "ES5",
 			languageOut: "ES3",
-			assumeFunctionWrapper: !isClient,
+			assumeFunctionWrapper: false,
 			rewritePolyfills: false,
 		}) as Plugin);
 	}
@@ -516,9 +508,9 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	};
 
 	const bundle = await rollup({
-		input: isClient ? [mainPath] : mainPath,
+		input: [mainPath],
 		external: (id: string, parentId: string, isResolved: boolean) => {
-			return profile === "server" && (id == "mobius" || id == "_broadcast" || /\!validators$/.test(id));
+			return false;
 		},
 		plugins,
 		acorn: {
@@ -541,10 +533,10 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 	}
 	// Generate the output, using our custom finalizer for client
 	await bundle.generate({
-		format: isClient ? customFinalizer : "cjs",
+		format: customFinalizer,
 		sourcemap: true,
 		name: "app",
-		legacy: isClient,
+		legacy: true,
 	});
 	// Cleanup some of the mess we made
 	(ts as any).parseJsonConfigFileContent = parseJsonConfigFileContent;

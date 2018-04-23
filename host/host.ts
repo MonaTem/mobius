@@ -14,7 +14,6 @@ import * as uuid from "uuid/v4";
 
 interface HostConfig {
 	mainPath: string;
-	bakedSource: string | undefined;
 	fileRead: (path: string) => void;
 	watch: boolean;
 	serverModulePaths: string[];
@@ -39,7 +38,6 @@ export class Host {
 	public constructSession: (sessionID: string, request?: Request) => Session;
 	constructor({
 		mainPath,
-		bakedSource,
 		fileRead,
 		watch,
 		serverModulePaths,
@@ -67,7 +65,7 @@ export class Host {
 			sessionsPath,
 			watch,
 			hostname,
-			source : typeof bakedSource !== "undefined" ? { from: "string", code: bakedSource, path: mainPath, sandbox: true } : { from: "file", path: packageRelative("common/main.js"), sandbox: true },
+			source: { from: "file", path: packageRelative("common/main.js"), sandbox: true },
 			moduleMap,
 			staticAssets,
 			minify,
