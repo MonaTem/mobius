@@ -132,13 +132,14 @@ export default function(path: string): VirtualModule | void {
 		},
 		instantiateModule() {
 			// Compile validators for each of the types in the parent module
-			const validators: { [symbol: string]: ((value: any) => boolean) | true } = { __esModule: true };
+			const exports: any = {};
+			Object.defineProperty(exports, "__esModule", { value: true });
 			for (const { name, schema } of schemas) {
 				const compiled = ajv.compile(schema);
-				validators[name] = (value: any) => !!compiled(value);
+				exports[name] = (value: any) => !!compiled(value);
 			}
 			return (global) => {
-				global.exports = validators;
+				global.exports = exports;
 			};
 		},
 	};

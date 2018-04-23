@@ -219,7 +219,7 @@ export default async function(profile: "client" | "server", fileRead: (path: str
 		return result;
 	} as any;
 	const isClient = profile === "client";
-	const mainPath = packageRelative("client/main.js");
+	const mainPath = packageRelative("common/main.js");
 	const memoizedVirtualModule = memoize(virtualModule);
 	const plugins = [
 		// Include preact

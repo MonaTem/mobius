@@ -1,5 +1,5 @@
 import { escape } from "./event-loop";
-import { exists } from "./fileUtils";
+import { exists, packageRelative } from "./fileUtils";
 import { createSessionGroup, Session } from "./session";
 import { archivePathForSessionId, HostSandboxOptions } from "./session-sandbox";
 import { ModuleMap, StaticAssets } from "./virtual-module";
@@ -67,7 +67,7 @@ export class Host {
 			sessionsPath,
 			watch,
 			hostname,
-			source : typeof bakedSource !== "undefined" ? { from: "string", code: bakedSource, path: mainPath, sandbox: true } : { from: "file", path: mainPath, sandbox: true },
+			source : typeof bakedSource !== "undefined" ? { from: "string", code: bakedSource, path: mainPath, sandbox: true } : { from: "file", path: packageRelative("common/main.js"), sandbox: true },
 			moduleMap,
 			staticAssets,
 			minify,

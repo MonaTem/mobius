@@ -9,6 +9,7 @@ import noImpureGetters from "./noImpureGetters";
 import rewriteDynamicImport from "./rewriteDynamicImport";
 import rewriteForInStatements from "./rewriteForInStatements";
 import { ModuleMap, StaticAssets, VirtualModule } from "./virtual-module";
+import { resolve } from "path";
 
 let convertToCommonJS: any;
 let optimizeClosuresInRender: any;
@@ -48,7 +49,32 @@ export const compilerOptions = (() => {
 	const fileName = "tsconfig-server.json";
 	const configFile = ts.readJsonConfigFile(packageRelative(fileName), (path: string) => readFileSync(path).toString());
 	const configObject = ts.convertToObject(configFile, []);
-	return ts.convertCompilerOptionsFromJson(configObject.compilerOptions, packageRelative("./"), fileName).options;
+	const result = ts.convertCompilerOptionsFromJson(configObject.compilerOptions, packageRelative("./"), fileName).options;
+	const basePath = resolve("./");
+	result.baseUrl = basePath;
+	result.paths = {
+		// "app": [
+		// 	resolve(basePath, input),
+		// ],
+		"*": [
+			packageRelative(`server/*`),
+			resolve(basePath, `server/*`),
+			packageRelative("common/*"),
+			resolve(basePath, "common/*"),
+			packageRelative("types/*"),
+			resolve(basePath, "*"),
+		],
+		"tslib": [
+			packageRelative("node_modules/tslib/tslib"),
+		],
+		"babel-plugin-transform-async-to-promises/helpers": [
+			packageRelative("node_modules/babel-plugin-transform-async-to-promises/helpers"),
+		],
+		"preact": [
+			packageRelative("dist/common/preact"),
+		],
+	};
+	return result;
 })();
 
 const diagnosticsHost = {
@@ -75,7 +101,7 @@ export class ServerCompiler {
 	constructor(mainFile: string, private moduleMap: ModuleMap, private staticAssets: StaticAssets, public virtualModule: (path: string) => VirtualModule | void, fileRead: (path: string) => void) {
 		// Hijack TypeScript's file access so that we can instrument when it reads files for watching and to inject virtual modules
 		fileRead = memoize(fileRead);
-		const fileNames = [/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), mainFile];
+		const fileNames = [/*packageRelative("dist/common/preact.d.ts"), */packageRelative("types/reduced-dom.d.ts"), packageRelative("common/main.js")];
 		const readFile = (path: string, encoding?: string) => {
 			if (declarationPattern.test(path)) {
 				const module = virtualModule(path.replace(declarationPattern, ""));
@@ -220,7 +246,7 @@ export class ServerCompiler {
 			plugins: [
 				dynamicImport,
 				rewriteDynamicImport,
-				convertToCommonJS,
+				[convertToCommonJS, { noInterop: true }],
 				noImpureGetters(),
 			],
 			inputSourceMap: typeof scriptMap === "string" ? JSON.parse(scriptMap) : undefined,
@@ -229,7 +255,7 @@ export class ServerCompiler {
 			babelrc: false,
 			compact: false,
 			plugins: [
-				convertToCommonJS,
+				[convertToCommonJS, { noInterop: true }],
 				[transformAsyncToPromises(babel), { externalHelpers: true, hoist: true }],
 				optimizeClosuresInRender,
 				rewriteForInStatements(),

@@ -163,6 +163,8 @@ export interface SessionSandbox {
 	becameActive(): void;
 }
 
+const wrappedNodeModules = new Map<string, any>();
+
 export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandboxClient> implements SessionSandbox {
 	public host: HostSandbox;
 	public client: C;
@@ -259,7 +261,25 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 				(e as any).code = "MODULE_NOT_FOUND";
 				throw e;
 			}
-			return require(name);
+			let result = wrappedNodeModules.get(name);
+			if (!result) {
+				const globalModule = require(name);
+				if (globalModule && globalModule.__esModule) {
+					result = globalModule;
+				} else {
+					const esModule: any = {};
+					Object.defineProperty(esModule, "__esModule", { value: true });
+					if (globalModule != null) {
+						for (const key in globalModule) {
+							if (Object.prototype.hasOwnProperty.call(globalModule, key)) esModule[key] = globalModule[key];
+						}
+					}
+					esModule.default = globalModule;
+					result = esModule;
+				}
+				wrappedNodeModules.set(name, result);
+			}
+			return result;
 		});
 	}
 
