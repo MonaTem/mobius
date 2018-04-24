@@ -109,6 +109,7 @@ interface Config {
 	simulatedLatency?: number;
 	generate?: boolean;
 	watch?: boolean;
+	compile?: boolean;
 }
 
 function defaultSessionPath(sourcePath: string) {
@@ -143,7 +144,7 @@ function suppressUnhandledRejection<T>(promise: Promise<T>) {
 	return promise;
 }
 
-export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0, generate = false, watch = false }: Config) {
+export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSessionPath(sourcePath), allowMultipleClientsPerSession = true, minify = false, sourceMaps, workers = cpus().length, hostname, simulatedLatency = 0, generate = false, watch = false, compile = true }: Config) {
 	const fallbackPath = packageRelative(minify ? "dist/fallback.min.js" : "dist/fallback.js");
 	const fallbackRouteAsync = suppressUnhandledRejection(readFile(fallbackPath).then((contents) => staticFileRoute("/fallback.js", contents)));
 	const fallbackMapContentsAsync = sourceMaps ? suppressUnhandledRejection(readFile(fallbackPath + ".map")) : undefined;
@@ -157,9 +158,9 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	let compiling = true;
 	let pendingRecompile = false;
 	let host: Host;
-	let mainRoute: StaticFileRoute;
-	let defaultRenderedRoute: StaticFileRoute;
-	let compilerOutput: CompilerOutput;
+	let mainRoute: StaticFileRoute | undefined;
+	let defaultRenderedRoute: StaticFileRoute | undefined;
+	let compilerOutput: CompilerOutput | undefined;
 	const servers: express.Express[] = [];
 	if (watch) {
 		const watcher = (require("chokidar") as typeof chokidar).watch([]);
@@ -213,21 +214,27 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 			pendingRecompile = false;
 
 			// Start compiling client
-			console.log("Compiling client bundle...");
+			if (compile) {
+				console.log("Compiling client bundle...");
+			}
 			const secretsAsync: Promise<{ [key: string]: any }> = readJSON(secretsPath).catch(() => {});
 			const mainPath = await loadMainPath();
-			const newCompilerOutput = await compileBundle(watchFile, mainPath, sourcePath, publicPath, minify);
-			const mainScript = newCompilerOutput.routes["/main.js"];
-			if (!mainScript) {
-				throw new Error("Could not find main.js in compiled output!");
-			}
+			let newCompilerOutput;
+			let mainScript;
 			const staticAssets: { [path: string]: { contents: string; integrity: string; } } = {};
-			for (const assetPath of Object.keys(newCompilerOutput.routes)) {
-				const route = newCompilerOutput.routes[assetPath].route;
-				staticAssets[route.foreverPath] = {
-					contents: stringFromRoute(route),
-					integrity: route.integrity,
-				};
+			if (compile) {
+				newCompilerOutput = await compileBundle(watchFile, mainPath, sourcePath, publicPath, minify);
+				mainScript = newCompilerOutput.routes["/main.js"];
+				if (!mainScript) {
+					throw new Error("Could not find main.js in compiled output!");
+				}
+				for (const assetPath of Object.keys(newCompilerOutput.routes)) {
+					const route = newCompilerOutput.routes[assetPath].route;
+					staticAssets[route.foreverPath] = {
+						contents: stringFromRoute(route),
+						integrity: route.integrity,
+					};
+				}
 			}
 
 			// Start compiling server
@@ -245,40 +252,48 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				allowMultipleClientsPerSession,
 				workerCount: workers,
 				hostname,
-				moduleMap: newCompilerOutput.moduleMap,
+				moduleMap: newCompilerOutput ? newCompilerOutput.moduleMap : {},
 				staticAssets,
 				minify,
 			});
 
 			// Start initial page render
-			console.log("Rendering initial page...");
-			const initialPageSession = newHost.constructSession("");
-			newHost.sessions.set("", initialPageSession);
-			initialPageSession.updateOpenServerChannelStatus(true);
-			await initialPageSession.prerenderContent();
+			let newMainRoute;
+			let newDefaultRenderedRoute;
+			if (compile) {
+				console.log("Rendering initial page...");
+				const initialPageSession = newHost.constructSession("");
+				newHost.sessions.set("", initialPageSession);
+				initialPageSession.updateOpenServerChannelStatus(true);
+				await initialPageSession.prerenderContent();
 
-			const newMainRoute = mainScript.route;
-			const fallback = await fallbackRouteAsync;
-			const newDefaultRenderedRoute = staticFileRoute("/", await initialPageSession.render({
-				mode: PageRenderMode.Bare,
-				client: { clientID: 0, incomingMessageId: 0 },
-				clientURL: newMainRoute.foreverPath,
-				clientIntegrity: newMainRoute.integrity,
-				fallbackURL: fallback.foreverPath,
-				fallbackIntegrity: fallback.integrity,
-				noScriptURL: "/?js=no",
-				inlineCSS: true,
-				bootstrap: watch ? true : undefined,
-			}));
-			await initialPageSession.destroy();
+				if (mainScript) {
+					newMainRoute = mainScript.route;
+				}
+				const fallback = await fallbackRouteAsync;
+				newDefaultRenderedRoute = staticFileRoute("/", await initialPageSession.render({
+					mode: PageRenderMode.Bare,
+					client: { clientID: 0, incomingMessageId: 0 },
+					clientURL: newMainRoute ? newMainRoute.foreverPath : "/main.js",
+					clientIntegrity: newMainRoute ? newMainRoute.integrity : "",
+					fallbackURL: fallback.foreverPath,
+					fallbackIntegrity: fallback.integrity,
+					noScriptURL: "/?js=no",
+					inlineCSS: true,
+					bootstrap: watch ? true : undefined,
+				}));
+				await initialPageSession.destroy();
+			}
 			// Publish the new compiled output
 			const oldHost = host;
 			host = newHost;
-			mainRoute = newMainRoute;
-			defaultRenderedRoute = newDefaultRenderedRoute;
-			compilerOutput = newCompilerOutput;
-			for (const server of servers) {
-				registerScriptRoutes(server);
+			if (compile) {
+				mainRoute = newMainRoute;
+				defaultRenderedRoute = newDefaultRenderedRoute;
+				compilerOutput = newCompilerOutput;
+				for (const server of servers) {
+					registerScriptRoutes(server);
+				}
 			}
 			if (oldHost) {
 				await oldHost.destroy();
@@ -325,26 +340,29 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 	}
 
 	function registerScriptRoutes(server: express.Express) {
-		for (const fullPath of Object.keys(compilerOutput.routes)) {
-			const script = compilerOutput.routes[fullPath];
-			const scriptRoute = script.route;
-			const contentType = /\.css$/.test(fullPath) ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8";
-			const map = script.map;
-			if (map && sourceMaps) {
-				const mapRoute = staticFileRoute(fullPath + ".map", JSON.stringify(map));
-				registerStatic(server, scriptRoute, (response) => {
-					response.set("Content-Type", contentType);
-					response.set("X-Content-Type-Options", "nosniff");
-					response.set("SourceMap", mapRoute.foreverPath);
-				});
-				registerStatic(server, mapRoute, (response) => {
-					response.set("Content-Type", "application/json; charset=utf-8");
-				});
-			} else {
-				registerStatic(server, scriptRoute, (response) => {
-					response.set("Content-Type", contentType);
-					response.set("X-Content-Type-Options", "nosniff");
-				});
+		const output = compilerOutput;
+		if (output) {
+			for (const fullPath of Object.keys(output.routes)) {
+				const script = output.routes[fullPath];
+				const scriptRoute = script.route;
+				const contentType = /\.css$/.test(fullPath) ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8";
+				const map = script.map;
+				if (map && sourceMaps) {
+					const mapRoute = staticFileRoute(fullPath + ".map", JSON.stringify(map));
+					registerStatic(server, scriptRoute, (response) => {
+						response.set("Content-Type", contentType);
+						response.set("X-Content-Type-Options", "nosniff");
+						response.set("SourceMap", mapRoute.foreverPath);
+					});
+					registerStatic(server, mapRoute, (response) => {
+						response.set("Content-Type", "application/json; charset=utf-8");
+					});
+				} else {
+					registerStatic(server, scriptRoute, (response) => {
+						response.set("Content-Type", contentType);
+						response.set("X-Content-Type-Options", "nosniff");
+					});
+				}
 			}
 		}
 	}
@@ -386,7 +404,9 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 							if (simulatedLatency) {
 								await delay(simulatedLatency);
 							}
-							return topFrameHTML(request, response, defaultRenderedRoute, defaultRenderedRoute.etag);
+							if (defaultRenderedRoute) {
+								return topFrameHTML(request, response, defaultRenderedRoute, defaultRenderedRoute.etag);
+							}
 						}
 						// New session
 						client = await host.newClient(request);
@@ -404,8 +424,8 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 							incomingMessageId: client.incomingMessageId,
 							queuedLocalEvents: client.queuedLocalEvents,
 						},
-						clientURL: mainRoute.foreverPath,
-						clientIntegrity: mainRoute.integrity,
+						clientURL: mainRoute ? mainRoute.foreverPath : "",
+						clientIntegrity: mainRoute ? mainRoute.integrity : "",
 						fallbackURL: fallbackRoute.foreverPath,
 						fallbackIntegrity: fallbackRoute.integrity,
 						bootstrap: true,
@@ -467,8 +487,8 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 						const html = await client.session.render({
 							mode: PageRenderMode.IncludeFormAndStripScript,
 							client,
-							clientURL: mainRoute.foreverPath,
-							clientIntegrity: mainRoute.integrity,
+							clientURL: mainRoute ? mainRoute.foreverPath : "",
+							clientIntegrity: mainRoute ? mainRoute.integrity : "",
 							fallbackURL: fallbackRoute.foreverPath,
 							fallbackIntegrity: fallbackRoute.integrity,
 						});
@@ -723,6 +743,8 @@ export default function main() {
 		const basePath = resolvePath(cwd, args.base as string);
 
 		const publicPath = resolvePath(basePath, "public");
+		const replay = args.replay;
+
 		const mobius = await prepare({
 			sourcePath: basePath,
 			publicPath,
@@ -733,9 +755,8 @@ export default function main() {
 			simulatedLatency: args["simulated-latency"] as number,
 			generate: args.generate as boolean,
 			watch: args.watch as boolean,
+			compile: typeof replay !== "string",
 		});
-
-		const replay = args.replay;
 
 		if (typeof replay === "string") {
 			await mobius.replay(replay);
