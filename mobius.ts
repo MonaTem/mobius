@@ -760,15 +760,6 @@ export default function main() {
 			process.exit(0);
 		}
 
-		server.get("/term", async (request, response) => {
-			response.send("exiting");
-			const acceptSocketClosed = new Promise((resolve) => {
-				acceptSocket.close(resolve);
-			});
-			await mobius.stop();
-			await acceptSocketClosed;
-		});
-
 	})().catch(escape);
 }
 
