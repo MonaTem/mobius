@@ -13,10 +13,15 @@ export function send<T extends JsonValue>(dest: Topic<T>, message: T | Redacted<
 	});
 }
 
-export function receive<T extends JsonValue>(source: Topic<T>, callback: (message: T) => void, onAbort?: () => void): Channel {
+export function receive<T extends JsonValue>(source: Topic<T>, callback: (message: T) => void, validator?: (message: any) => message is T, onAbort?: () => void): Channel {
 	const peekedTopic = peek(source as any as Redacted<string>);
 	return createServerChannel(callback, (sendMessage) => {
-		addListener(peekedTopic, sendMessage as (message: JsonValue) => void);
-		return sendMessage;
-	}, (sendMessage) => removeListener(peekedTopic, sendMessage as (message: JsonValue) => void), false);
+		const listener = validator ? (value: any) => {
+			if (validator(value)) {
+				sendMessage(value);
+			}
+		} : (sendMessage as (message: JsonValue) => void);
+		addListener(peekedTopic, listener);
+		return listener;
+	}, (listener) => removeListener(peekedTopic, listener), false);
 }
