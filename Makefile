@@ -17,8 +17,10 @@ cleaner: clean
 lint:
 	node_modules/.bin/tslint -c tslint.json 'host/**/*.ts' 'common/**/*.ts' 'server/**/*.ts' 'client/**/*.ts' mobius.ts --fix
 
-test: lint
-	# TODO: Add actual tests
+output-test: all
+	tests/compare-expected.sh tests/randomness
+
+test: lint output-test
 
 preact: dist/common/preact.js dist/common/preact.d.ts
 
