@@ -24,6 +24,7 @@
 		"no-bitwise": false,
 		"no-conditional-assignment": false,
 		"no-console": false,
+		"no-shadowed-variable": false,
 		"no-var-requires": false,
 		"object-literal-sort-keys": false,
 		"only-arrow-functions": false,
