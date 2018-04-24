@@ -652,12 +652,12 @@ export default function main() {
 						},
 						{
 							name: "port",
-							typeLabel: "[underline]{number}",
+							typeLabel: "{underline number}",
 							description: "The port number to listen on",
 						},
 						{
 							name: "base",
-							typeLabel: "[underline]{path}",
+							typeLabel: "{underline path}",
 							description: "The base path of the app to serve",
 						},
 						{
@@ -670,7 +670,7 @@ export default function main() {
 						},
 						{
 							name: "hostname",
-							typeLabel: "[underline]{name}",
+							typeLabel: "{underline name}",
 							description: "Public hostname to serve content from; used to validate CSRF if set",
 						},
 						{
@@ -679,7 +679,7 @@ export default function main() {
 						},
 						{
 							name: "workers",
-							typeLabel: "[underline]{number}",
+							typeLabel: "{underline number}",
 							description: `Number or workers to use (defaults to number of CPUs: ${cpuCount})`,
 						},
 						{
@@ -693,7 +693,7 @@ export default function main() {
 					],
 				},
 				{
-					content: "Project home: [underline]{https://github.com/rpetrich/mobius}",
+					content: "Project home: {underline https://github.com/rpetrich/mobius}",
 				},
 			]));
 			process.exit(1);
