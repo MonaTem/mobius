@@ -612,6 +612,9 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 				});
 			}
 		},
+		async replay(sessionId: string) {
+			await host.sessionFromId(sessionId, undefined, false);
+		},
 		async stop() {
 			await host.destroy();
 			await gracefulExit();
@@ -635,6 +638,7 @@ export default function main() {
 			{ name: "simulated-latency", type: Number, defaultValue: 0 },
 			{ name: "launch", type: Boolean, defaultValue: false },
 			{ name: "init", type: Boolean, defaultValue: false },
+			{ name: "replay", type: String },
 			{ name: "help", type: Boolean },
 		]);
 		if (args.help) {
@@ -687,6 +691,11 @@ export default function main() {
 							description: "Open the default browser once server is ready for requests",
 						},
 						{
+							name: "replay",
+							typeLabel: "{underline session-id}",
+							description: "Replays the session from start to finish",
+						},
+						{
 							name: "help",
 							description: "Prints this usage guide. Yahahah! You found me!",
 						},
@@ -725,6 +734,14 @@ export default function main() {
 			generate: args.generate as boolean,
 			watch: args.watch as boolean,
 		});
+
+		const replay = args.replay;
+
+		if (typeof replay === "string") {
+			await mobius.replay(replay);
+			await mobius.stop();
+			return;
+		}
 
 		const expressAsync = require("express") as typeof express;
 		const server = expressAsync();

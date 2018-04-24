@@ -82,7 +82,7 @@ export class Host {
 			}
 		}, 10 * 1000);
 	}
-	public async sessionFromId(sessionID: string | undefined, request: Request, allowNewSession: boolean) {
+	public async sessionFromId(sessionID: string | undefined, request: Request | undefined, allowNewSession: boolean) {
 		if (!sessionID) {
 			throw new Error("No session ID specified!");
 		}
@@ -97,12 +97,12 @@ export class Host {
 				if (await exists(archivePathForSessionId(this.options.sessionsPath, sessionID))) {
 					await session.unarchiveEvents();
 					return session;
-				} else if (allowNewSession) {
+				} else if (allowNewSession && request) {
 					session.client.newClient(session, request);
 					return session;
 				}
 			}
-			if (allowNewSession) {
+			if (allowNewSession && request) {
 				session = this.constructSession(sessionID, request);
 				this.sessions.set(sessionID, session);
 				session.client.newClient(session, request);
