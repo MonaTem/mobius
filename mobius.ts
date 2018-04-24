@@ -215,7 +215,7 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 
 			// Start compiling client
 			if (compile) {
-				console.log("Compiling client bundle...");
+				console.log("Compiling client modules...");
 			}
 			const secretsAsync: Promise<{ [key: string]: any }> = readJSON(secretsPath).catch(() => {});
 			const mainPath = await loadMainPath();
@@ -238,7 +238,9 @@ export async function prepare({ sourcePath, publicPath, sessionsPath = defaultSe
 			}
 
 			// Start compiling server
-			console.log("Compiling server bundle...");
+			if (compile) {
+				console.log("Compiling server modules...");
+			}
 			const newHost = new Host({
 				mainPath,
 				fileRead: watchFile,
