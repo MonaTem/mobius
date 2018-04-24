@@ -754,7 +754,7 @@ export default function main() {
 			minify: args.minify as boolean,
 			sourceMaps: args["source-map"] as boolean,
 			hostname: args.hostname as string | undefined,
-			workers: hasReplay ? args.workers as number : 0,
+			workers: hasReplay ? 0 : args.workers as number,
 			simulatedLatency: args["simulated-latency"] as number,
 			generate: args.generate as boolean,
 			watch: args.watch as boolean,
