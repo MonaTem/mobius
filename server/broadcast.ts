@@ -1,4 +1,4 @@
-import { createServerChannel } from "mobius";
+import { createServerChannel, createServerPromise } from "mobius";
 import { Channel, JsonValue } from "mobius-types";
 import { peek, redact, Redacted } from "redact";
 
@@ -7,8 +7,10 @@ import { addListener, removeListener, send as sendImplementation } from "_broadc
 export type Topic<T> = Redacted<string> & { messageType: T };
 export const topic = redact as <T extends JsonValue>(name: string) => Topic<T>;
 
-export function send<T extends JsonValue>(dest: Topic<T>, message: T | Redacted<T>) {
-	sendImplementation(peek(dest as any), peek(message));
+export function send<T extends JsonValue>(dest: Topic<T>, message: T | Redacted<T>): Promise<void> {
+	return createServerPromise<void>(() => {
+		sendImplementation(peek(dest as any), peek(message));
+	});
 }
 
 export function receive<T extends JsonValue>(source: Topic<T>, callback: (message: T) => void, onAbort?: () => void): Channel {
