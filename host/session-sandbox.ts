@@ -271,7 +271,7 @@ export class LocalSessionSandbox<C extends SessionSandboxClient = SessionSandbox
 					Object.defineProperty(esModule, "__esModule", { value: true });
 					if (globalModule != null) {
 						for (const key in globalModule) {
-							if (Object.prototype.hasOwnProperty.call(globalModule, key)) esModule[key] = globalModule[key];
+							if (Object.prototype.hasOwnProperty.call(globalModule, key)) { esModule[key] = globalModule[key]; }
 						}
 					}
 					esModule.default = globalModule;

@@ -1,5 +1,6 @@
 import * as babel from "babel-core";
 import { readFileSync } from "fs";
+import { resolve } from "path";
 import { cwd } from "process";
 import * as ts from "typescript";
 import * as vm from "vm";
@@ -9,7 +10,6 @@ import noImpureGetters from "./noImpureGetters";
 import rewriteDynamicImport from "./rewriteDynamicImport";
 import rewriteForInStatements from "./rewriteForInStatements";
 import { ModuleMap, StaticAssets, VirtualModule } from "./virtual-module";
-import { resolve } from "path";
 
 let convertToCommonJS: any;
 let optimizeClosuresInRender: any;

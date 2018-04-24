@@ -308,7 +308,7 @@ export default async function(fileRead: (path: string) => void, input: string, b
 				noImpureGetters(),
 				simplifyVoidInitializedVariables(),
 				stripUnusedArgumentCopies(),
-			]
+			],
 		}),
 	];
 
