@@ -746,6 +746,7 @@ export default function main() {
 
 		const publicPath = resolvePath(basePath, "public");
 		const replay = args.replay;
+		const hasReplay = typeof replay === "string";
 
 		const mobius = await prepare({
 			sourcePath: basePath,
@@ -753,14 +754,14 @@ export default function main() {
 			minify: args.minify as boolean,
 			sourceMaps: args["source-map"] as boolean,
 			hostname: args.hostname as string | undefined,
-			workers: args.workers as number,
+			workers: hasReplay ? args.workers as number : 0,
 			simulatedLatency: args["simulated-latency"] as number,
 			generate: args.generate as boolean,
 			watch: args.watch as boolean,
-			compile: typeof replay !== "string",
+			compile: !hasReplay,
 		});
 
-		if (typeof replay === "string") {
+		if (hasReplay) {
 			await mobius.replay(replay);
 			await mobius.stop();
 			return;
